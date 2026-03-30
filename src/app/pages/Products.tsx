@@ -492,12 +492,11 @@ export function Products() {
                 />
               </div>
               <div className="col-span-2 space-y-2">
-                <Label htmlFor="description">Descripción</Label>
+                <Label htmlFor="description">Descripción (Opcional)</Label>
                 <Input
                   id="description"
                   value={formData.description}
                   onChange={(e) => setFormData({ ...formData, description: e.target.value })}
-                  required
                 />
               </div>
 

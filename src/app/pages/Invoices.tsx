@@ -217,9 +217,9 @@ export function Invoices() {
         console.log('✅ Producto encontrado:', product ? product.name : '❌ NO ENCONTRADO');
         
         if (product) {
-          // Verificar stock
-          if (product.stock <= 0) {
-            toast.error(`${product.name} no tiene stock disponible`);
+          // Verificar stock SOLO para productos con IDs únicas
+          if (product.use_unit_ids && product.stock <= 0) {
+            toast.error(`${product.name} requiere IDs únicas y no tiene stock disponible`);
             return;
           }
           
@@ -552,8 +552,9 @@ export function Invoices() {
   };
 
   const handleAddProductDirect = (product: Product) => {
-    if (product.stock <= 0) {
-      toast.error('Producto sin stock');
+    // Verificar stock SOLO para productos con IDs únicas
+    if (product.use_unit_ids && product.stock <= 0) {
+      toast.error(`${product.name} requiere IDs únicas y no tiene stock disponible`);
       return;
     }
 
@@ -1665,13 +1666,21 @@ export function Invoices() {
                         </SelectTrigger>
                         <SelectContent>
                           {products
-                            .filter(p => p.stock > 0)
-                            .map((product) => (
-                              <SelectItem key={product.id} value={product.id}>
-                                {product.code} - {product.name} (Stock: {product.stock})
+                            .map((product) => {
+                              const cannotSelect = product.use_unit_ids && product.stock <= 0;
+                              return (
+                              <SelectItem 
+                                key={product.id} 
+                                value={product.id}
+                                disabled={cannotSelect}
+                              >
+                                {product.code} - {product.name} (Stock: {product.stock}
+                                {product.stock < 0 ? ' ⚠️ Negativo' : product.stock === 0 ? ' ⚠️ Sin stock' : ''})
                                 {product.use_unit_ids && ' 🔢'}
+                                {cannotSelect && ' 🔒'}
                               </SelectItem>
-                            ))}
+                            );
+                            })}
                         </SelectContent>
                       </Select>
                     </div>
@@ -2096,12 +2105,17 @@ export function Invoices() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[500px] overflow-y-auto">
               {getSortedProducts()
-                .filter(p => p.stock > 0)
-                .map((product) => (
+                .map((product) => {
+                  const cannotAdd = product.use_unit_ids && product.stock <= 0;
+                  return (
                   <div
                     key={product.id}
-                    className="p-4 border border-border rounded-lg cursor-pointer hover:bg-muted transition-colors"
-                    onClick={() => handleAddProductDirect(product)}
+                    className={`p-4 border rounded-lg transition-colors ${
+                      cannotAdd 
+                        ? 'border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/20 cursor-not-allowed opacity-60' 
+                        : 'border-border cursor-pointer hover:bg-muted'
+                    }`}
+                    onClick={() => !cannotAdd && handleAddProductDirect(product)}
                   >
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1">
@@ -2119,7 +2133,20 @@ export function Invoices() {
                     <div className="space-y-1 text-sm">
                       <p>
                         <span className="text-muted-foreground">Stock:</span>{' '}
-                        <span className="font-medium">{product.stock}</span>
+                        <span className={`font-medium ${
+                          product.stock < 0 
+                            ? 'text-red-600 dark:text-red-400' 
+                            : product.stock === 0 
+                            ? 'text-orange-600 dark:text-orange-400' 
+                            : 'text-gray-900 dark:text-gray-100'
+                        }`}>
+                          {product.stock}
+                          {product.stock <= 0 && (
+                            <span className="ml-1 text-xs">
+                              {product.stock < 0 ? '⚠️ Negativo' : '⚠️ Sin stock'}
+                            </span>
+                          )}
+                        </span>
                       </p>
                       <p>
                         <span className="text-muted-foreground">Precio:</span>{' '}
@@ -2136,9 +2163,15 @@ export function Invoices() {
                           {product.registered_ids?.length || 0} IDs disponibles
                         </p>
                       )}
+                      {cannotAdd && (
+                        <p className="text-xs text-red-600 dark:text-red-400 font-medium mt-2">
+                          🔒 Requiere IDs - No disponible
+                        </p>
+                      )}
                     </div>
                   </div>
-                ))}
+                );
+                })}
             </div>
           </div>
         </DialogContent>

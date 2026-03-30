@@ -17,30 +17,61 @@ import {
   RotateCcw,
   Users,
   Settings as SettingsIcon,
-  Plus
+  Plus,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { getCurrentUser, logoutUser, getSession } from '../lib/supabase';
 
 const adminNavigation = [
-  { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-  { name: 'Departamentos', href: '/departamentos', icon: FolderOpen },
-  { name: 'Productos', href: '/productos', icon: Package },
-  { name: 'Facturación', href: '/facturacion', icon: FileText },
-  { name: 'Devoluciones', href: '/devoluciones', icon: RotateCcw },
-  { name: 'Clientes', href: '/clientes', icon: Users },
-  { name: 'Movimientos', href: '/movimientos', icon: ArrowRightLeft },
-  { name: 'Gastos', href: '/gastos', icon: Receipt },
-  { name: 'Cierres', href: '/cierres', icon: DoorOpen },
-  { name: 'Reportes', href: '/reportes', icon: BarChart3 },
+  // Sección 1: Gestión de Inventario
+  {
+    section: 'Gestión de Inventario',
+    items: [
+      { name: 'Dashboard', href: '/', icon: LayoutDashboard },
+      { name: 'Departamentos', href: '/departamentos', icon: FolderOpen },
+      { name: 'Productos', href: '/productos', icon: Package },
+    ]
+  },
+  // Sección 2: Operaciones
+  {
+    section: 'Operaciones',
+    items: [
+      { name: 'Facturación', href: '/facturacion', icon: FileText },
+      { name: 'Devoluciones', href: '/devoluciones', icon: RotateCcw },
+      { name: 'Clientes', href: '/clientes', icon: Users },
+      { name: 'Movimientos', href: '/movimientos', icon: ArrowRightLeft },
+    ]
+  },
+  // Sección 3: Finanzas y Reportes
+  {
+    section: 'Finanzas y Reportes',
+    items: [
+      { name: 'Gastos', href: '/gastos', icon: Receipt },
+      { name: 'Cierres', href: '/cierres', icon: DoorOpen },
+      { name: 'Reportes', href: '/reportes', icon: BarChart3 },
+    ]
+  }
 ];
 
 const sellerNavigation = [
-  { name: 'Facturación', href: '/facturacion', icon: FileText },
-  { name: 'Devoluciones', href: '/devoluciones', icon: RotateCcw },
-  { name: 'Clientes', href: '/clientes', icon: Users },
-  { name: 'Movimientos', href: '/movimientos', icon: ArrowRightLeft },
-  { name: 'Cierres', href: '/cierres', icon: DoorOpen },
+  // Sección 1: Ventas
+  {
+    section: 'Ventas',
+    items: [
+      { name: 'Facturación', href: '/facturacion', icon: FileText },
+      { name: 'Devoluciones', href: '/devoluciones', icon: RotateCcw },
+      { name: 'Clientes', href: '/clientes', icon: Users },
+    ]
+  },
+  // Sección 2: Consultas
+  {
+    section: 'Consultas',
+    items: [
+      { name: 'Cierres', href: '/cierres', icon: DoorOpen },
+    ]
+  }
 ];
 
 export function Layout() {
@@ -52,6 +83,33 @@ export function Layout() {
   const currentUser = getCurrentUser();
   const session = getSession();
   const companyName = session?.company === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
+  
+  // Estado para controlar qué secciones están abiertas/cerradas
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    const saved = localStorage.getItem('nav-sections-state');
+    if (saved) {
+      return JSON.parse(saved);
+    }
+    // Por defecto, todas las secciones abiertas
+    return {};
+  });
+
+  // Función para toggle de secciones
+  const toggleSection = (sectionName: string) => {
+    setOpenSections(prev => {
+      const newState = {
+        ...prev,
+        [sectionName]: !prev[sectionName]
+      };
+      localStorage.setItem('nav-sections-state', JSON.stringify(newState));
+      return newState;
+    });
+  };
+
+  // Función para verificar si una sección está abierta (por defecto true)
+  const isSectionOpen = (sectionName: string) => {
+    return openSections[sectionName] !== false;
+  };
   
   // Redirigir a login si no hay usuario
   useEffect(() => {
@@ -106,32 +164,63 @@ export function Layout() {
                 <X className="h-6 w-6" />
               </button>
             </div>
-            <nav className="p-4 space-y-2">
-              {navigation.map((item) => {
-                const isActive = location.pathname === item.href;
+            <nav className="flex-1 p-4 space-y-4 overflow-y-auto">
+              {navigation.map((section, sectionIndex) => {
+                const isOpen = isSectionOpen(section.section);
                 return (
-                  <Link
-                    key={item.name}
-                    to={item.href}
-                    onClick={() => setSidebarOpen(false)}
-                    className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                      isActive
-                        ? 'bg-green-600 text-white'
-                        : 'text-green-100 hover:bg-green-900/50 hover:text-white'
-                    }`}
-                  >
-                    <item.icon className="h-5 w-5" />
-                    <span>{item.name}</span>
-                  </Link>
+                  <div key={section.section}>
+                    {/* Título de la sección con botón toggle */}
+                    <button
+                      onClick={() => toggleSection(section.section)}
+                      className="w-full flex items-center gap-2 mb-3 hover:opacity-80 transition-opacity group"
+                    >
+                      <div className="h-px flex-1 bg-green-800/30 group-hover:bg-green-700/40 transition-colors"></div>
+                      <h3 className="text-xs font-semibold text-green-400/80 uppercase tracking-wider px-2 flex items-center gap-2">
+                        {section.section}
+                        {isOpen ? (
+                          <ChevronUp className="h-3.5 w-3.5" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5" />
+                        )}
+                      </h3>
+                      <div className="h-px flex-1 bg-green-800/30 group-hover:bg-green-700/40 transition-colors"></div>
+                    </button>
+                    
+                    {/* Items de la sección con animación de colapso */}
+                    <div 
+                      className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                        isOpen ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'
+                      }`}
+                    >
+                      <div className="space-y-1 mb-4">
+                        {section.items.map((item) => {
+                          const isActive = location.pathname === item.href;
+                          return (
+                            <Link
+                              key={item.name}
+                              to={item.href}
+                              onClick={() => setSidebarOpen(false)}
+                              className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors ${
+                                isActive
+                                  ? 'bg-green-600 text-white shadow-lg'
+                                  : 'text-green-100 hover:bg-green-900/50 hover:text-white'
+                              }`}
+                            >
+                              <item.icon className="h-5 w-5" />
+                              <span className="text-sm">{item.name}</span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    
+                    {/* Separador entre secciones (excepto después de la última) */}
+                    {sectionIndex < navigation.length - 1 && (
+                      <div className="h-px bg-green-800/20 my-4"></div>
+                    )}
+                  </div>
                 );
               })}
-              <button
-                onClick={handleLogout}
-                className="flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-red-500 hover:bg-red-900/50 hover:text-white"
-              >
-                <LogOut className="h-5 w-5" />
-                <span>Cerrar sesión</span>
-              </button>
             </nav>
           </div>
         </div>
@@ -142,31 +231,62 @@ export function Layout() {
         <div className="flex items-center justify-center h-16 border-b border-green-800/30 px-4">
           <h1 className="text-xl font-bold text-white">{companyName}</h1>
         </div>
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          {navigation.map((item) => {
-            const isActive = location.pathname === item.href;
+        <nav className="flex-1 p-4 space-y-4 overflow-y-auto">
+          {navigation.map((section, sectionIndex) => {
+            const isOpen = isSectionOpen(section.section);
             return (
-              <Link
-                key={item.name}
-                to={item.href}
-                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
-                  isActive
-                    ? 'bg-green-600 text-white'
-                    : 'text-green-100 hover:bg-green-900/50 hover:text-white'
-                }`}
-              >
-                <item.icon className="h-5 w-5" />
-                <span>{item.name}</span>
-              </Link>
+              <div key={section.section}>
+                {/* Título de la sección con botón toggle */}
+                <button
+                  onClick={() => toggleSection(section.section)}
+                  className="w-full flex items-center gap-2 mb-3 hover:opacity-80 transition-opacity group"
+                >
+                  <div className="h-px flex-1 bg-green-800/30 group-hover:bg-green-700/40 transition-colors"></div>
+                  <h3 className="text-xs font-semibold text-green-400/80 uppercase tracking-wider px-2 flex items-center gap-2">
+                    {section.section}
+                    {isOpen ? (
+                      <ChevronUp className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronDown className="h-3.5 w-3.5" />
+                    )}
+                  </h3>
+                  <div className="h-px flex-1 bg-green-800/30 group-hover:bg-green-700/40 transition-colors"></div>
+                </button>
+                
+                {/* Items de la sección con animación de colapso */}
+                <div 
+                  className={`overflow-hidden transition-all duration-300 ease-in-out ${
+                    isOpen ? 'max-h-[1000px] opacity-100' : 'max-h-0 opacity-0'
+                  }`}
+                >
+                  <div className="space-y-1 mb-4">
+                    {section.items.map((item) => {
+                      const isActive = location.pathname === item.href;
+                      return (
+                        <Link
+                          key={item.name}
+                          to={item.href}
+                          className={`flex items-center gap-3 px-4 py-2.5 rounded-lg transition-colors ${
+                            isActive
+                              ? 'bg-green-600 text-white shadow-lg'
+                              : 'text-green-100 hover:bg-green-900/50 hover:text-white'
+                          }`}
+                        >
+                          <item.icon className="h-5 w-5" />
+                          <span className="text-sm">{item.name}</span>
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+                
+                {/* Separador entre secciones (excepto después de la última) */}
+                {sectionIndex < navigation.length - 1 && (
+                  <div className="h-px bg-green-800/20 my-4"></div>
+                )}
+              </div>
             );
           })}
-          <button
-            onClick={handleLogout}
-            className="flex items-center gap-3 px-4 py-3 rounded-lg transition-colors text-red-500 hover:bg-red-900/50 hover:text-white"
-          >
-            <LogOut className="h-5 w-5" />
-            <span>Cerrar sesión</span>
-          </button>
         </nav>
       </div>
 
@@ -187,7 +307,7 @@ export function Layout() {
                 {currentUser?.username} ({currentUser?.role === 'admin' ? 'Administrador' : 'Vendedor'})
               </span>
             </div>
-            <div className="text-sm text-muted-foreground">
+            <div className="hidden md:block text-sm text-muted-foreground">
               {new Date().toLocaleDateString('es-ES', { 
                 weekday: 'long', 
                 year: 'numeric', 
@@ -195,6 +315,14 @@ export function Layout() {
                 day: 'numeric' 
               })}
             </div>
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-200 text-red-500 hover:text-red-400 hover:bg-red-900/10 border border-red-900/30 hover:border-red-700/50"
+              title="Cerrar sesión"
+            >
+              <LogOut className="h-5 w-5" />
+              <span className="hidden lg:inline text-sm font-medium">Cerrar sesión</span>
+            </button>
           </div>
         </header>
 
