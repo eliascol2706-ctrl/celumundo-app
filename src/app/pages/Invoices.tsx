@@ -300,6 +300,19 @@ export function Invoices() {
     };
   }, [isCreateDialogOpen, barcodeBuffer, products, invoiceType, invoiceItems]);
 
+  // Escuchar evento personalizado para abrir el diálogo de crear factura desde el botón flotante
+  useEffect(() => {
+    const handleOpenDialog = () => {
+      handleOpenCreateDialog();
+    };
+    
+    window.addEventListener('openCreateInvoiceDialog', handleOpenDialog);
+    
+    return () => {
+      window.removeEventListener('openCreateInvoiceDialog', handleOpenDialog);
+    };
+  }, []); // Solo se ejecuta al montar/desmontar el componente
+
   const loadData = async () => {
     const [invoicesData, productsData] = await Promise.all([
       getInvoices(),

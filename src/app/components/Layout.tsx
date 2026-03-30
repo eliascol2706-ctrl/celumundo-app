@@ -207,22 +207,34 @@ export function Layout() {
       {/* Botón de tema fijo en esquina inferior izquierda */}
       <button
         onClick={toggleTheme}
-        className="fixed bottom-6 left-6 z-50 p-4 bg-green-600 hover:bg-green-700 text-white rounded-full shadow-lg transition-all duration-300 hover:scale-110"
+        className="fixed bottom-4 left-4 lg:bottom-6 lg:left-6 z-50 p-3 lg:p-4 bg-green-600 hover:bg-green-700 text-white rounded-full shadow-lg transition-all duration-300 hover:scale-110"
         aria-label="Toggle theme"
       >
-        {isDark ? <Sun className="h-6 w-6" /> : <Moon className="h-6 w-6" />}
+        {isDark ? <Sun className="h-5 w-5 lg:h-6 lg:w-6" /> : <Moon className="h-5 w-5 lg:h-6 lg:w-6" />}
       </button>
 
       {/* Botón flotante de Nueva Factura (para todos los usuarios) - arriba del botón de config */}
       <button
-        onClick={() => navigate('/facturacion')}
-        className="fixed bottom-24 right-6 z-50 p-5 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl group"
+        onClick={() => {
+          // Si estamos en la página de facturación, disparar evento para abrir el modal
+          if (location.pathname === '/facturacion') {
+            window.dispatchEvent(new CustomEvent('openCreateInvoiceDialog'));
+          } else {
+            // Si no estamos en facturación, navegar primero y luego abrir el modal
+            navigate('/facturacion');
+            // Esperar un poco para que se monte el componente y luego disparar el evento
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('openCreateInvoiceDialog'));
+            }, 100);
+          }
+        }}
+        className="fixed bottom-20 right-4 lg:bottom-24 lg:right-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl group"
         aria-label="Nueva Factura"
         title="Crear Nueva Factura"
       >
         <div className="relative">
-          <FileText className="h-7 w-7" />
-          <Plus className="h-4 w-4 absolute -top-1 -right-1 bg-blue-500 rounded-full p-0.5 group-hover:rotate-90 transition-transform duration-300" />
+          <FileText className="h-5 w-5 lg:h-6 lg:w-6" />
+          <Plus className="h-2.5 w-2.5 lg:h-3 lg:w-3 absolute -top-1 -right-1 bg-blue-500 rounded-full p-0.5 group-hover:rotate-90 transition-transform duration-300" />
         </div>
       </button>
 
@@ -230,11 +242,11 @@ export function Layout() {
       {currentUser?.role === 'admin' && (
         <button
           onClick={() => navigate('/configuracion')}
-          className="fixed bottom-6 right-6 z-50 p-4 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl group"
+          className="fixed bottom-4 right-4 lg:bottom-6 lg:right-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl group"
           aria-label="Configuración"
           title="Configuración de Credenciales"
         >
-          <SettingsIcon className="h-6 w-6 group-hover:rotate-90 transition-transform duration-300" />
+          <SettingsIcon className="h-5 w-5 lg:h-6 lg:w-6 group-hover:rotate-90 transition-transform duration-300" />
         </button>
       )}
     </div>
