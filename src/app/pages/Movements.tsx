@@ -717,7 +717,7 @@ export function Movements() {
             
             .label-barcode-container { 
               width: 100% !important; 
-              height: 8mm !important; 
+              height: 12mm !important; 
               display: flex !important; 
               justify-content: center !important; 
               align-items: center !important; 
@@ -726,8 +726,8 @@ export function Movements() {
             }
             
             .label-barcode-container svg { 
-              max-width: 30mm !important; 
-              max-height: 9mm !important; 
+              max-width: 32mm !important; 
+              max-height: 10mm !important; 
               width: auto !important; 
               height: auto !important; 
             }
