@@ -89,6 +89,12 @@ export function Movements() {
   // Prevenir doble clic
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Estados para búsqueda y filtros de productos
+  const [productSearchTerm, setProductSearchTerm] = useState("");
+  const [productSortFilter, setProductSortFilter] = useState<"price-desc" | "price-asc" | "stock-asc" | "stock-desc">("price-desc");
+  const [productSearchDialogOpen, setProductSearchDialogOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+
   const [formData, setFormData] = useState({
     type: "entry" as "entry" | "exit",
     reason: "",
@@ -116,6 +122,50 @@ export function Movements() {
   const loadProducts = async () => {
     const data = await getProducts();
     setProducts(data);
+  };
+
+  // Filtrar y ordenar productos para el selector
+  const getFilteredAndSortedProducts = () => {
+    let filtered = [...products];
+
+    // Aplicar búsqueda
+    if (productSearchTerm) {
+      filtered = filtered.filter((product) =>
+        product.name.toLowerCase().includes(productSearchTerm.toLowerCase()) ||
+        product.code.toLowerCase().includes(productSearchTerm.toLowerCase())
+      );
+    }
+
+    // Aplicar ordenamiento
+    filtered.sort((a, b) => {
+      switch (productSortFilter) {
+        case "price-desc":
+          return b.current_cost - a.current_cost;
+        case "price-asc":
+          return a.current_cost - b.current_cost;
+        case "stock-asc":
+          return a.stock - b.stock;
+        case "stock-desc":
+          return b.stock - a.stock;
+        default:
+          return 0;
+      }
+    });
+
+    return filtered;
+  };
+
+  // Función para seleccionar producto desde el diálogo
+  const handleSelectProductFromDialog = (product: Product) => {
+    setSelectedProduct(product);
+    setFormData({
+      ...formData,
+      productId: product.id,
+      newCost: product.current_cost.toString(),
+    });
+    setProductSearchDialogOpen(false);
+    setProductSearchTerm("");
+    toast.success(`Producto seleccionado: ${product.name}`);
   };
 
   const filteredMovements = movements.filter((movement) => {
@@ -167,14 +217,12 @@ export function Movements() {
   };
 
   const handleAddItem = () => {
-    if (!formData.productId) {
-      toast.error("Selecciona un producto");
+    if (!formData.productId || !selectedProduct) {
+      toast.error("Selecciona un producto usando el botón de búsqueda");
       return;
     }
 
-    const product = products.find((p) => p.id === formData.productId);
-    if (!product) return;
-
+    const product = selectedProduct;
     const quantity = parseInt(formData.quantity) || 1;
 
     // Verificar que no se agregue el mismo producto dos veces
@@ -223,6 +271,7 @@ export function Movements() {
         quantity: "1",
         newCost: "",
       });
+      setSelectedProduct(null);
       return;
     }
 
@@ -233,6 +282,7 @@ export function Movements() {
       quantity: "1",
       newCost: "",
     });
+    setSelectedProduct(null);
     toast.success("Producto agregado al movimiento");
   };
 
@@ -431,6 +481,9 @@ export function Movements() {
         quantity: "1",
         newCost: "",
       });
+      setProductSearchTerm("");
+      setProductSortFilter("price-desc");
+      setSelectedProduct(null);
 
       loadMovements();
       loadProducts();
@@ -899,7 +952,12 @@ export function Movements() {
             Control de entradas y salidas con IDs únicas
           </p>
         </div>
-        <Button onClick={() => setIsDialogOpen(true)}>
+        <Button onClick={() => {
+          setIsDialogOpen(true);
+          setProductSearchTerm("");
+          setProductSortFilter("price-desc");
+          setSelectedProduct(null);
+        }}>
           <Plus className="h-4 w-4 mr-2" />
           Nuevo Movimiento
         </Button>
@@ -1177,33 +1235,54 @@ export function Movements() {
 
                   <div className="space-y-3">
                     <div className="space-y-2">
-                      <Label htmlFor="product">Producto</Label>
-                      <Select
-                        value={formData.productId}
-                        onValueChange={(value) => {
-                          const product = products.find((p) => p.id === value);
-                          setFormData({
-                            ...formData,
-                            productId: value,
-                            newCost: product
-                              ? product.current_cost.toString()
-                              : "",
-                          });
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Seleccionar producto" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {products.map((product) => (
-                            <SelectItem key={product.id} value={product.id}>
-                              {product.code} - {product.name} (Stock:{" "}
-                              {product.stock})
-                              {product.use_unit_ids && " 🔢"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <Label>Producto</Label>
+                      <div className="space-y-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="w-full justify-start"
+                          onClick={() => setProductSearchDialogOpen(true)}
+                        >
+                          <Search className="h-4 w-4 mr-2" />
+                          {selectedProduct 
+                            ? `${selectedProduct.code} - ${selectedProduct.name}` 
+                            : "Buscar Producto"
+                          }
+                        </Button>
+                        
+                        {selectedProduct && (
+                          <div className="p-3 bg-muted rounded-lg border border-border">
+                            <div className="flex items-start justify-between">
+                              <div className="flex-1">
+                                <p className="font-medium text-sm">{selectedProduct.code}</p>
+                                <p className="text-xs text-muted-foreground">{selectedProduct.name}</p>
+                                <div className="flex items-center gap-3 mt-2 text-xs">
+                                  <span className="text-muted-foreground">
+                                    Stock: <span className="font-semibold text-foreground">{selectedProduct.stock}</span>
+                                  </span>
+                                  <span className="text-muted-foreground">
+                                    Costo: <span className="font-semibold text-green-600">{formatCOP(selectedProduct.current_cost)}</span>
+                                  </span>
+                                  {selectedProduct.use_unit_ids && (
+                                    <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded">🔢 IDs Únicas</span>
+                                  )}
+                                </div>
+                              </div>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedProduct(null);
+                                  setFormData({ ...formData, productId: "", newCost: "" });
+                                }}
+                              >
+                                <X className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-2">
@@ -1442,7 +1521,12 @@ export function Movements() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setIsDialogOpen(false)}
+                onClick={() => {
+                  setIsDialogOpen(false);
+                  setProductSearchTerm("");
+                  setProductSortFilter("price-desc");
+                  setSelectedProduct(null);
+                }}
                 disabled={isSubmitting}
               >
                 Cancelar
@@ -1738,6 +1822,135 @@ export function Movements() {
             >
               <Printer className="h-4 w-4 mr-2" />
               Imprimir Etiquetas
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog para buscar y seleccionar producto */}
+      <Dialog open={productSearchDialogOpen} onOpenChange={setProductSearchDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh]">
+          <DialogHeader>
+            <DialogTitle>Buscar Producto</DialogTitle>
+            <DialogDescription>
+              Usa el buscador y filtros para encontrar el producto que deseas agregar al movimiento.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Buscador */}
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                type="text"
+                placeholder="Buscar por nombre o código..."
+                value={productSearchTerm}
+                onChange={(e) => setProductSearchTerm(e.target.value)}
+                className="pl-10"
+                autoFocus
+              />
+            </div>
+
+            {/* Filtros de ordenamiento */}
+            <div className="flex items-center gap-2">
+              <Filter className="h-4 w-4 text-gray-400" />
+              <Select
+                value={productSortFilter}
+                onValueChange={(value: any) => setProductSortFilter(value)}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="price-desc">Mayor a Menor (PRECIO)</SelectItem>
+                  <SelectItem value="price-asc">Menor a Mayor (PRECIO)</SelectItem>
+                  <SelectItem value="stock-asc">Stock Menor a Mayor</SelectItem>
+                  <SelectItem value="stock-desc">Stock Mayor a Menor</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Lista de productos */}
+            <div className="border border-border rounded-lg overflow-hidden">
+              <div className="max-h-[50vh] overflow-y-auto">
+                {getFilteredAndSortedProducts().length > 0 ? (
+                  <div className="divide-y divide-border">
+                    {getFilteredAndSortedProducts().map((product) => (
+                      <button
+                        key={product.id}
+                        type="button"
+                        onClick={() => handleSelectProductFromDialog(product)}
+                        className="w-full p-4 text-left hover:bg-muted transition-colors flex items-center justify-between gap-4"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-3 mb-2">
+                            <span className="font-mono font-bold text-sm bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+                              {product.code}
+                            </span>
+                            {product.use_unit_ids && (
+                              <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded">
+                                🔢 IDs Únicas
+                              </span>
+                            )}
+                          </div>
+                          <p className="font-medium text-base truncate">{product.name}</p>
+                        </div>
+                        
+                        <div className="flex items-center gap-6">
+                          <div className="text-right">
+                            <p className="text-xs text-muted-foreground">Stock</p>
+                            <p className={`font-bold text-lg ${
+                              product.stock <= 5 
+                                ? "text-red-600" 
+                                : product.stock <= 10 
+                                ? "text-yellow-600" 
+                                : "text-green-600"
+                            }`}>
+                              {product.stock}
+                            </p>
+                          </div>
+                          
+                          <div className="text-right">
+                            <p className="text-xs text-muted-foreground">Costo</p>
+                            <p className="font-bold text-lg text-green-600">
+                              {formatCOP(product.current_cost)}
+                            </p>
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="py-12 text-center">
+                    <p className="text-muted-foreground">No se encontraron productos</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Intenta con otro término de búsqueda
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Contador de resultados */}
+            <div className="text-sm text-muted-foreground text-center">
+              {getFilteredAndSortedProducts().length > 0 && (
+                <span>
+                  Mostrando {getFilteredAndSortedProducts().length} de {products.length} productos
+                </span>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setProductSearchDialogOpen(false);
+                setProductSearchTerm("");
+              }}
+            >
+              Cancelar
             </Button>
           </DialogFooter>
         </DialogContent>
