@@ -599,7 +599,7 @@ export function Movements() {
               <svg id="${barcodeId}"></svg>
             </div>
             <div class="label-numeric-code">${cleanDisplayCode}</div>
-            <div class="label-reference">${completedMovement.reference}</div>
+            <div class="label-reference">${completedMovement.reference.substring(0, 2).toUpperCase()}</div>
           </div>
         `;
 
@@ -652,8 +652,9 @@ export function Movements() {
               margin: 0; 
               padding: 0; 
               box-sizing: border-box; 
-              -webkit-print-color-adjust: exact;
-              print-color-adjust: exact;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+              color-adjust: exact !important;
             }
             
             html, body { 
@@ -682,11 +683,11 @@ export function Movements() {
               background: white !important;
               overflow: hidden !important;
               position: relative;
-              gap: 2mm;
+              gap: 4mm;
             }
             
             .label { 
-              width: 32mm !important; 
+              width: 30mm !important; 
               height: 25mm !important; 
               display: flex !important; 
               flex-direction: column !important;
@@ -703,56 +704,57 @@ export function Movements() {
             }
             
             .label-product-name { 
-              font-size: 6.5pt !important; 
+              font-size: 6.1pt !important; 
               font-weight: bold !important; 
               text-align: center !important; 
-              max-height: 3mm !important; 
+              max-height: 3.5mm !important; 
               overflow: hidden !important; 
-              line-height: 0.95 !important; 
+              line-height: 1.1 !important; 
               word-wrap: break-word !important; 
               width: 100% !important; 
-              margin-bottom: 0.2mm !important; 
+              margin-bottom: 0.3mm !important; 
               padding-top: 0mm;
               margin-top: 0mm;
             }
             
             .label-barcode-container { 
               width: 100% !important; 
-              height: 14.5mm !important; 
+              height: 13mm !important; 
               display: flex !important; 
               justify-content: center !important; 
               align-items: center !important; 
               flex-shrink: 0 !important;
-              margin: 0.4mm 0 !important; 
+              margin: 0.5mm 0 !important; 
               padding: 0 !important;
               overflow: visible !important;
             }
             
             .label-barcode-container svg { 
-              max-width: 100% !important; 
-              max-height: 14.5mm !important; 
-              width: 100% !important; 
-              height: 14.5mm !important; 
               display: block !important;
+              max-width: 28mm !important; 
+              height: auto !important; 
             }
             
             .label-numeric-code { 
-              font-size: 6.5pt !important; 
+              font-size: 7pt !important; 
               font-weight: bold !important; 
               text-align: center !important; 
-              letter-spacing: 0.15px !important; 
-              line-height: 0.95 !important; 
-              margin: 0.1mm 0 !important; 
+              letter-spacing: 0.2px !important; 
+              line-height: 1 !important; 
+              margin: 0.3mm 0 !important; 
+              font-family: 'Courier New', monospace !important;
             }
             
             .label-reference { 
-              font-size: 5.5pt !important; 
-              font-weight: bold !important; 
+              font-size: 6pt !important; 
+              font-weight: 700 !important; 
               text-align: left !important; 
               line-height: 1 !important; 
               position: absolute !important; 
-              bottom: 1mm !important; 
-              left: 2.5mm !important; 
+              bottom: 1.2mm !important; 
+              left: 2mm !important; 
+              color: #000000 !important;
+              text-transform: uppercase !important;
             }
             
             @media print {
@@ -780,14 +782,26 @@ export function Movements() {
                 align-items: center !important;
                 page-break-after: always !important;
                 page-break-inside: avoid !important;
-                gap: 2mm;
+                gap: 4mm;
               }
               
               .label { 
-                width: 32mm !important; 
+                width: 30mm !important; 
                 height: 25mm !important; 
                 display: flex !important;
                 padding: 1.5mm 2mm !important;
+              }
+              
+              .label-barcode-container svg,
+              .label-barcode-container svg * {
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+                color-adjust: exact !important;
+              }
+              
+              .label-barcode-container svg rect[fill="#000000"],
+              .label-barcode-container svg rect[fill="black"] {
+                fill: #000000 !important;
               }
             }
           </style>
@@ -822,15 +836,12 @@ export function Movements() {
                         if (elem) {
                           JsBarcode(elem, "${numericCode}", {
                             format: "CODE128",
-                            width: 4.5,
-                            height: 70,
+                            width: 2,
+                            height: 50,
                             displayValue: false,
-                            margin: 3,
-                            marginTop: 1,
-                            marginBottom: 1,
+                            margin: 8,
                             background: "#ffffff",
-                            lineColor: "#000000",
-                            flat: true
+                            lineColor: "#000000"
                           });
                         }
                       })();
@@ -1146,7 +1157,6 @@ export function Movements() {
                       setFormData({ ...formData, reason: e.target.value })
                     }
                     placeholder="Ej: Compra a proveedor, Ajuste de inventario, etc."
-                    required
                   />
                 </div>
 
