@@ -1,10 +1,9 @@
 import { createClient } from '@supabase/supabase-js';
 
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Cliente de Supabase
-const supabaseUrl = `https://${projectId}.supabase.co`;
-export const supabase = createClient(supabaseUrl, publicAnonKey);
+export const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Tipos de datos
 export interface Department {
