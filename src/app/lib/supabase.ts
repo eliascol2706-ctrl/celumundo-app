@@ -1,10 +1,10 @@
 import { createClient } from '@supabase/supabase-js';
-import bcrypt from 'bcryptjs';
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+import { projectId, publicAnonKey } from '/utils/supabase/info';
 
-export const supabase = createClient(supabaseUrl, supabaseKey);
+// Cliente de Supabase
+const supabaseUrl = `https://${projectId}.supabase.co`;
+export const supabase = createClient(supabaseUrl, publicAnonKey);
 
 // Tipos de datos
 export interface Department {
@@ -210,10 +210,8 @@ export const authenticateUser = async (
     return null;
   }
 
-  // Verificar la contraseña con bcrypt
-  const isPasswordValid = await bcrypt.compare(password, user.password);
-  
-  if (!isPasswordValid) {
+  // Verificar la contraseña directamente
+  if (password !== user.password) {
     return null;
   }
 
@@ -224,12 +222,6 @@ export const updateUserCredentials = async (
   userId: string,
   updates: { username?: string; password?: string }
 ): Promise<boolean> => {
-  // Si se está actualizando la contraseña, encriptarla
-  if (updates.password) {
-    const saltRounds = 10;
-    updates.password = await bcrypt.hash(updates.password, saltRounds);
-  }
-
   const { error } = await supabase
     .from('users')
     .update(updates)
