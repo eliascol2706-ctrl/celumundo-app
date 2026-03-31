@@ -96,13 +96,13 @@ export function Login() {
       {/* Botón Consultar en la esquina superior */}
       <Button
         onClick={handleConsultClick}
-        className="absolute top-4 right-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800"
+        className="absolute top-4 right-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 animate-fade-in"
       >
         <Search className="h-4 w-4 mr-2" />
         Consultar
       </Button>
 
-      <Card className="w-full max-w-md shadow-2xl border-green-200 dark:border-green-800">
+      <Card className="w-full max-w-md shadow-2xl border-green-200 dark:border-green-800 animate-scale-in">
         <CardHeader className="text-center pb-4">
           <div className="mx-auto mb-4 h-20 w-20 bg-gradient-to-br from-green-600 to-green-700 rounded-full flex items-center justify-center shadow-lg">
             <LogIn className="h-10 w-10 text-white" />
@@ -174,8 +174,6 @@ export function Login() {
               {isLoading ? 'Iniciando sesión...' : 'Iniciar Sesión'}
             </Button>
           </form>
-
-          
 
           <div className="mt-4 text-center">
             <p className="text-xs text-muted-foreground">
@@ -249,7 +247,7 @@ export function Login() {
               {filteredProducts.length > 0 && (
                 <div className="space-y-2 max-h-[400px] overflow-y-auto">
                   {filteredProducts.map(product => (
-                    <div key={product.id} className="p-4 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800">
+                    <div key={product.id} className="p-4 bg-green-50 dark:bg-green-950 rounded-lg border border-green-200 dark:border-green-800 hover:shadow-md transition-all duration-200">
                       <p className="text-sm font-mono font-bold text-green-700 dark:text-green-400">Código: {product.code}</p>
                       <p className="text-base font-semibold mt-1">{product.name}</p>
                       <p className="text-sm text-muted-foreground">{product.description}</p>

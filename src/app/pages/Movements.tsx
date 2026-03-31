@@ -674,15 +674,15 @@ export function Movements() {
               height: 25mm !important; 
               display: flex !important; 
               flex-direction: row !important;
-              justify-content: flex-start !important;
-              align-items: stretch !important;
+              justify-content: center !important;
+              align-items: center !important;
               page-break-after: always !important; 
               page-break-inside: avoid !important;
-              padding: 0 !important;
+              padding: 0 1mm !important;
               background: white !important;
               overflow: hidden !important;
               position: relative;
-              gap: 2.5mm;
+              gap: 2mm;
             }
             
             .label { 
@@ -692,7 +692,7 @@ export function Movements() {
               flex-direction: column !important;
               justify-content: flex-start !important;
               align-items: center !important;
-              padding: 0.8mm 4mm !important;
+              padding: 1.5mm 2mm !important;
               flex-shrink: 0 !important;
               position: relative !important;
               overflow: hidden !important;
@@ -703,52 +703,56 @@ export function Movements() {
             }
             
             .label-product-name { 
-              font-size: 6pt !important; 
+              font-size: 6.5pt !important; 
               font-weight: bold !important; 
               text-align: center !important; 
-              max-height: 4.5mm !important; 
+              max-height: 3mm !important; 
               overflow: hidden !important; 
-              line-height: 1 !important; 
+              line-height: 0.95 !important; 
               word-wrap: break-word !important; 
               width: 100% !important; 
-              margin-bottom: 0.3mm !important; 
-              padding-top: 0.8mm;
+              margin-bottom: 0.2mm !important; 
+              padding-top: 0mm;
+              margin-top: 0mm;
             }
             
             .label-barcode-container { 
               width: 100% !important; 
-              height: 8mm !important; 
+              height: 14.5mm !important; 
               display: flex !important; 
               justify-content: center !important; 
               align-items: center !important; 
               flex-shrink: 0 !important;
-              margin: 2mm 0 !important; 
+              margin: 0.4mm 0 !important; 
+              padding: 0 !important;
+              overflow: visible !important;
             }
             
             .label-barcode-container svg { 
-              max-width: 30mm !important; 
-              max-height: 9mm !important; 
-              width: auto !important; 
-              height: auto !important; 
+              max-width: 100% !important; 
+              max-height: 14.5mm !important; 
+              width: 100% !important; 
+              height: 14.5mm !important; 
+              display: block !important;
             }
             
             .label-numeric-code { 
-              font-size: 8pt !important; 
+              font-size: 6.5pt !important; 
               font-weight: bold !important; 
               text-align: center !important; 
-              letter-spacing: 0.3px !important; 
-              line-height: 1 !important; 
-              margin: 0.3mm 0 !important; 
+              letter-spacing: 0.15px !important; 
+              line-height: 0.95 !important; 
+              margin: 0.1mm 0 !important; 
             }
             
             .label-reference { 
-              font-size: 6pt !important; 
+              font-size: 5.5pt !important; 
               font-weight: bold !important; 
               text-align: left !important; 
               line-height: 1 !important; 
               position: absolute !important; 
-              bottom: 0.8mm !important; 
-              left: 5mm !important; 
+              bottom: 1mm !important; 
+              left: 2.5mm !important; 
             }
             
             @media print {
@@ -767,19 +771,23 @@ export function Movements() {
               
               .label-page { 
                 margin: 0 !important; 
-                padding: 0 !important; 
+                padding: 0 1mm !important; 
                 width: 100mm !important; 
                 height: 25mm !important; 
                 display: flex !important;
                 flex-direction: row !important;
+                justify-content: center !important;
+                align-items: center !important;
                 page-break-after: always !important;
                 page-break-inside: avoid !important;
+                gap: 2mm;
               }
               
               .label { 
                 width: 32mm !important; 
                 height: 25mm !important; 
                 display: flex !important;
+                padding: 1.5mm 2mm !important;
               }
             }
           </style>
@@ -814,14 +822,15 @@ export function Movements() {
                         if (elem) {
                           JsBarcode(elem, "${numericCode}", {
                             format: "CODE128",
-                            width: 1.3,
-                            height: 30,
+                            width: 4.5,
+                            height: 70,
                             displayValue: false,
-                            margin: 0,
-                            marginTop: 0,
-                            marginBottom: 0,
+                            margin: 3,
+                            marginTop: 1,
+                            marginBottom: 1,
                             background: "#ffffff",
-                            lineColor: "#000000"
+                            lineColor: "#000000",
+                            flat: true
                           });
                         }
                       })();

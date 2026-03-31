@@ -122,14 +122,14 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6">
-      <div>
+      <div className="animate-fade-in-up">
         <h2 className="text-3xl font-bold">Dashboard</h2>
         <p className="text-muted-foreground mt-1">Resumen general del sistema</p>
       </div>
 
       {/* Tarjetas de estadísticas */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
+        <Card className="hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Total Productos
@@ -144,7 +144,7 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Facturas Emitidas
@@ -159,7 +159,7 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Ingresos Netos
@@ -174,7 +174,7 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card>
+        <Card className="hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Stock Bajo
@@ -190,7 +190,7 @@ export function Dashboard() {
 
       {/* Tarjetas adicionales de finanzas */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30">
+        <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 hover:shadow-lg transition-all duration-300">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-green-700 dark:text-green-300">
               Ingresos Brutos
@@ -205,7 +205,7 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30">
+        <Card className="border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-950/30 hover:shadow-lg transition-all duration-300">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-red-700 dark:text-red-300">
               Devoluciones
@@ -225,7 +225,7 @@ export function Dashboard() {
           </CardContent>
         </Card>
 
-        <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30">
+        <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30 hover:shadow-lg transition-all duration-300">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-300">
               Gastos

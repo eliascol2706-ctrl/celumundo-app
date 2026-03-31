@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
+import bcrypt from 'bcryptjs';
 
-// Cliente de Supabase
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
@@ -193,25 +193,43 @@ export const authenticateUser = async (
   password: string,
   company: 'celumundo' | 'repuestos'
 ): Promise<User | null> => {
-  const { data, error } = await supabase
+  // Obtener el usuario por username y company
+  const { data: user, error } = await supabase
     .from('users')
     .select('*')
     .eq('company', company)
     .eq('username', username)
-    .eq('password', password)
-    .maybeSingle(); // Cambio de .single() a .maybeSingle() para manejar 0 resultados
+    .maybeSingle();
   
   if (error) {
     console.error('Error authenticating user:', error);
     return null;
   }
-  return data;
+
+  if (!user) {
+    return null;
+  }
+
+  // Verificar la contraseña con bcrypt
+  const isPasswordValid = await bcrypt.compare(password, user.password);
+  
+  if (!isPasswordValid) {
+    return null;
+  }
+
+  return user;
 };
 
 export const updateUserCredentials = async (
   userId: string,
   updates: { username?: string; password?: string }
 ): Promise<boolean> => {
+  // Si se está actualizando la contraseña, encriptarla
+  if (updates.password) {
+    const saltRounds = 10;
+    updates.password = await bcrypt.hash(updates.password, saltRounds);
+  }
+
   const { error } = await supabase
     .from('users')
     .update(updates)
@@ -477,7 +495,70 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
     console.log('[DEBUG canCreateInvoice] Hoy (Colombia):', today);
     console.log('[DEBUG canCreateInvoice] Ayer (calculado):', yesterdayStr);
     
-    // Verificar si existe un cierre para el día anterior
+    // NUEVO: Primero verificar si hubo facturas en el día anterior
+    const { data: yesterdayInvoices, error: invoicesError } = await supabase
+      .from('invoices')
+      .select('id')
+      .eq('company', company)
+      .eq('date', yesterdayStr);
+    
+    if (invoicesError) {
+      console.error('Error checking yesterday invoices:', invoicesError);
+      return { canCreate: false, message: 'Error al verificar facturas del día anterior' };
+    }
+    
+    console.log('[DEBUG canCreateInvoice] Facturas de ayer encontradas:', yesterdayInvoices?.length || 0);
+    
+    // Si NO hubo facturas ayer, NO se requiere cierre, permitir facturar hoy
+    if (!yesterdayInvoices || yesterdayInvoices.length === 0) {
+      console.log('[DEBUG canCreateInvoice] No hubo facturas ayer, no se requiere cierre, permitir facturar');
+      
+      // VALIDACIÓN ADICIONAL: Verificar si es un nuevo mes y requiere cierre mensual
+      const currentMonth = today.substring(0, 7); // YYYY-MM
+      const yesterdayMonth = yesterdayStr.substring(0, 7); // YYYY-MM
+      
+      console.log('[DEBUG canCreateInvoice] Mes actual:', currentMonth);
+      console.log('[DEBUG canCreateInvoice] Mes de ayer:', yesterdayMonth);
+      
+      // Si es día 1 de un nuevo mes (ayer era otro mes)
+      if (currentMonth !== yesterdayMonth) {
+        console.log('[DEBUG canCreateInvoice] ¡Es un nuevo mes! Verificando cierre mensual...');
+        
+        // Verificar si existe un cierre mensual para el mes anterior
+        const { data: monthlyClosures, error: monthlyError } = await supabase
+          .from('monthly_closures')
+          .select('id, month, year')
+          .eq('company', company)
+          .eq('month', yesterdayMonth);
+        
+        if (monthlyError) {
+          console.error('Error checking monthly closures:', monthlyError);
+          return { canCreate: false, message: 'Error al verificar cierres mensuales' };
+        }
+        
+        console.log('[DEBUG canCreateInvoice] Cierres mensuales encontrados:', monthlyClosures);
+        
+        // Si no existe cierre mensual del mes anterior, no permitir facturar
+        if (!monthlyClosures || monthlyClosures.length === 0) {
+          console.log('[DEBUG canCreateInvoice] No hay cierre mensual, bloquear facturación');
+          
+          const previousMonthDate = new Date(yesterdayStr);
+          const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+          
+          return { 
+            canCreate: false,
+            requiresMonthlyClose: true,
+            message: `⚠️ Es un nuevo mes. Debes realizar el CIERRE MENSUAL de ${monthName} antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre mensual.` 
+          };
+        }
+        
+        console.log('[DEBUG canCreateInvoice] Cierre mensual existe, permitir facturar en nuevo mes');
+      }
+      
+      return { canCreate: true };
+    }
+    
+    // Si SÍ hubo facturas ayer, verificar si existe un cierre para ese día
     const { data: closures, error } = await supabase
       .from('daily_closures')
       .select('id, date')
@@ -491,9 +572,9 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
     
     console.log('[DEBUG canCreateInvoice] Cierres encontrados para ayer:', closures);
     
-    // Si no existe cierre del día anterior, no permitir facturar
+    // Si hubo facturas ayer pero NO existe cierre del día anterior, no permitir facturar
     if (!closures || closures.length === 0) {
-      console.log('[DEBUG canCreateInvoice] No hay cierre para ayer, bloquear facturación');
+      console.log('[DEBUG canCreateInvoice] Hubo facturas ayer pero no hay cierre, bloquear facturación');
       return { 
         canCreate: false, 
         message: `No se puede facturar. Debes realizar el cierre del día ${yesterdayStr} (${todayDate.toLocaleDateString('es-ES', { day: '2-digit', month: 'long', year: 'numeric' })}) antes de continuar.` 
@@ -501,48 +582,6 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
     }
     
     console.log('[DEBUG canCreateInvoice] Cierre de ayer existe, permitir facturar');
-    
-    // NUEVA VALIDACIÓN: Verificar si es un nuevo mes y requiere cierre mensual
-    const currentMonth = today.substring(0, 7); // YYYY-MM
-    const yesterdayMonth = yesterdayStr.substring(0, 7); // YYYY-MM
-    
-    console.log('[DEBUG canCreateInvoice] Mes actual:', currentMonth);
-    console.log('[DEBUG canCreateInvoice] Mes de ayer:', yesterdayMonth);
-    
-    // Si es día 1 de un nuevo mes (ayer era otro mes)
-    if (currentMonth !== yesterdayMonth) {
-      console.log('[DEBUG canCreateInvoice] ¡Es un nuevo mes! Verificando cierre mensual...');
-      
-      // Verificar si existe un cierre mensual para el mes anterior
-      const { data: monthlyClosures, error: monthlyError } = await supabase
-        .from('monthly_closures')
-        .select('id, month, year')
-        .eq('company', company)
-        .eq('month', yesterdayMonth);
-      
-      if (monthlyError) {
-        console.error('Error checking monthly closures:', monthlyError);
-        return { canCreate: false, message: 'Error al verificar cierres mensuales' };
-      }
-      
-      console.log('[DEBUG canCreateInvoice] Cierres mensuales encontrados:', monthlyClosures);
-      
-      // Si no existe cierre mensual del mes anterior, no permitir facturar
-      if (!monthlyClosures || monthlyClosures.length === 0) {
-        console.log('[DEBUG canCreateInvoice] No hay cierre mensual, bloquear facturación');
-        
-        const previousMonthDate = new Date(yesterdayStr);
-        const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
-        
-        return { 
-          canCreate: false,
-          requiresMonthlyClose: true,
-          message: `⚠️ Es un nuevo mes. Debes realizar el CIERRE MENSUAL de ${monthName} antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre mensual.` 
-        };
-      }
-      
-      console.log('[DEBUG canCreateInvoice] Cierre mensual existe, permitir facturar en nuevo mes');
-    }
   }
   
   return { canCreate: true };
