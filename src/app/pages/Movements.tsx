@@ -718,11 +718,7 @@ export function Movements() {
             
             .label-barcode-container { 
               width: 100% !important; 
-<<<<<<< HEAD
               height: 14.5mm !important; 
-=======
-              height: 12mm !important; 
->>>>>>> 6336a9406c0862d4a8cb415efc73a72f7501a04e
               display: flex !important; 
               justify-content: center !important; 
               align-items: center !important; 
@@ -733,18 +729,11 @@ export function Movements() {
             }
             
             .label-barcode-container svg { 
-<<<<<<< HEAD
               max-width: 100% !important; 
               max-height: 14.5mm !important; 
               width: 100% !important; 
               height: 14.5mm !important; 
               display: block !important;
-=======
-              max-width: 32mm !important; 
-              max-height: 10mm !important; 
-              width: auto !important; 
-              height: auto !important; 
->>>>>>> 6336a9406c0862d4a8cb415efc73a72f7501a04e
             }
             
             .label-numeric-code { 
