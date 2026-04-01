@@ -1,9 +1,9 @@
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
-import { 
-  LayoutDashboard, 
-  Package, 
-  FileText, 
-  ArrowRightLeft, 
+import {
+  LayoutDashboard,
+  Package,
+  FileText,
+  ArrowRightLeft,
   BarChart3,
   Receipt,
   Menu,
@@ -20,10 +20,12 @@ import {
   ChevronDown,
   ChevronUp,
   Search,
-  Settings
+  Settings,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
-import { getCurrentUser, logoutUser, getSession, getProducts, type Product } from '../lib/supabase';
+import { getCurrentUser, logoutUser, getSession, getProducts, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession } from '../lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -124,6 +126,16 @@ export function Layout() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
 
+  // Estados para configuración (solo para admin)
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+  const [adminUsername, setAdminUsername] = useState("");
+  const [adminPassword, setAdminPassword] = useState("");
+  const [sellerUsername, setSellerUsername] = useState("");
+  const [sellerPassword, setSellerPassword] = useState("");
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
+  const [showSellerPassword, setShowSellerPassword] = useState(false);
+
   // Cargar productos cuando se abre el diálogo
   useEffect(() => {
     if (productSearchDialogOpen && currentUser?.role === 'seller') {
@@ -134,6 +146,126 @@ export function Layout() {
       }, 100);
     }
   }, [productSearchDialogOpen, currentUser]);
+
+  // Cargar usuarios cuando se abre el diálogo de configuración
+  useEffect(() => {
+    if (settingsDialogOpen && currentUser?.role === 'admin' && session) {
+      loadUsers();
+    }
+  }, [settingsDialogOpen]);
+
+  const loadUsers = async () => {
+    if (!session) return;
+    const users = await getUsersFromDB(session.company);
+
+    const admin = users.find(u => u.role === 'admin');
+    const seller = users.find(u => u.role === 'seller');
+
+    setAdminUsername(admin?.username || '');
+    setAdminPassword(admin?.password || '');
+    setSellerUsername(seller?.username || '');
+    setSellerPassword(seller?.password || '');
+  };
+
+  const handleSaveSettings = async () => {
+    if (!session || !currentUser) return;
+
+    setIsSavingSettings(true);
+
+    try {
+      const users = await getUsersFromDB(session.company);
+      const admin = users.find(u => u.role === 'admin');
+      const seller = users.find(u => u.role === 'seller');
+
+      // Validar que los nombres de usuario no estén vacíos
+      if (!adminUsername.trim()) {
+        alert('El nombre de usuario del administrador no puede estar vacío');
+        setIsSavingSettings(false);
+        return;
+      }
+
+      if (!sellerUsername.trim()) {
+        alert('El nombre de usuario del vendedor no puede estar vacío');
+        setIsSavingSettings(false);
+        return;
+      }
+
+      // Validar que las contraseñas no estén vacías
+      if (!adminPassword.trim()) {
+        alert('La contraseña del administrador no puede estar vacía');
+        setIsSavingSettings(false);
+        return;
+      }
+
+      if (!sellerPassword.trim()) {
+        alert('La contraseña del vendedor no puede estar vacía');
+        setIsSavingSettings(false);
+        return;
+      }
+
+      // Verificar si el nuevo username del admin ya existe (excluyendo el admin actual)
+      if (admin && adminUsername !== admin.username) {
+        const usernameExists = await checkUsernameExists(adminUsername, session.company, admin.id);
+        if (usernameExists) {
+          alert('El nombre de usuario del administrador ya existe. Por favor elige otro.');
+          setIsSavingSettings(false);
+          return;
+        }
+      }
+
+      // Verificar si el nuevo username del seller ya existe (excluyendo el seller actual)
+      if (seller && sellerUsername !== seller.username) {
+        const usernameExists = await checkUsernameExists(sellerUsername, session.company, seller.id);
+        if (usernameExists) {
+          alert('El nombre de usuario del vendedor ya existe. Por favor elige otro.');
+          setIsSavingSettings(false);
+          return;
+        }
+      }
+
+      // Actualizar credenciales del admin
+      if (admin) {
+        const adminSuccess = await updateUserCredentials(admin.id, {
+          username: adminUsername,
+          password: adminPassword
+        });
+
+        if (!adminSuccess) {
+          alert('Error al actualizar las credenciales del administrador');
+          setIsSavingSettings(false);
+          return;
+        }
+      }
+
+      // Actualizar credenciales del seller
+      if (seller) {
+        const sellerSuccess = await updateUserCredentials(seller.id, {
+          username: sellerUsername,
+          password: sellerPassword
+        });
+
+        if (!sellerSuccess) {
+          alert('Error al actualizar las credenciales del vendedor');
+          setIsSavingSettings(false);
+          return;
+        }
+      }
+
+      // Si el admin cambió su propio username, actualizar la sesión
+      if (admin && currentUser.id === admin.id && adminUsername !== admin.username) {
+        const updatedUser = { ...currentUser, username: adminUsername };
+        saveSession({ user: updatedUser, company: session.company });
+      }
+
+      alert('✅ Configuración guardada exitosamente');
+      setSettingsDialogOpen(false);
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      alert('Error al guardar la configuración');
+    } finally {
+      setIsSavingSettings(false);
+    }
+  };
 
   const loadProducts = async () => {
     const data = await getProducts();
@@ -405,9 +537,7 @@ export function Layout() {
       {currentUser?.role === 'admin' && (
         <button
           onClick={() => {
-            // Aquí puedes agregar la lógica para abrir configuración
-            // Por ahora, solo mostramos un toast
-            alert('Funcionalidad de Settings - Aquí se pueden agregar configuraciones del sistema');
+            setSettingsDialogOpen(true);
           }}
           className="fixed bottom-20 right-4 lg:bottom-24 lg:right-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl"
           aria-label="Configuración"
@@ -639,21 +769,21 @@ export function Layout() {
                               <p className="font-medium text-base truncate">{product.name}</p>
                               <p className="text-sm text-muted-foreground truncate">{product.description}</p>
                             </div>
-                            
+
                             <div className="flex items-center gap-6">
                               <div className="text-right">
                                 <p className="text-xs text-muted-foreground">Stock</p>
                                 <p className={`font-bold text-lg ${
-                                  product.stock <= 5 
-                                    ? "text-red-600" 
-                                    : product.stock <= 10 
-                                    ? "text-yellow-600" 
+                                  product.stock <= 5
+                                    ? "text-red-600"
+                                    : product.stock <= 10
+                                    ? "text-yellow-600"
                                     : "text-green-600"
                                 }`}>
                                   {product.stock}
                                 </p>
                               </div>
-                              
+
                               <div className="text-right">
                                 <p className="text-xs text-muted-foreground">Precio</p>
                                 <p className="font-bold text-lg text-green-600">
@@ -682,6 +812,177 @@ export function Layout() {
                   <p className="text-muted-foreground">Escribe o escanea un código para buscar</p>
                 </div>
               )}
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Diálogo de Configuración (solo para admin) */}
+      {currentUser?.role === 'admin' && (
+        <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Settings className="h-5 w-5" />
+                Configuración del Sistema
+              </DialogTitle>
+              <DialogDescription>
+                Administra las credenciales de los usuarios de {companyName}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-6">
+              {/* Sección de Administrador */}
+              <div className="border border-green-200 dark:border-green-800 rounded-lg p-6 bg-green-50 dark:bg-green-950/30">
+                <div className="flex items-center gap-2 mb-4">
+                  <Building2 className="h-5 w-5 text-green-600" />
+                  <h3 className="text-lg font-bold text-green-900 dark:text-green-100">
+                    Credenciales de Administrador
+                  </h3>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="adminUsername">Nombre de Usuario</Label>
+                    <input
+                      id="adminUsername"
+                      type="text"
+                      placeholder="admin1"
+                      value={adminUsername}
+                      onChange={(e) => {
+                        console.log('Admin username changed:', e.target.value);
+                        setAdminUsername(e.target.value);
+                      }}
+                      disabled={isSavingSettings}
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="adminPassword">Contraseña</Label>
+                    <div className="relative">
+                      <input
+                        id="adminPassword"
+                        type={showAdminPassword ? "text" : "password"}
+                        placeholder="••••••••"
+                        value={adminPassword}
+                        onChange={(e) => {
+                          console.log('Admin password changed:', e.target.value);
+                          setAdminPassword(e.target.value);
+                        }}
+                        disabled={isSavingSettings}
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowAdminPassword(!showAdminPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showAdminPassword ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Sección de Vendedor */}
+              <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-6 bg-blue-50 dark:bg-blue-950/30">
+                <div className="flex items-center gap-2 mb-4">
+                  <Users className="h-5 w-5 text-blue-600" />
+                  <h3 className="text-lg font-bold text-blue-900 dark:text-blue-100">
+                    Credenciales de Vendedor
+                  </h3>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="sellerUsername">Nombre de Usuario</Label>
+                    <input
+                      id="sellerUsername"
+                      type="text"
+                      placeholder="seller1"
+                      value={sellerUsername}
+                      onChange={(e) => setSellerUsername(e.target.value)}
+                      disabled={isSavingSettings}
+                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="sellerPassword">Contraseña</Label>
+                    <div className="relative">
+                      <input
+                        id="sellerPassword"
+                        type={showSellerPassword ? "text" : "password"}
+                        placeholder="••••••••"
+                        value={sellerPassword}
+                        onChange={(e) => setSellerPassword(e.target.value)}
+                        disabled={isSavingSettings}
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 pr-10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowSellerPassword(!showSellerPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+                        tabIndex={-1}
+                      >
+                        {showSellerPassword ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Nota informativa */}
+              <div className="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                <div className="flex items-start gap-3">
+                  <div className="text-yellow-600 dark:text-yellow-400 mt-0.5">ℹ️</div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-yellow-900 dark:text-yellow-100 mb-1">
+                      Información Importante
+                    </p>
+                    <ul className="text-xs text-yellow-800 dark:text-yellow-200 space-y-1 list-disc list-inside">
+                      <li>Los cambios solo afectan a {companyName}</li>
+                      <li>Todas las credenciales deben tener al menos 1 carácter</li>
+                      <li>Los nombres de usuario deben ser únicos</li>
+                    </ul>
+                  </div>
+                </div>
+              </div>
+
+              {/* Botones de acción */}
+              <div className="flex items-center justify-end gap-3 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setSettingsDialogOpen(false);
+                    // Resetear campos al cerrar
+                    setAdminUsername('');
+                    setAdminPassword('');
+                    setSellerUsername('');
+                    setSellerPassword('');
+                  }}
+                  disabled={isSavingSettings}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleSaveSettings}
+                  disabled={isSavingSettings}
+                  className="bg-green-600 hover:bg-green-700 text-white"
+                >
+                  {isSavingSettings ? 'Guardando...' : 'Guardar Cambios'}
+                </Button>
+              </div>
             </div>
           </DialogContent>
         </Dialog>
