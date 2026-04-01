@@ -16,13 +16,19 @@ import {
   FolderOpen,
   RotateCcw,
   Users,
-  Settings as SettingsIcon,
   Plus,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Search,
+  Settings
 } from 'lucide-react';
-import { useState, useEffect } from 'react';
-import { getCurrentUser, logoutUser, getSession } from '../lib/supabase';
+import { useState, useEffect, useRef } from 'react';
+import { getCurrentUser, logoutUser, getSession, getProducts, type Product } from '../lib/supabase';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
+import { Input } from '../components/ui/input';
+import { Button } from '../components/ui/button';
+import { Label } from '../components/ui/label';
+import { formatCOP } from '../lib/currency';
 
 const adminNavigation = [
   // Sección 1: Gestión de Inventario
@@ -110,6 +116,35 @@ export function Layout() {
   const isSectionOpen = (sectionName: string) => {
     return openSections[sectionName] !== false;
   };
+  
+  // Estados para consulta de producto (solo para seller)
+  const [productSearchDialogOpen, setProductSearchDialogOpen] = useState(false);
+  const [productSearchTerm, setProductSearchTerm] = useState("");
+  const [products, setProducts] = useState<Product[]>([]);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  // Cargar productos cuando se abre el diálogo
+  useEffect(() => {
+    if (productSearchDialogOpen && currentUser?.role === 'seller') {
+      loadProducts();
+      // Enfocar el input cuando se abre el diálogo
+      setTimeout(() => {
+        barcodeInputRef.current?.focus();
+      }, 100);
+    }
+  }, [productSearchDialogOpen, currentUser]);
+
+  const loadProducts = async () => {
+    const data = await getProducts();
+    setProducts(data);
+  };
+
+  // Filtrar productos por código o nombre
+  const filteredProducts = products.filter(product =>
+    product.name.toLowerCase().includes(productSearchTerm.toLowerCase()) ||
+    product.code.toLowerCase().includes(productSearchTerm.toLowerCase())
+  );
   
   // Redirigir a login si no hay usuario
   useEffect(() => {
@@ -341,7 +376,7 @@ export function Layout() {
         {isDark ? <Sun className="h-5 w-5 lg:h-6 lg:w-6" /> : <Moon className="h-5 w-5 lg:h-6 lg:w-6" />}
       </button>
 
-      {/* Botón flotante de Nueva Factura (para todos los usuarios) - arriba del botón de config */}
+      {/* Botón flotante de Nueva Factura (para todos los usuarios) */}
       <button
         onClick={() => {
           // Si estamos en la página de facturación, disparar evento para abrir el modal
@@ -356,7 +391,7 @@ export function Layout() {
             }, 100);
           }
         }}
-        className="fixed bottom-20 right-4 lg:bottom-24 lg:right-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl group"
+        className="fixed bottom-4 right-4 lg:bottom-6 lg:right-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl group"
         aria-label="Nueva Factura"
         title="Crear Nueva Factura"
       >
@@ -366,16 +401,290 @@ export function Layout() {
         </div>
       </button>
 
-      {/* Botón flotante de Configuración (solo para Admin) - esquina inferior derecha */}
+      {/* Botón flotante de Settings (solo para admin) */}
       {currentUser?.role === 'admin' && (
         <button
-          onClick={() => navigate('/configuracion')}
-          className="fixed bottom-4 right-4 lg:bottom-6 lg:right-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-green-600 to-green-700 hover:from-green-700 hover:to-green-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl group"
+          onClick={() => {
+            // Aquí puedes agregar la lógica para abrir configuración
+            // Por ahora, solo mostramos un toast
+            alert('Funcionalidad de Settings - Aquí se pueden agregar configuraciones del sistema');
+          }}
+          className="fixed bottom-20 right-4 lg:bottom-24 lg:right-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl"
           aria-label="Configuración"
-          title="Configuración de Credenciales"
+          title="Configuración del Sistema"
         >
-          <SettingsIcon className="h-5 w-5 lg:h-6 lg:w-6 group-hover:rotate-90 transition-transform duration-300" />
+          <Settings className="h-5 w-5 lg:h-6 lg:w-6" />
         </button>
+      )}
+
+      {/* Botón flotante de Consultar Producto (solo para sellers) - En la posición donde estaba Settings */}
+      {currentUser?.role === 'seller' && (
+        <button
+          onClick={() => {
+            setProductSearchDialogOpen(true);
+            setProductSearchTerm("");
+            setSelectedProduct(null);
+          }}
+          className="fixed bottom-20 right-4 lg:bottom-24 lg:right-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-purple-600 to-purple-700 hover:from-purple-700 hover:to-purple-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl"
+          aria-label="Consultar Producto"
+          title="Consultar Producto"
+        >
+          <Search className="h-5 w-5 lg:h-6 lg:w-6" />
+        </button>
+      )}
+
+      {/* Diálogo de Consultar Producto (solo para sellers) */}
+      {currentUser?.role === 'seller' && (
+        <Dialog open={productSearchDialogOpen} onOpenChange={setProductSearchDialogOpen}>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Consultar Producto</DialogTitle>
+              <DialogDescription>
+                Busca por nombre o código de barras para ver la información del producto
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              {/* Buscador con soporte para lector de código de barras */}
+              <div className="space-y-2">
+                <Label htmlFor="productSearch">Buscar Producto</Label>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    id="productSearch"
+                    ref={barcodeInputRef}
+                    type="text"
+                    placeholder="Escanea código de barras o escribe nombre/código..."
+                    value={productSearchTerm}
+                    onChange={(e) => {
+                      setProductSearchTerm(e.target.value);
+                      // Si hay un producto exacto, seleccionarlo automáticamente
+                      const exactMatch = products.find(
+                        p => p.code.toLowerCase() === e.target.value.toLowerCase()
+                      );
+                      if (exactMatch) {
+                        setSelectedProduct(exactMatch);
+                      }
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && filteredProducts.length === 1) {
+                        setSelectedProduct(filteredProducts[0]);
+                      }
+                    }}
+                    className="pl-10"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  💡 Tip: Usa el lector de código de barras para búsqueda rápida
+                </p>
+              </div>
+
+              {/* Mostrar producto seleccionado */}
+              {selectedProduct && (
+                <div className="border-2 border-green-500 dark:border-green-600 rounded-lg p-6 bg-green-50 dark:bg-green-950/30">
+                  <div className="flex items-start justify-between mb-4">
+                    <div>
+                      <h3 className="text-xl font-bold text-green-900 dark:text-green-100">
+                        {selectedProduct.name}
+                      </h3>
+                      <p className="text-sm text-green-700 dark:text-green-300 mt-1">
+                        {selectedProduct.description}
+                      </p>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setSelectedProduct(null)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-green-700 dark:text-green-400">Código</p>
+                      <p className="text-lg font-mono font-bold text-green-900 dark:text-green-100">
+                        {selectedProduct.code}
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-green-700 dark:text-green-400">Stock</p>
+                      <p className={`text-lg font-bold ${
+                        selectedProduct.stock <= selectedProduct.min_stock
+                          ? 'text-red-600'
+                          : selectedProduct.stock <= 10
+                          ? 'text-yellow-600'
+                          : 'text-green-600'
+                      }`}>
+                        {selectedProduct.stock} unidades
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-green-700 dark:text-green-400">Categoría</p>
+                      <p className="text-sm font-semibold text-green-900 dark:text-green-100">
+                        {selectedProduct.category}
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
+                      <p className="text-xs font-medium text-green-700 dark:text-green-400">Stock Mínimo</p>
+                      <p className="text-sm font-semibold text-green-900 dark:text-green-100">
+                        {selectedProduct.min_stock} unidades
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 pt-6 border-t border-green-200 dark:border-green-800">
+                    <h4 className="font-semibold text-green-900 dark:text-green-100 mb-3">Precios de Venta</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="bg-white dark:bg-gray-900 p-4 rounded-lg border border-green-200 dark:border-green-800">
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Precio 1</p>
+                        <p className="text-2xl font-bold text-green-600">
+                          {formatCOP(selectedProduct.price1)}
+                        </p>
+                        {selectedProduct.margin1 && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Margen: {selectedProduct.margin1.toFixed(1)}%
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="bg-white dark:bg-gray-900 p-4 rounded-lg border border-green-200 dark:border-green-800">
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Precio 2</p>
+                        <p className="text-2xl font-bold text-green-600">
+                          {formatCOP(selectedProduct.price2)}
+                        </p>
+                        {selectedProduct.margin2 && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Margen: {selectedProduct.margin2.toFixed(1)}%
+                          </p>
+                        )}
+                      </div>
+
+                      <div className="bg-white dark:bg-gray-900 p-4 rounded-lg border-2 border-green-500 dark:border-green-600">
+                        <p className="text-xs font-medium text-green-700 dark:text-green-400 mb-1">💰 Precio Final</p>
+                        <p className="text-2xl font-bold text-green-600">
+                          {formatCOP(selectedProduct.final_price)}
+                        </p>
+                        {selectedProduct.margin_final && (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            Margen: {selectedProduct.margin_final.toFixed(1)}%
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 pt-4 border-t border-green-200 dark:border-green-800">
+                    <h4 className="font-semibold text-green-900 dark:text-green-100 mb-2">Información de Costos</h4>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Costo Actual</p>
+                        <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          {formatCOP(selectedProduct.current_cost)}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-medium text-gray-600 dark:text-gray-400">Costo Anterior</p>
+                        <p className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                          {formatCOP(selectedProduct.old_cost)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {selectedProduct.use_unit_ids && (
+                    <div className="mt-4 pt-4 border-t border-green-200 dark:border-green-800">
+                      <div className="flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                        <Package className="h-5 w-5" />
+                        <span className="font-semibold">Este producto usa IDs únicas por unidad</span>
+                      </div>
+                      {selectedProduct.registered_ids && selectedProduct.registered_ids.length > 0 && (
+                        <p className="text-sm text-blue-600 dark:text-blue-400 mt-2">
+                          Total de IDs registradas: {selectedProduct.registered_ids.length}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Lista de productos si no hay selección */}
+              {!selectedProduct && productSearchTerm && (
+                <div className="border border-border rounded-lg overflow-hidden">
+                  <div className="max-h-[400px] overflow-y-auto">
+                    {filteredProducts.length > 0 ? (
+                      <div className="divide-y divide-border">
+                        {filteredProducts.slice(0, 10).map((product) => (
+                          <button
+                            key={product.id}
+                            type="button"
+                            onClick={() => setSelectedProduct(product)}
+                            className="w-full p-4 text-left hover:bg-muted transition-colors flex items-center justify-between gap-4"
+                          >
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-3 mb-2">
+                                <span className="font-mono font-bold text-sm bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+                                  {product.code}
+                                </span>
+                                {product.use_unit_ids && (
+                                  <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded">
+                                    🔢 IDs
+                                  </span>
+                                )}
+                              </div>
+                              <p className="font-medium text-base truncate">{product.name}</p>
+                              <p className="text-sm text-muted-foreground truncate">{product.description}</p>
+                            </div>
+                            
+                            <div className="flex items-center gap-6">
+                              <div className="text-right">
+                                <p className="text-xs text-muted-foreground">Stock</p>
+                                <p className={`font-bold text-lg ${
+                                  product.stock <= 5 
+                                    ? "text-red-600" 
+                                    : product.stock <= 10 
+                                    ? "text-yellow-600" 
+                                    : "text-green-600"
+                                }`}>
+                                  {product.stock}
+                                </p>
+                              </div>
+                              
+                              <div className="text-right">
+                                <p className="text-xs text-muted-foreground">Precio</p>
+                                <p className="font-bold text-lg text-green-600">
+                                  {formatCOP(product.final_price)}
+                                </p>
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="py-12 text-center">
+                        <p className="text-muted-foreground">No se encontraron productos</p>
+                        <p className="text-sm text-muted-foreground mt-1">
+                          Intenta con otro término de búsqueda
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {!selectedProduct && !productSearchTerm && (
+                <div className="text-center py-12">
+                  <Search className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-muted-foreground">Escribe o escanea un código para buscar</p>
+                </div>
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

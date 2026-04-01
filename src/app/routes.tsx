@@ -1,3 +1,4 @@
+import * as React from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
@@ -11,7 +12,6 @@ import { Closures } from './pages/Closures';
 import { Departments } from './pages/Departments';
 import { Returns } from './pages/Returns';
 import { Customers } from './pages/Customers';
-import { Settings } from './pages/Settings';
 import { getCurrentUser } from './lib/supabase';
 
 // Componente para proteger rutas
@@ -115,14 +115,6 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
             <Returns />
-          </ProtectedRoute>
-        )
-      },
-      { 
-        path: 'configuracion', 
-        element: (
-          <ProtectedRoute allowedRoles={['admin']}>
-            <Settings />
           </ProtectedRoute>
         )
       },

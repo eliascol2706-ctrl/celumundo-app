@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
-import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List } from 'lucide-react';
-import { getProducts, addProduct, updateProduct, deleteProduct, getDepartments, type Product, type Department } from '../lib/supabase';
+import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List, X } from 'lucide-react';
+import { getProducts, addProduct, updateProduct, deleteProduct, getDepartments, type Product, type Department, supabase } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -290,6 +290,59 @@ export function Products() {
   const handleOpenUnitIdsDialog = (product: Product) => {
     setSelectedProductForIds(product);
     setIsUnitIdsDialogOpen(true);
+  };
+
+  // Función para eliminar una ID específica del producto
+  const handleDeleteUnitId = async (productId: string, idToDelete: string) => {
+    if (!confirm(`¿Estás seguro de eliminar la ID "${idToDelete}"? Esta acción no se puede deshacer.`)) {
+      return;
+    }
+
+    try {
+      const product = products.find(p => p.id === productId);
+      if (!product || !product.registered_ids) return;
+
+      // Remover la ID del array
+      const updatedIds = product.registered_ids.filter(id => id !== idToDelete);
+      
+      // Actualizar el producto en Supabase
+      await updateProduct(productId, {
+        registered_ids: updatedIds,
+        stock: updatedIds.length, // Actualizar el stock también
+      });
+
+      toast.success(`ID "${idToDelete}" eliminada correctamente`);
+      
+      // Recargar productos
+      await loadProducts();
+      
+      // Actualizar el producto seleccionado en el diálogo si está abierto
+      if (selectedProductForIds && selectedProductForIds.id === productId) {
+        const updatedProduct = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', productId)
+          .single();
+        if (updatedProduct.data) {
+          setSelectedProductForIds(updatedProduct.data as Product);
+        }
+      }
+      
+      // Actualizar el producto en edición si está abierto
+      if (editingProduct && editingProduct.id === productId) {
+        const updatedProduct = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', productId)
+          .single();
+        if (updatedProduct.data) {
+          setEditingProduct(updatedProduct.data as Product);
+        }
+      }
+    } catch (error) {
+      console.error('Error al eliminar ID:', error);
+      toast.error('Error al eliminar la ID');
+    }
   };
 
   return (
@@ -672,16 +725,30 @@ export function Products() {
               {/* Mostrar IDs registradas si está editando y el producto usa IDs */}
               {editingProduct && editingProduct.use_unit_ids && editingProduct.registered_ids && editingProduct.registered_ids.length > 0 && (
                 <div className="col-span-2 space-y-2">
-                  <Label>IDs Registradas ({editingProduct.registered_ids.length})</Label>
+                  <Label>IDs Registradas ({editingProduct.registered_ids.length}) - Click en X para eliminar</Label>
                   <div className="p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg max-h-40 overflow-y-auto">
                     <div className="flex flex-wrap gap-2">
                       {editingProduct.registered_ids.map((id) => (
-                        <span key={id} className="px-3 py-1 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 text-xs font-mono rounded-full">
-                          {id}
-                        </span>
+                        <div
+                          key={id}
+                          className="inline-flex items-center gap-1 px-3 py-1 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 text-xs font-mono rounded-full group hover:bg-red-100 dark:hover:bg-red-900 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+                        >
+                          <span>{id}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteUnitId(editingProduct.id, id)}
+                            className="ml-1 hover:bg-red-200 dark:hover:bg-red-800 rounded-full p-0.5 transition-colors"
+                            title={`Eliminar ID ${id}`}
+                          >
+                            <X className="h-3 w-3" />
+                          </button>
+                        </div>
                       ))}
                     </div>
                   </div>
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    ⚠️ Al eliminar una ID, el stock se reducirá automáticamente.
+                  </p>
                 </div>
               )}
             </div>
@@ -739,30 +806,42 @@ export function Products() {
 
                   <div>
                     <Label className="text-sm font-medium text-gray-700 mb-3 block">
-                      Listado de IDs (Click para copiar)
+                      Listado de IDs (Click para copiar / Botón rojo para eliminar)
                     </Label>
-                    <div className="grid grid-cols-6 sm:grid-cols-8 gap-2 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg max-h-80 overflow-y-auto">
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg max-h-80 overflow-y-auto">
                       {selectedProductForIds.registered_ids
                         .sort((a, b) => parseInt(a) - parseInt(b))
                         .map((id) => {
                           const fullCode = `${selectedProductForIds.code.slice(0, -1)}-${id}A`;
                           return (
-                            <button
+                            <div
                               key={id}
-                              type="button"
-                              onClick={async () => {
-                                const success = await copyToClipboard(fullCode);
-                                if (success) {
-                                  toast.success(`Copiado: ${fullCode}`);
-                                } else {
-                                  toast.error('No se pudo copiar al portapapeles');
-                                }
-                              }}
-                              className="px-3 py-2 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900 dark:to-green-800 hover:from-green-200 hover:to-green-300 dark:hover:from-green-800 dark:hover:to-green-700 text-green-800 dark:text-green-200 text-sm font-mono rounded-lg border-2 border-green-300 dark:border-green-700 transition-all hover:scale-105 cursor-pointer shadow-sm hover:shadow-md"
-                              title={`Click para copiar: ${fullCode}`}
+                              className="relative group"
                             >
-                              {id}
-                            </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const success = await copyToClipboard(fullCode);
+                                  if (success) {
+                                    toast.success(`Copiado: ${fullCode}`);
+                                  } else {
+                                    toast.error('No se pudo copiar al portapapeles');
+                                  }
+                                }}
+                                className="w-full px-3 py-2 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900 dark:to-green-800 hover:from-green-200 hover:to-green-300 dark:hover:from-green-800 dark:hover:to-green-700 text-green-800 dark:text-green-200 text-sm font-mono rounded-lg border-2 border-green-300 dark:border-green-700 transition-all hover:scale-105 cursor-pointer shadow-sm hover:shadow-md"
+                                title={`Click para copiar: ${fullCode}`}
+                              >
+                                {id}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteUnitId(selectedProductForIds.id, id)}
+                                className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                                title={`Eliminar ID ${id}`}
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            </div>
                           );
                         })}
                     </div>
@@ -770,7 +849,7 @@ export function Products() {
 
                   <div className="bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 p-4 rounded-lg">
                     <p className="text-sm text-amber-800 dark:text-amber-200">
-                      💡 <strong>Tip:</strong> Haz clic en cualquier ID para copiar el código completo al portapapeles.
+                      💡 <strong>Tip:</strong> Haz clic en cualquier ID para copiar el código completo al portapapeles. Pasa el mouse sobre una ID y presiona el botón rojo para eliminarla.
                     </p>
                     <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
                       Ejemplo: Click en "0001" copia "{selectedProductForIds.code.slice(0, -1)}-0001A"
