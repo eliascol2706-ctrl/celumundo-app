@@ -25,6 +25,7 @@ import { formatCOP } from '../lib/currency';
 import { jsPDF } from 'jspdf';
 import { ProductInfoDialog } from '../components/ProductInfoDialog';
 import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
+import { includesIgnoreAccents } from '../lib/string-utils';
 
 interface InvoiceItem {
   productId: string;
@@ -391,9 +392,9 @@ export function Invoices() {
 
   const getSortedProducts = () => {
     const filtered = products.filter(product =>
-      product.name.toLowerCase().includes(productSearchTerm.toLowerCase()) ||
-      product.code.toLowerCase().includes(productSearchTerm.toLowerCase()) ||
-      product.category.toLowerCase().includes(productSearchTerm.toLowerCase())
+      includesIgnoreAccents(product.name, productSearchTerm) ||
+      includesIgnoreAccents(product.code, productSearchTerm) ||
+      includesIgnoreAccents(product.category, productSearchTerm)
     );
 
     return filtered.sort((a, b) => {
@@ -2120,9 +2121,14 @@ export function Invoices() {
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex-1">
                         <h4 className="font-medium text-sm">{product.name}</h4>
-                        <p className="text-xs text-muted-foreground">
-                          {product.code}
-                        </p>
+                        <div className="flex items-center gap-2 mt-1">
+                          <p className="text-xs text-muted-foreground font-mono">
+                            {product.code}
+                          </p>
+                          <span className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded">
+                            {product.category}
+                          </span>
+                        </div>
                       </div>
                       {product.use_unit_ids && (
                         <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded">

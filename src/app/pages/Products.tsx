@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List, X } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List, X, Printer, Eye } from 'lucide-react';
 import { getProducts, addProduct, updateProduct, deleteProduct, getDepartments, type Product, type Department, supabase } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -10,6 +10,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
 import { copyToClipboard } from '../lib/clipboard';
+import { includesIgnoreAccents } from '../lib/string-utils';
+import { jsPDF } from 'jspdf';
 
 export function Products() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -20,6 +22,17 @@ export function Products() {
   const [isUnitIdsDialogOpen, setIsUnitIdsDialogOpen] = useState(false);
   const [selectedProductForIds, setSelectedProductForIds] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false); // Prevenir doble clic
+
+  // Estados para el sistema de impresión
+  const [isPrintOptionsOpen, setIsPrintOptionsOpen] = useState(false);
+  const [isPrintPreviewOpen, setIsPrintPreviewOpen] = useState(false);
+  const [printOptions, setPrintOptions] = useState({
+    nameFilter: '',
+    categoryFilter: 'all' as string,
+    stockOrder: 'asc' as 'asc' | 'desc',
+    includeZeroStock: true
+  });
+
   const [formData, setFormData] = useState({
     code: '',
     name: '',
@@ -92,10 +105,10 @@ export function Products() {
   };
 
   const filteredProducts = products.filter(product =>
-    product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    product.code.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    (product.full_code && product.full_code.toLowerCase().includes(searchTerm.toLowerCase())) ||
-    product.category.toLowerCase().includes(searchTerm.toLowerCase())
+    includesIgnoreAccents(product.name, searchTerm) ||
+    includesIgnoreAccents(product.code, searchTerm) ||
+    (product.full_code && includesIgnoreAccents(product.full_code, searchTerm)) ||
+    includesIgnoreAccents(product.category, searchTerm)
   );
 
   // Calcular precio desde margen
@@ -154,6 +167,154 @@ export function Products() {
       price2: cost > 0 ? calculatePriceFromMargin(cost, margin2).toFixed(2) : '',
       finalPrice: cost > 0 ? calculatePriceFromMargin(cost, marginFinal).toFixed(2) : '',
     });
+  };
+
+  // Obtener productos para impresión con filtros y ordenamiento
+  const getProductsForPrint = () => {
+    let productsToShow = [...products];
+
+    // Filtrar por nombre (búsqueda)
+    if (printOptions.nameFilter.trim()) {
+      productsToShow = productsToShow.filter(p =>
+        includesIgnoreAccents(p.name, printOptions.nameFilter)
+      );
+    }
+
+    // Filtrar por categoría
+    if (printOptions.categoryFilter !== 'all') {
+      productsToShow = productsToShow.filter(p => p.category === printOptions.categoryFilter);
+    }
+
+    // Filtrar por stock cero
+    if (!printOptions.includeZeroStock) {
+      productsToShow = productsToShow.filter(p => p.stock > 0);
+    }
+
+    // Ordenar por nombre primero
+    productsToShow.sort((a, b) => a.name.localeCompare(b.name));
+
+    // Ordenar por stock
+    if (printOptions.stockOrder === 'asc') {
+      productsToShow.sort((a, b) => a.stock - b.stock);
+    } else {
+      productsToShow.sort((a, b) => b.stock - a.stock);
+    }
+
+    return productsToShow;
+  };
+
+  // Generar PDF para impresión
+  const handlePrintToPDF = () => {
+    const productsToShow = getProductsForPrint();
+
+    const doc = new jsPDF({
+      orientation: 'portrait',
+      unit: 'mm',
+      format: 'letter'
+    });
+
+    // Encabezado
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Reporte de Productos', 105, 15, { align: 'center' });
+
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    const date = new Date().toLocaleDateString('es-CO', {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
+    });
+    doc.text(`Fecha: ${date}`, 105, 22, { align: 'center' });
+
+    // Filtros aplicados
+    doc.setFontSize(9);
+    let filterText = '';
+    if (printOptions.nameFilter) {
+      filterText += `Nombre: "${printOptions.nameFilter}" | `;
+    }
+    if (printOptions.categoryFilter !== 'all') {
+      filterText += `Categoría: ${printOptions.categoryFilter} | `;
+    }
+    filterText += `Stock: ${printOptions.stockOrder === 'asc' ? '↑' : '↓'} | `;
+    filterText += `${printOptions.includeZeroStock ? 'Con' : 'Sin'} stock 0`;
+    doc.text(filterText, 105, 28, { align: 'center' });
+
+    // Tabla de productos
+    let y = 38;
+    const pageHeight = 279; // Altura de página carta en mm
+    const lineHeight = 7;
+    const marginBottom = 20;
+
+    // Encabezados de tabla
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.text('Código', 10, y);
+    doc.text('Nombre', 35, y);
+    doc.text('Categoría', 110, y);
+    doc.text('Stock', 155, y);
+    doc.text('Precio Final', 175, y);
+
+    // Línea separadora
+    doc.setLineWidth(0.3);
+    doc.line(10, y + 2, 200, y + 2);
+
+    y += lineHeight;
+
+    doc.setFont('helvetica', 'normal');
+
+    productsToShow.forEach((product) => {
+      // Verificar si necesitamos nueva página
+      if (y > pageHeight - marginBottom) {
+        doc.addPage();
+        y = 20;
+
+        // Re-dibujar encabezados en nueva página
+        doc.setFont('helvetica', 'bold');
+        doc.text('Código', 10, y);
+        doc.text('Nombre', 35, y);
+        doc.text('Categoría', 110, y);
+        doc.text('Stock', 155, y);
+        doc.text('Precio Final', 175, y);
+        doc.line(10, y + 2, 200, y + 2);
+        y += lineHeight;
+        doc.setFont('helvetica', 'normal');
+      }
+
+      // Contenido
+      doc.setFontSize(7);
+      doc.text(product.code.substring(0, 15), 10, y);
+      doc.text(product.name.substring(0, 35), 35, y);
+      doc.text(product.category.substring(0, 20), 110, y);
+
+      // Stock con color según nivel
+      const stockText = product.stock.toString();
+      doc.text(stockText, 155, y);
+
+      doc.text(formatCOP(product.final_price), 175, y);
+
+      y += lineHeight;
+    });
+
+    // Footer
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'italic');
+    const totalProducts = productsToShow.length;
+    doc.text(`Total de productos: ${totalProducts}`, 105, pageHeight - 10, { align: 'center' });
+
+    // Abrir ventana de impresión
+    doc.autoPrint();
+    const pdfBlob = doc.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+    const printWindow = window.open(pdfUrl, '_blank');
+
+    if (printWindow) {
+      printWindow.onload = () => {
+        printWindow.print();
+      };
+    }
+
+    toast.success('Abriendo ventana de impresión...');
   };
 
   const handleOpenDialog = (product?: Product) => {
@@ -352,10 +513,21 @@ export function Products() {
           <h2 className="text-3xl font-bold">Productos</h2>
           <p className="text-muted-foreground mt-1">Gestión de inventario</p>
         </div>
-        <Button onClick={() => handleOpenDialog()}>
-          <Plus className="h-4 w-4 mr-2" />
-          Nuevo Producto
-        </Button>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+          <Button
+            variant="outline"
+            onClick={() => setIsPrintOptionsOpen(true)}
+            className="border-green-600 text-green-600 hover:bg-green-50 dark:hover:bg-green-950 w-full sm:w-auto text-sm"
+          >
+            <Printer className="h-4 w-4 mr-2" />
+            <span className="hidden sm:inline">Imprimir Productos</span>
+            <span className="sm:hidden">Imprimir</span>
+          </Button>
+          <Button onClick={() => handleOpenDialog()} className="w-full sm:w-auto text-sm">
+            <Plus className="h-4 w-4 mr-2" />
+            Nuevo Producto
+          </Button>
+        </div>
       </div>
 
       {/* Buscador */}
@@ -873,12 +1045,302 @@ export function Products() {
           )}
           
           <DialogFooter>
-            <Button 
-              type="button" 
-              variant="outline" 
+            <Button
+              type="button"
+              variant="outline"
               onClick={() => setIsUnitIdsDialogOpen(false)}
             >
               Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Opciones de Impresión */}
+      <Dialog open={isPrintOptionsOpen} onOpenChange={setIsPrintOptionsOpen}>
+        <DialogContent className="max-w-[95vw] sm:max-w-2xl max-h-[95vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <Printer className="h-4 w-4 sm:h-5 sm:w-5" />
+              Filtros de Impresión
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              Filtra y ordena los productos a imprimir
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 sm:space-y-6 py-2 sm:py-4">
+            {/* Filtrar por Nombre */}
+            <div className="space-y-2 sm:space-y-3">
+              <Label className="text-sm sm:text-base font-semibold">Buscar por Nombre</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  type="text"
+                  placeholder="Escribe para buscar productos..."
+                  value={printOptions.nameFilter}
+                  onChange={(e) => setPrintOptions({ ...printOptions, nameFilter: e.target.value })}
+                  className="pl-10"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Deja vacío para incluir todos los productos
+              </p>
+            </div>
+
+            {/* Filtrar por Categoría */}
+            <div className="space-y-2 sm:space-y-3">
+              <Label className="text-sm sm:text-base font-semibold">Filtrar por Categoría</Label>
+              <Select
+                value={printOptions.categoryFilter}
+                onValueChange={(value) => setPrintOptions({ ...printOptions, categoryFilter: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecciona una categoría" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las categorías</SelectItem>
+                  {departments.map((dept) => (
+                    <SelectItem key={dept.id} value={dept.name}>
+                      {dept.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Ordenar Stock */}
+            <div className="space-y-2 sm:space-y-3">
+              <Label className="text-sm sm:text-base font-semibold">Ordenar por Stock</Label>
+              <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                <button
+                  onClick={() => setPrintOptions({ ...printOptions, stockOrder: 'asc' })}
+                  className={`p-2 sm:p-4 rounded-lg border-2 transition-all ${
+                    printOptions.stockOrder === 'asc'
+                      ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/30'
+                      : 'border-border hover:border-blue-300 dark:hover:border-blue-700'
+                  }`}
+                >
+                  <div className="font-medium text-sm sm:text-base">Menor a Mayor</div>
+                  <div className="text-xs sm:text-sm text-muted-foreground mt-0.5 sm:mt-1">↑</div>
+                </button>
+                <button
+                  onClick={() => setPrintOptions({ ...printOptions, stockOrder: 'desc' })}
+                  className={`p-2 sm:p-4 rounded-lg border-2 transition-all ${
+                    printOptions.stockOrder === 'desc'
+                      ? 'border-blue-600 bg-blue-50 dark:bg-blue-950/30'
+                      : 'border-border hover:border-blue-300 dark:hover:border-blue-700'
+                  }`}
+                >
+                  <div className="font-medium text-sm sm:text-base">Mayor a Menor</div>
+                  <div className="text-xs sm:text-sm text-muted-foreground mt-0.5 sm:mt-1">↓</div>
+                </button>
+              </div>
+            </div>
+
+            {/* Incluir productos sin stock */}
+            <div className="space-y-2 sm:space-y-3">
+              <div className="flex items-center justify-between p-3 sm:p-4 rounded-lg border bg-card gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="font-medium text-sm sm:text-base">Productos sin stock</div>
+                  <div className="text-xs sm:text-sm text-muted-foreground mt-0.5 sm:mt-1">
+                    Incluir productos con 0 unidades
+                  </div>
+                </div>
+                <button
+                  onClick={() => setPrintOptions({ ...printOptions, includeZeroStock: !printOptions.includeZeroStock })}
+                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                    printOptions.includeZeroStock ? 'bg-green-600' : 'bg-gray-300 dark:bg-gray-600'
+                  }`}
+                >
+                  <span
+                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                      printOptions.includeZeroStock ? 'translate-x-6' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+              </div>
+            </div>
+
+            {/* Resumen */}
+            <div className="bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg p-3 sm:p-4">
+              <div className="flex items-start gap-2 sm:gap-3">
+                <div className="text-green-600 dark:text-green-400 mt-0.5 text-sm sm:text-base">📊</div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs sm:text-sm font-medium text-green-900 dark:text-green-100 mb-2">
+                    Resumen de Filtros
+                  </p>
+                  <ul className="text-xs text-green-800 dark:text-green-200 space-y-0.5 sm:space-y-1">
+                    {printOptions.nameFilter && (
+                      <li className="truncate">• Nombre: <strong>"{printOptions.nameFilter}"</strong></li>
+                    )}
+                    {printOptions.categoryFilter !== 'all' && (
+                      <li className="truncate">• Categoría: <strong>{printOptions.categoryFilter}</strong></li>
+                    )}
+                    <li className="truncate">• Stock ordenado: <strong>{printOptions.stockOrder === 'asc' ? 'Menor a Mayor ↑' : 'Mayor a Menor ↓'}</strong></li>
+                    <li className="truncate">• {printOptions.includeZeroStock ? 'Incluye' : 'Excluye'} stock 0</li>
+                    <li className="truncate font-semibold">• Total: <strong className="text-base">{getProductsForPrint().length}</strong> productos</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 flex-col sm:flex-row">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsPrintOptionsOpen(false);
+                // Resetear filtros al cerrar
+                setPrintOptions({
+                  nameFilter: '',
+                  categoryFilter: 'all',
+                  stockOrder: 'asc',
+                  includeZeroStock: true
+                });
+              }}
+              className="w-full sm:w-auto text-sm"
+            >
+              Cancelar
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsPrintOptionsOpen(false);
+                setIsPrintPreviewOpen(true);
+              }}
+              className="w-full sm:w-auto border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950 text-sm"
+            >
+              <Eye className="h-4 w-4 mr-2" />
+              Vista Previa
+            </Button>
+            <Button
+              onClick={() => {
+                setIsPrintOptionsOpen(false);
+                handlePrintToPDF();
+              }}
+              className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white text-sm"
+              disabled={getProductsForPrint().length === 0}
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              Imprimir PDF
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Vista Previa */}
+      <Dialog open={isPrintPreviewOpen} onOpenChange={setIsPrintPreviewOpen}>
+        <DialogContent className="max-w-[95vw] sm:max-w-6xl max-h-[90vh] overflow-hidden flex flex-col p-3 sm:p-6">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <Eye className="h-4 w-4 sm:h-5 sm:w-5" />
+              Vista Previa
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              Revisa los productos a imprimir
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto -mx-3 sm:mx-0">
+            {/* Información de filtros */}
+            <div className="bg-muted/50 p-2 sm:p-4 rounded-lg mb-3 sm:mb-4 sticky top-0 z-10 mx-3 sm:mx-0">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+                <div className="flex flex-wrap items-center gap-2 sm:gap-6 text-xs sm:text-sm">
+                  {printOptions.nameFilter && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">Nombre:</span>
+                      <strong>"{printOptions.nameFilter}"</strong>
+                    </div>
+                  )}
+                  {printOptions.categoryFilter !== 'all' && (
+                    <div className="flex items-center gap-1">
+                      <span className="text-muted-foreground">Categoría:</span>
+                      <strong>{printOptions.categoryFilter}</strong>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground">Stock:</span>
+                    <strong>{printOptions.stockOrder === 'asc' ? '↑' : '↓'}</strong>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <span className="text-muted-foreground">Stock 0:</span>
+                    <strong>{printOptions.includeZeroStock ? 'Sí' : 'No'}</strong>
+                  </div>
+                </div>
+                <div className="text-xs sm:text-sm font-semibold whitespace-nowrap">
+                  Total: {getProductsForPrint().length}
+                </div>
+              </div>
+            </div>
+
+            {/* Tabla de productos - Scrollable horizontalmente en móvil */}
+            <div className="border rounded-lg overflow-hidden mx-3 sm:mx-0">
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[600px]">
+                  <thead className="bg-muted">
+                    <tr>
+                      <th className="text-left p-2 sm:p-3 font-semibold text-xs sm:text-sm">#</th>
+                      <th className="text-left p-2 sm:p-3 font-semibold text-xs sm:text-sm">Código</th>
+                      <th className="text-left p-2 sm:p-3 font-semibold text-xs sm:text-sm">Nombre</th>
+                      <th className="text-left p-2 sm:p-3 font-semibold text-xs sm:text-sm">Categoría</th>
+                      <th className="text-right p-2 sm:p-3 font-semibold text-xs sm:text-sm">Stock</th>
+                      <th className="text-right p-2 sm:p-3 font-semibold text-xs sm:text-sm">Precio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {getProductsForPrint().map((product, index) => (
+                      <tr
+                        key={product.id}
+                        className="border-t hover:bg-muted/30 transition-colors"
+                      >
+                        <td className="p-2 sm:p-3 text-muted-foreground text-xs sm:text-sm">{index + 1}</td>
+                        <td className="p-2 sm:p-3 font-mono text-xs sm:text-sm">{product.code}</td>
+                        <td className="p-2 sm:p-3 text-xs sm:text-sm">{product.name}</td>
+                        <td className="p-2 sm:p-3">
+                          <span className="inline-block px-1.5 sm:px-2 py-0.5 sm:py-1 rounded text-xs bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300">
+                            {product.category}
+                          </span>
+                        </td>
+                        <td className="p-2 sm:p-3 text-right">
+                          <span className={`font-semibold text-xs sm:text-sm ${
+                            product.stock === 0
+                              ? 'text-red-600 dark:text-red-400'
+                              : product.stock <= product.min_stock
+                              ? 'text-yellow-600 dark:text-yellow-400'
+                              : 'text-green-600 dark:text-green-400'
+                          }`}>
+                            {product.stock}
+                          </span>
+                        </td>
+                        <td className="p-2 sm:p-3 text-right font-semibold text-xs sm:text-sm">
+                          {formatCOP(product.final_price)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter className="mt-3 sm:mt-4 gap-2 flex-col sm:flex-row">
+            <Button
+              variant="outline"
+              onClick={() => setIsPrintPreviewOpen(false)}
+              className="w-full sm:w-auto text-sm"
+            >
+              Cerrar
+            </Button>
+            <Button
+              onClick={() => {
+                setIsPrintPreviewOpen(false);
+                handlePrintToPDF();
+              }}
+              className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white text-sm"
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              Imprimir PDF
             </Button>
           </DialogFooter>
         </DialogContent>

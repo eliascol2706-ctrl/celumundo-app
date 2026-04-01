@@ -50,6 +50,7 @@ import { toast } from "sonner";
 import { formatCOP } from "../lib/currency";
 import { jsPDF } from "jspdf";
 import JsBarcode from "jsbarcode";
+import { includesIgnoreAccents } from "../lib/string-utils";
 
 interface MovementItem {
   productId: string;
@@ -131,8 +132,9 @@ export function Movements() {
     // Aplicar búsqueda
     if (productSearchTerm) {
       filtered = filtered.filter((product) =>
-        product.name.toLowerCase().includes(productSearchTerm.toLowerCase()) ||
-        product.code.toLowerCase().includes(productSearchTerm.toLowerCase())
+        includesIgnoreAccents(product.name, productSearchTerm) ||
+        includesIgnoreAccents(product.code, productSearchTerm) ||
+        includesIgnoreAccents(product.category, productSearchTerm)
       );
     }
 

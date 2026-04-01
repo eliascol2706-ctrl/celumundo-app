@@ -31,6 +31,7 @@ import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Label } from '../components/ui/label';
 import { formatCOP } from '../lib/currency';
+import { includesIgnoreAccents } from '../lib/string-utils';
 
 const adminNavigation = [
   // Sección 1: Gestión de Inventario
@@ -272,10 +273,11 @@ export function Layout() {
     setProducts(data);
   };
 
-  // Filtrar productos por código o nombre
+  // Filtrar productos por código, nombre o categoría (ignorando acentos)
   const filteredProducts = products.filter(product =>
-    product.name.toLowerCase().includes(productSearchTerm.toLowerCase()) ||
-    product.code.toLowerCase().includes(productSearchTerm.toLowerCase())
+    includesIgnoreAccents(product.name, productSearchTerm) ||
+    includesIgnoreAccents(product.code, productSearchTerm) ||
+    includesIgnoreAccents(product.category, productSearchTerm)
   );
   
   // Redirigir a login si no hay usuario
@@ -640,6 +642,13 @@ export function Layout() {
                     </div>
 
                     <div className="space-y-1">
+                      <p className="text-xs font-medium text-green-700 dark:text-green-400">Categoría</p>
+                      <p className="text-lg font-semibold text-green-900 dark:text-green-100">
+                        {selectedProduct.category}
+                      </p>
+                    </div>
+
+                    <div className="space-y-1">
                       <p className="text-xs font-medium text-green-700 dark:text-green-400">Stock</p>
                       <p className={`text-lg font-bold ${
                         selectedProduct.stock <= selectedProduct.min_stock
@@ -653,15 +662,8 @@ export function Layout() {
                     </div>
 
                     <div className="space-y-1">
-                      <p className="text-xs font-medium text-green-700 dark:text-green-400">Categoría</p>
-                      <p className="text-sm font-semibold text-green-900 dark:text-green-100">
-                        {selectedProduct.category}
-                      </p>
-                    </div>
-
-                    <div className="space-y-1">
                       <p className="text-xs font-medium text-green-700 dark:text-green-400">Stock Mínimo</p>
-                      <p className="text-sm font-semibold text-green-900 dark:text-green-100">
+                      <p className="text-lg font-semibold text-green-900 dark:text-green-100">
                         {selectedProduct.min_stock} unidades
                       </p>
                     </div>
@@ -759,6 +761,9 @@ export function Layout() {
                               <div className="flex items-center gap-3 mb-2">
                                 <span className="font-mono font-bold text-sm bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
                                   {product.code}
+                                </span>
+                                <span className="text-xs bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300 px-2 py-1 rounded font-medium">
+                                  {product.category}
                                 </span>
                                 {product.use_unit_ids && (
                                   <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded">
