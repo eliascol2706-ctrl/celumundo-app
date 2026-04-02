@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
 import { Calendar, FileText, TrendingUp, AlertTriangle } from 'lucide-react';
-import { 
-  getInvoices, 
-  getDailyClosures, 
-  getMonthlyClosures, 
+import {
+  getInvoices,
+  getDailyClosures,
+  getMonthlyClosures,
   getReturns,
   getCustomers,
   getProducts,
   getColombiaDate,
   deleteDailyClosure,
   updateClosureDate,
+  getExpenses,
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -32,6 +33,7 @@ export function Closures() {
   const [returns, setReturns] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
 
   useEffect(() => {
     loadData();
@@ -50,13 +52,14 @@ export function Closures() {
   }, []);
 
   const loadData = async () => {
-    const [invoicesData, dailyClosuresData, monthlyClosuresData, returnsData, customersData, productsData] = await Promise.all([
+    const [invoicesData, dailyClosuresData, monthlyClosuresData, returnsData, customersData, productsData, expensesData] = await Promise.all([
       getInvoices(),
       getDailyClosures(),
       getMonthlyClosures(),
       getReturns(),
       getCustomers(),
       getProducts(),
+      getExpenses(),
     ]);
     setInvoices(invoicesData);
     setDailyClosures(dailyClosuresData);
@@ -64,6 +67,7 @@ export function Closures() {
     setReturns(returnsData);
     setCustomers(customersData);
     setProducts(productsData);
+    setExpenses(expensesData);
     
     // DEBUG: Ver qué cierres tenemos guardados
     console.log('[DEBUG Closures] Cierres diarios guardados:', dailyClosuresData.map(c => ({ id: c.id, date: c.date, closed_by: c.closed_by })));
@@ -230,7 +234,7 @@ export function Closures() {
     previousMonth.setMonth(previousMonth.getMonth() - 1);
     const previousMonthStr = previousMonth.toISOString().substring(0, 7);
     const currentMonthStr = new Date().toISOString().substring(0, 7);
-    
+
     const previousMonthInvoices = invoices.filter(inv => {
       const invDate = inv.date ? inv.date.split('T')[0] : '';
       return invDate.substring(0, 7) === previousMonthStr && inv.status === 'paid';
@@ -260,6 +264,13 @@ export function Closures() {
     const previousMonthPendingCredit = previousMonthCreditInvoices
       .filter(inv => inv.status === 'pending')
       .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+
+    // Calcular gastos del mes actual
+    const currentMonthExpenses = expenses.filter(expense => {
+      const expenseDate = expense.date ? expense.date.split('T')[0] : '';
+      return expenseDate.substring(0, 7) === currentMonthStr;
+    });
+    const totalExpenses = currentMonthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
     const comparisonData = [
       {
@@ -299,6 +310,7 @@ export function Closures() {
       totalRevenue,
       totalInvoices: currentMonthInvoices.length,
       totalPendingCredit,
+      totalExpenses,
       comparisonData,
       creditComparisonData,
       dailySalesData,
@@ -370,15 +382,27 @@ export function Closures() {
     const todayDate = new Date(today + 'T00:00:00');
     todayDate.setDate(todayDate.getDate() - 1);
     const yesterdayStr = todayDate.toISOString().split('T')[0];
-    
+
     const currentMonth = today.substring(0, 7);
     const yesterdayMonth = yesterdayStr.substring(0, 7);
-    
+
     // Si es día 1 de un nuevo mes (ayer era otro mes)
     if (currentMonth !== yesterdayMonth) {
       // Verificar si existe cierre mensual del mes anterior
       const hasPreviousMonthClosure = monthlyClosures.some(closure => closure.month === yesterdayMonth);
-      if (!hasPreviousMonthClosure && dailyClosures.length > 0) {
+
+      // Verificar si realmente hubo facturas en el mes anterior
+      const previousMonthInvoices = invoices.filter(inv => {
+        if (!inv.date) return false;
+        const invDate = typeof inv.date === 'string' ? inv.date.split('T')[0] : inv.date;
+        return invDate.substring(0, 7) === yesterdayMonth;
+      });
+
+      // Solo pedir el cierre mensual si:
+      // 1. NO existe un cierre mensual del mes anterior
+      // 2. Hay cierres diarios en total (el sistema está en uso)
+      // 3. Realmente hubo facturas en el mes anterior
+      if (!hasPreviousMonthClosure && dailyClosures.length > 0 && previousMonthInvoices.length > 0) {
         const previousMonthDate = new Date(yesterdayStr);
         const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
         return { needed: true, monthName };
@@ -618,7 +642,7 @@ export function Closures() {
                     {dailyClosures.slice().reverse().map((closure) => (
                       <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
                         <td className="py-2 px-3 text-sm">
-                          {new Date(closure.date).toLocaleDateString('es-ES')}
+                          {new Date(closure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}
                         </td>
                         <td className="py-2 px-3 text-center text-sm">{closure.total_invoices}</td>
                         <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_cash)}</td>
@@ -740,7 +764,7 @@ export function Closures() {
                     {monthlyStats.closures.map((closure) => (
                       <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
                         <td className="py-2 px-3 text-sm">
-                          {new Date(closure.date).toLocaleDateString('es-ES')}
+                          {new Date(closure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}
                         </td>
                         <td className="py-2 px-3 text-center text-sm">{closure.total_invoices}</td>
                         <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_cash)}</td>
@@ -785,7 +809,7 @@ export function Closures() {
                     {monthlyClosures.slice().reverse().map((closure) => (
                       <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
                         <td className="py-2 px-3 text-sm">
-                          {new Date(closure.month + '-01').toLocaleDateString('es-ES', { month: 'long' })}
+                          {new Date(closure.month + '-01').toLocaleDateString('es-ES', { month: 'long', timeZone: 'UTC' })}
                         </td>
                         <td className="py-2 px-3 text-center text-sm">{closure.year}</td>
                         <td className="py-2 px-3 text-center text-sm">{closure.totalInvoices}</td>

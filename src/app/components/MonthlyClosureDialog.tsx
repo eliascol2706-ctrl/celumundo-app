@@ -19,6 +19,7 @@ interface MonthlyClosureDialogProps {
     totalRevenue: number;
     totalInvoices: number;
     totalPendingCredit: number;
+    totalExpenses: number;
     closures: any[];
     comparisonData: any[];
     dailySalesData: any[];
@@ -223,7 +224,7 @@ export function MonthlyClosureDialog({
             {phase === 2 && (
               <div className="space-y-6">
                 {/* Final Stats */}
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <Card>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -266,6 +267,29 @@ export function MonthlyClosureDialog({
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
                         Saldo pendiente total
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Ganancias
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className={`text-2xl font-bold ${
+                        (monthlyStats.totalRevenue - monthlyStats.totalExpenses) >= 0
+                          ? 'text-blue-600 dark:text-blue-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}>
+                        COP {formatCOP(monthlyStats.totalRevenue - monthlyStats.totalExpenses)}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Ingresos - Gastos
+                      </p>
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                        Gastos: COP {formatCOP(monthlyStats.totalExpenses)}
                       </p>
                     </CardContent>
                   </Card>

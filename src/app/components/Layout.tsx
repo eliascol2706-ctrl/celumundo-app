@@ -25,7 +25,7 @@ import {
   EyeOff
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
-import { getCurrentUser, logoutUser, getSession, getProducts, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession } from '../lib/supabase';
+import { getCurrentUser, logoutUser, getSession, getProducts, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession, canCreateInvoice } from '../lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -512,7 +512,15 @@ export function Layout() {
 
       {/* Botón flotante de Nueva Factura (para todos los usuarios) */}
       <button
-        onClick={() => {
+        onClick={async () => {
+          // Verificar si se puede crear factura
+          const validation = await canCreateInvoice();
+
+          if (!validation.canCreate) {
+            alert(validation.message || 'No se pueden crear facturas en este momento.');
+            return;
+          }
+
           // Si estamos en la página de facturación, disparar evento para abrir el modal
           if (location.pathname === '/facturacion') {
             window.dispatchEvent(new CustomEvent('openCreateInvoiceDialog'));
@@ -525,7 +533,7 @@ export function Layout() {
             }, 100);
           }
         }}
-        className="fixed bottom-4 right-4 lg:bottom-6 lg:right-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl group"
+        className="fixed bottom-4 right-4 lg:bottom-6 lg:right-6 z-50 p-3 lg:p-4 rounded-full shadow-xl transition-all duration-300 group bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 hover:scale-110 hover:shadow-2xl cursor-pointer text-white"
         aria-label="Nueva Factura"
         title="Crear Nueva Factura"
       >
@@ -854,10 +862,7 @@ export function Layout() {
                       type="text"
                       placeholder="admin1"
                       value={adminUsername}
-                      onChange={(e) => {
-                        console.log('Admin username changed:', e.target.value);
-                        setAdminUsername(e.target.value);
-                      }}
+                      onChange={(e) => setAdminUsername(e.target.value)}
                       disabled={isSavingSettings}
                       className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
                     />
@@ -871,10 +876,7 @@ export function Layout() {
                         type={showAdminPassword ? "text" : "password"}
                         placeholder="••••••••"
                         value={adminPassword}
-                        onChange={(e) => {
-                          console.log('Admin password changed:', e.target.value);
-                          setAdminPassword(e.target.value);
-                        }}
+                        onChange={(e) => setAdminPassword(e.target.value)}
                         disabled={isSavingSettings}
                         className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 pr-10"
                       />

@@ -241,7 +241,11 @@ export function Departments() {
                     <div className="bg-green-50 dark:bg-green-950/30 rounded-lg p-3 text-center hover:scale-105 transition-transform duration-200">
                       <TrendingUp className="h-4 w-4 text-green-600 mx-auto mb-1" />
                       <div className="text-xl font-bold text-green-600">
-                        {stats.totalRevenue > 0 ? Math.round(stats.totalRevenue / 1000) : 0}K
+                        {stats.totalRevenue > 0
+                          ? stats.totalRevenue >= 1000000
+                            ? `${Math.round(stats.totalRevenue / 1000000)}M`
+                            : `${Math.round(stats.totalRevenue / 1000)}K`
+                          : '0K'}
                       </div>
                       <div className="text-xs text-muted-foreground">Ingresos</div>
                     </div>
