@@ -29,17 +29,19 @@ interface DailyClosureDialogProps {
   dayToClose: string; // YYYY-MM-DD date to close
   hourlyData: any[];
   topProducts: any[];
+  products: any[]; // Lista de productos para calcular costos
   onSuccess: () => void;
 }
 
-export function DailyClosureDialog({ 
-  open, 
-  onOpenChange, 
+export function DailyClosureDialog({
+  open,
+  onOpenChange,
   dailyStats,
   dayToClose,
   hourlyData,
   topProducts,
-  onSuccess 
+  products,
+  onSuccess
 }: DailyClosureDialogProps) {
   const [phase, setPhase] = useState<Phase>(1);
   const [invoiceFilter, setInvoiceFilter] = useState<'all' | 'regular' | 'wholesale'>('all');
@@ -49,6 +51,29 @@ export function DailyClosureDialog({
   const [isSuccess, setIsSuccess] = useState(false);
 
   const currentUser = getCurrentUser();
+
+  // Calcular el costo de los productos vendidos
+  const calculateTotalCost = () => {
+    let totalCost = 0;
+
+    dailyStats.invoices.forEach(invoice => {
+      // Solo contar facturas pagadas
+      if (invoice.status === 'paid') {
+        invoice.items.forEach((item: any) => {
+          // Buscar el producto para obtener su costo actual
+          const product = products.find(p => p.id === item.productId);
+          if (product) {
+            const itemCost = product.current_cost * item.quantity;
+            totalCost += itemCost;
+          }
+        });
+      }
+    });
+
+    return totalCost;
+  };
+
+  const totalCost = calculateTotalCost();
 
   // Calcular totales de efectivo y transferencias de las facturas del día
   const calculatePaymentTotals = () => {
@@ -192,7 +217,7 @@ export function DailyClosureDialog({
             {phase === 1 && (
               <div className="space-y-6">
                 {/* Top Stats */}
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <Card>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -229,6 +254,29 @@ export function DailyClosureDialog({
                       <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                         {formatCOP(paymentTotals.totalTransfer)}
                       </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Ganancias
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className={`text-2xl font-bold ${
+                        (paymentTotals.total - totalCost) >= 0
+                          ? 'text-blue-600 dark:text-blue-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}>
+                        COP {formatCOP(paymentTotals.total - totalCost)}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Ingresos - Costos
+                      </p>
+                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                        Costos: COP {formatCOP(totalCost)}
+                      </p>
                     </CardContent>
                   </Card>
                 </div>

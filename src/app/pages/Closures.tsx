@@ -842,6 +842,7 @@ export function Closures() {
         dayToClose={getDayToClose() || getColombiaDate()}
         hourlyData={hourlyData}
         topProducts={topProducts}
+        products={products}
         onSuccess={loadData}
       />
 
