@@ -74,6 +74,8 @@ export function Movements() {
   const [receiptDialogOpen, setReceiptDialogOpen] = useState(false);
   const [completedMovement, setCompletedMovement] = useState<any>(null);
   const printRef = useRef<HTMLDivElement>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
 
   // Estados para impresión de etiquetas
   const [labelDialogOpen, setLabelDialogOpen] = useState(false);
@@ -86,7 +88,7 @@ export function Movements() {
   const [unitIdDialogOpen, setUnitIdDialogOpen] = useState(false);
   const [currentItemIndex, setCurrentItemIndex] = useState<number | null>(null);
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
-  
+
   // Prevenir doble clic
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -185,6 +187,17 @@ export function Movements() {
 
     return matchesSearch && matchesType;
   });
+
+  // Paginación
+  const totalPages = Math.ceil(filteredMovements.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedMovements = filteredMovements.slice(startIndex, endIndex);
+
+  // Reset page cuando cambian los filtros
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterType]);
 
   // Generar siguiente ID única para un producto
   const generateNextUnitId = (registeredIds: string[]): string => {
@@ -1071,7 +1084,7 @@ export function Movements() {
                 </tr>
               </thead>
               <tbody>
-                {filteredMovements.map((movement) => (
+                {paginatedMovements.map((movement) => (
                   <tr
                     key={movement.id}
                     className="border-b border-gray-100 hover:bg-gray-50"
@@ -1151,7 +1164,7 @@ export function Movements() {
                     </td>
                   </tr>
                 ))}
-                {filteredMovements.length === 0 && (
+                {paginatedMovements.length === 0 && (
                   <tr>
                     <td
                       colSpan={8}
@@ -1164,6 +1177,57 @@ export function Movements() {
               </tbody>
             </table>
           </div>
+
+          {/* Paginación */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200">
+              <div className="text-sm text-gray-600">
+                Mostrando {startIndex + 1} - {Math.min(endIndex, filteredMovements.length)} de {filteredMovements.length} movimientos
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Anterior
+                </Button>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                    if (
+                      page === 1 ||
+                      page === totalPages ||
+                      (page >= currentPage - 1 && page <= currentPage + 1)
+                    ) {
+                      return (
+                        <Button
+                          key={page}
+                          variant={currentPage === page ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setCurrentPage(page)}
+                          className="min-w-[40px]"
+                        >
+                          {page}
+                        </Button>
+                      );
+                    } else if (page === currentPage - 2 || page === currentPage + 2) {
+                      return <span key={page} className="px-2 text-gray-500">...</span>;
+                    }
+                    return null;
+                  })}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Siguiente
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

@@ -24,6 +24,8 @@ export function Customers() {
   const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [paymentForm, setPaymentForm] = useState({
     amount: '',
     paymentMethod: 'cash',
@@ -146,6 +148,17 @@ export function Customers() {
     customer.document.includes(searchTerm)
   );
 
+  // Paginación
+  const totalPages = Math.ceil(filteredCustomers.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedCustomers = filteredCustomers.slice(startIndex, endIndex);
+
+  // Reset page cuando cambia la búsqueda
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
+
   // Estadísticas generales
   const totalCreditBalance = invoices
     .filter(inv => inv.is_credit && inv.status === 'pending')
@@ -230,7 +243,7 @@ export function Customers() {
 
       {/* Lista de Clientes */}
       <div className="grid grid-cols-1 gap-4">
-        {filteredCustomers.map((customer) => {
+        {paginatedCustomers.map((customer) => {
           const customerInvoices = getCustomerInvoices(customer.document);
           const pendingInvoices = customerInvoices.filter(inv => inv.status === 'pending');
           const totalDebt = pendingInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
@@ -337,7 +350,7 @@ export function Customers() {
           );
         })}
 
-        {filteredCustomers.length === 0 && (
+        {paginatedCustomers.length === 0 && (
           <Card>
             <CardContent className="p-12 text-center">
               <User className="h-12 w-12 text-gray-300 mx-auto mb-4" />
@@ -349,6 +362,57 @@ export function Customers() {
           </Card>
         )}
       </div>
+
+      {/* Paginación */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-4">
+          <div className="text-sm text-gray-600 dark:text-gray-400">
+            Mostrando {startIndex + 1} - {Math.min(endIndex, filteredCustomers.length)} de {filteredCustomers.length} clientes
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+            >
+              Anterior
+            </Button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                if (
+                  page === 1 ||
+                  page === totalPages ||
+                  (page >= currentPage - 1 && page <= currentPage + 1)
+                ) {
+                  return (
+                    <Button
+                      key={page}
+                      variant={currentPage === page ? 'default' : 'outline'}
+                      size="sm"
+                      onClick={() => setCurrentPage(page)}
+                      className="min-w-[40px]"
+                    >
+                      {page}
+                    </Button>
+                  );
+                } else if (page === currentPage - 2 || page === currentPage + 2) {
+                  return <span key={page} className="px-2 text-gray-500">...</span>;
+                }
+                return null;
+              })}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={currentPage === totalPages}
+            >
+              Siguiente
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Dialog de Abono */}
       <Dialog open={isPaymentDialogOpen} onOpenChange={setIsPaymentDialogOpen}>

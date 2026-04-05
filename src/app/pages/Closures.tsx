@@ -26,6 +26,9 @@ export function Closures() {
   const [view, setView] = useState<ClosureView>('daily');
   const [isDailyDialogOpen, setIsDailyDialogOpen] = useState(false);
   const [isMonthlyDialogOpen, setIsMonthlyDialogOpen] = useState(false);
+  const [currentPageDaily, setCurrentPageDaily] = useState(1);
+  const [currentPageMonthly, setCurrentPageMonthly] = useState(1);
+  const itemsPerPage = 10;
 
   const [invoices, setInvoices] = useState<any[]>([]);
   const [dailyClosures, setDailyClosures] = useState<any[]>([]);
@@ -639,30 +642,94 @@ export function Closures() {
                     </tr>
                   </thead>
                   <tbody>
-                    {dailyClosures.slice().reverse().map((closure) => (
-                      <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
-                        <td className="py-2 px-3 text-sm">
-                          {new Date(closure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}
-                        </td>
-                        <td className="py-2 px-3 text-center text-sm">{closure.total_invoices}</td>
-                        <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_cash)}</td>
-                        <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_transfer)}</td>
-                        <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
-                          COP {formatCOP(closure.total)}
-                        </td>
-                        <td className="py-2 px-3 text-sm">{closure.closed_by}</td>
-                      </tr>
-                    ))}
-                    {dailyClosures.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="py-8 text-center text-muted-foreground">
-                          No hay cierres registrados
-                        </td>
-                      </tr>
-                    )}
+                    {(() => {
+                      const reversedClosures = dailyClosures.slice().reverse();
+                      const totalPages = Math.ceil(reversedClosures.length / itemsPerPage);
+                      const startIndex = (currentPageDaily - 1) * itemsPerPage;
+                      const endIndex = startIndex + itemsPerPage;
+                      const paginatedClosures = reversedClosures.slice(startIndex, endIndex);
+
+                      return (
+                        <>
+                          {paginatedClosures.map((closure) => (
+                            <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
+                              <td className="py-2 px-3 text-sm">
+                                {new Date(closure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}
+                              </td>
+                              <td className="py-2 px-3 text-center text-sm">{closure.total_invoices}</td>
+                              <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_cash)}</td>
+                              <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_transfer)}</td>
+                              <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
+                                COP {formatCOP(closure.total)}
+                              </td>
+                              <td className="py-2 px-3 text-sm">{closure.closed_by}</td>
+                            </tr>
+                          ))}
+                          {paginatedClosures.length === 0 && (
+                            <tr>
+                              <td colSpan={6} className="py-8 text-center text-muted-foreground">
+                                No hay cierres registrados
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>
+
+              {/* Paginación Diaria */}
+              {dailyClosures.length > itemsPerPage && (
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
+                  <div className="text-sm text-muted-foreground">
+                    Mostrando {(currentPageDaily - 1) * itemsPerPage + 1} - {Math.min(currentPageDaily * itemsPerPage, dailyClosures.length)} de {dailyClosures.length} cierres
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPageDaily(prev => Math.max(1, prev - 1))}
+                      disabled={currentPageDaily === 1}
+                    >
+                      Anterior
+                    </Button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.ceil(dailyClosures.length / itemsPerPage) }, (_, i) => i + 1).map(page => {
+                        const totalPages = Math.ceil(dailyClosures.length / itemsPerPage);
+                        if (
+                          page === 1 ||
+                          page === totalPages ||
+                          (page >= currentPageDaily - 1 && page <= currentPageDaily + 1)
+                        ) {
+                          return (
+                            <Button
+                              key={page}
+                              variant={currentPageDaily === page ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setCurrentPageDaily(page)}
+                              className="min-w-[40px]"
+                            >
+                              {page}
+                            </Button>
+                          );
+                        } else if (page === currentPageDaily - 2 || page === currentPageDaily + 2) {
+                          return <span key={page} className="px-2 text-muted-foreground">...</span>;
+                        }
+                        return null;
+                      })}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPageDaily(prev => Math.min(Math.ceil(dailyClosures.length / itemsPerPage), prev + 1))}
+                      disabled={currentPageDaily === Math.ceil(dailyClosures.length / itemsPerPage)}
+                    >
+                      Siguiente
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </>
@@ -806,29 +873,93 @@ export function Closures() {
                     </tr>
                   </thead>
                   <tbody>
-                    {monthlyClosures.slice().reverse().map((closure) => (
-                      <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
-                        <td className="py-2 px-3 text-sm">
-                          {new Date(closure.month + '-01').toLocaleDateString('es-ES', { month: 'long', timeZone: 'UTC' })}
-                        </td>
-                        <td className="py-2 px-3 text-center text-sm">{closure.year}</td>
-                        <td className="py-2 px-3 text-center text-sm">{closure.totalInvoices}</td>
-                        <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
-                          COP {formatCOP(closure.totalRevenue)}
-                        </td>
-                        <td className="py-2 px-3 text-sm">{closure.closedBy}</td>
-                      </tr>
-                    ))}
-                    {monthlyClosures.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="py-8 text-center text-muted-foreground">
-                          No hay cierres mensuales registrados
-                        </td>
-                      </tr>
-                    )}
+                    {(() => {
+                      const reversedClosures = monthlyClosures.slice().reverse();
+                      const totalPages = Math.ceil(reversedClosures.length / itemsPerPage);
+                      const startIndex = (currentPageMonthly - 1) * itemsPerPage;
+                      const endIndex = startIndex + itemsPerPage;
+                      const paginatedClosures = reversedClosures.slice(startIndex, endIndex);
+
+                      return (
+                        <>
+                          {paginatedClosures.map((closure) => (
+                            <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
+                              <td className="py-2 px-3 text-sm">
+                                {new Date(closure.month + '-01').toLocaleDateString('es-ES', { month: 'long', timeZone: 'UTC' })}
+                              </td>
+                              <td className="py-2 px-3 text-center text-sm">{closure.year}</td>
+                              <td className="py-2 px-3 text-center text-sm">{closure.totalInvoices}</td>
+                              <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
+                                COP {formatCOP(closure.totalRevenue)}
+                              </td>
+                              <td className="py-2 px-3 text-sm">{closure.closedBy}</td>
+                            </tr>
+                          ))}
+                          {paginatedClosures.length === 0 && (
+                            <tr>
+                              <td colSpan={5} className="py-8 text-center text-muted-foreground">
+                                No hay cierres mensuales registrados
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>
+
+              {/* Paginación Mensual */}
+              {monthlyClosures.length > itemsPerPage && (
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
+                  <div className="text-sm text-muted-foreground">
+                    Mostrando {(currentPageMonthly - 1) * itemsPerPage + 1} - {Math.min(currentPageMonthly * itemsPerPage, monthlyClosures.length)} de {monthlyClosures.length} cierres
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPageMonthly(prev => Math.max(1, prev - 1))}
+                      disabled={currentPageMonthly === 1}
+                    >
+                      Anterior
+                    </Button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.ceil(monthlyClosures.length / itemsPerPage) }, (_, i) => i + 1).map(page => {
+                        const totalPages = Math.ceil(monthlyClosures.length / itemsPerPage);
+                        if (
+                          page === 1 ||
+                          page === totalPages ||
+                          (page >= currentPageMonthly - 1 && page <= currentPageMonthly + 1)
+                        ) {
+                          return (
+                            <Button
+                              key={page}
+                              variant={currentPageMonthly === page ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setCurrentPageMonthly(page)}
+                              className="min-w-[40px]"
+                            >
+                              {page}
+                            </Button>
+                          );
+                        } else if (page === currentPageMonthly - 2 || page === currentPageMonthly + 2) {
+                          return <span key={page} className="px-2 text-muted-foreground">...</span>;
+                        }
+                        return null;
+                      })}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPageMonthly(prev => Math.min(Math.ceil(monthlyClosures.length / itemsPerPage), prev + 1))}
+                      disabled={currentPageMonthly === Math.ceil(monthlyClosures.length / itemsPerPage)}
+                    >
+                      Siguiente
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
         </>

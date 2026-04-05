@@ -20,6 +20,8 @@ export function Expenses() {
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7)); // YYYY-MM
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
   const [formData, setFormData] = useState({
     date: new Date().toISOString().split('T')[0],
     category: '',
@@ -71,6 +73,17 @@ export function Expenses() {
     expense.supplier.toLowerCase().includes(searchTerm.toLowerCase()) ||
     expense.reference.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  // Paginación
+  const totalPages = Math.ceil(filteredExpenses.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedExpenses = filteredExpenses.slice(startIndex, endIndex);
+
+  // Reset page cuando cambian los filtros
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, dateFilter, selectedMonth, dateFrom, dateTo]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -335,7 +348,7 @@ export function Expenses() {
                 </tr>
               </thead>
               <tbody>
-                {filteredExpenses.map((expense) => (
+                {paginatedExpenses.map((expense) => (
                   <tr key={expense.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
                     <td className="py-3 px-4 text-sm text-gray-700 dark:text-gray-300">
                       {new Date(expense.date).toLocaleDateString('es-ES')}
@@ -389,7 +402,7 @@ export function Expenses() {
                     </td>
                   </tr>
                 ))}
-                {filteredExpenses.length === 0 && (
+                {paginatedExpenses.length === 0 && (
                   <tr>
                     <td colSpan={8} className="py-8 text-center text-gray-500 dark:text-gray-400">
                       No se encontraron gastos
@@ -399,6 +412,57 @@ export function Expenses() {
               </tbody>
             </table>
           </div>
+
+          {/* Paginación */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                Mostrando {startIndex + 1} - {Math.min(endIndex, filteredExpenses.length)} de {filteredExpenses.length} gastos
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Anterior
+                </Button>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                    if (
+                      page === 1 ||
+                      page === totalPages ||
+                      (page >= currentPage - 1 && page <= currentPage + 1)
+                    ) {
+                      return (
+                        <Button
+                          key={page}
+                          variant={currentPage === page ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setCurrentPage(page)}
+                          className="min-w-[40px]"
+                        >
+                          {page}
+                        </Button>
+                      );
+                    } else if (page === currentPage - 2 || page === currentPage + 2) {
+                      return <span key={page} className="px-2 text-gray-500">...</span>;
+                    }
+                    return null;
+                  })}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Siguiente
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

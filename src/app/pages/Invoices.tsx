@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Plus, Search, Eye, FileText, Printer, Download, X, Info, Scan, Hash, RotateCcw, CreditCard, Trash2, Receipt, Calendar } from 'lucide-react';
+import { Plus, Search, Eye, FileText, Printer, Download, X, Info, Scan, Hash, RotateCcw, CreditCard, Trash2, Receipt, Calendar, Loader2 } from 'lucide-react';
 import { 
   getInvoices, 
   getProducts, 
@@ -87,6 +87,7 @@ interface Product {
 export function Invoices() {
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState<'recent' | 'highest' | 'lowest' | 'oldest'>('recent');
   const [periodFilter, setPeriodFilter] = useState<'current_month' | 'last_month' | 'last_3_months' | 'last_6_months' | 'last_year' | 'all'>('current_month');
@@ -137,6 +138,7 @@ export function Invoices() {
   
   // Estado para prevenir doble clic
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isValidating, setIsValidating] = useState(false); // Para la validación de canCreateInvoice
   
   // Dialog de método de pago
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
@@ -315,12 +317,20 @@ export function Invoices() {
   }, []); // Solo se ejecuta al montar/desmontar el componente
 
   const loadData = async () => {
-    const [invoicesData, productsData] = await Promise.all([
-      getInvoices(),
-      getProducts(),
-    ]);
-    setInvoices(invoicesData);
-    setProducts(productsData);
+    try {
+      setIsLoading(true);
+      const [invoicesData, productsData] = await Promise.all([
+        getInvoices(),
+        getProducts(),
+      ]);
+      setInvoices(invoicesData);
+      setProducts(productsData);
+    } catch (error) {
+      console.error('Error loading data:', error);
+      toast.error('Error al cargar los datos');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const getSortedInvoices = () => {
@@ -434,33 +444,43 @@ export function Invoices() {
   }, [invoiceToPrint]);
 
   const handleOpenCreateDialog = async () => {
-    // Validar si se puede crear una factura (verificar cierre pendiente)
-    const validation = await canCreateInvoice();
-    if (!validation.canCreate) {
-      const toastMessage = validation.message || 'No se puede crear factura en este momento';
-      const toastDuration = validation.requiresMonthlyClose ? 10000 : 8000;
-      const buttonLabel = validation.requiresMonthlyClose ? '🔒 Realizar Cierre Mensual' : 'Ir a Cierres';
-      
-      toast.error(toastMessage, {
-        duration: toastDuration,
-        action: {
-          label: buttonLabel,
-          onClick: () => window.location.href = '/cierres'
-        }
-      });
-      return;
+    try {
+      setIsValidating(true);
+
+      // Validar si se puede crear una factura (verificar cierre pendiente)
+      const validation = await canCreateInvoice();
+
+      if (!validation.canCreate) {
+        const toastMessage = validation.message || 'No se puede crear factura en este momento';
+        const toastDuration = validation.requiresMonthlyClose ? 10000 : 8000;
+        const buttonLabel = validation.requiresMonthlyClose ? '🔒 Realizar Cierre Mensual' : 'Ir a Cierres';
+
+        toast.error(toastMessage, {
+          duration: toastDuration,
+          action: {
+            label: buttonLabel,
+            onClick: () => window.location.href = '/cierres'
+          }
+        });
+        return;
+      }
+
+      setInvoiceType('regular');
+      setFormData({ customerName: '', customerDocument: '' });
+      setInvoiceItems([]);
+      setCurrentItem({ productId: '', quantity: '1', price: '' });
+      setSelectedProductInfo(null);
+      setIsCreateDialogOpen(true);
+
+      // Recargar productos cada vez que se abre el diálogo para mostrar productos recién creados
+      const productsData = await getProducts();
+      setProducts(productsData);
+    } catch (error) {
+      console.error('Error opening create dialog:', error);
+      toast.error('Error al abrir el diálogo de facturación');
+    } finally {
+      setIsValidating(false);
     }
-    
-    setInvoiceType('regular');
-    setFormData({ customerName: '', customerDocument: '' });
-    setInvoiceItems([]);
-    setCurrentItem({ productId: '', quantity: '1', price: '' });
-    setSelectedProductInfo(null);
-    setIsCreateDialogOpen(true);
-    
-    // Recargar productos cada vez que se abre el diálogo para mostrar productos recién creados
-    const productsData = await getProducts();
-    setProducts(productsData);
   };
 
   const handleProductChange = (productId: string) => {
@@ -553,47 +573,20 @@ export function Invoices() {
   };
 
   const handleAddProductDirect = (product: Product) => {
-    // Verificar stock SOLO para productos con IDs únicas
-    if (product.use_unit_ids && product.stock <= 0) {
-      toast.error(`${product.name} requiere IDs únicas y no tiene stock disponible`);
-      return;
-    }
-
-    if (invoiceItems.some(item => item.productId === product.id)) {
-      toast.error('Este producto ya está agregado');
-      return;
-    }
-
-    const defaultPrice = invoiceType === 'regular' ? product.final_price : product.price2;
-    
-    const newItem: InvoiceItem = {
+    // En lugar de agregar directamente, seleccionar el producto en el formulario
+    setCurrentItem({
       productId: product.id,
-      productName: product.name,
-      productCode: product.code,
-      quantity: 1,
-      price: defaultPrice,
-      total: defaultPrice,
-      useUnitIds: product.use_unit_ids,
-      unitIds: [],
-      availableIds: product.use_unit_ids ? (product.registered_ids || []) : undefined,
-    };
+      quantity: '1',
+      price: (invoiceType === 'regular' ? product.final_price : product.price2).toString(),
+    });
 
-    // Si usa IDs, abrir selector
-    if (product.use_unit_ids) {
-      if ((product.registered_ids || []).length === 0) {
-        toast.error('Producto sin IDs disponibles');
-        return;
-      }
-      setInvoiceItems([...invoiceItems, newItem]);
-      setCurrentItemIndex(invoiceItems.length);
-      setSelectedUnitIds([]);
-      setUnitIdDialogOpen(true);
-    } else {
-      setInvoiceItems([...invoiceItems, newItem]);
-      toast.success('Producto agregado');
-    }
-    
+    // Mostrar información del producto
+    setSelectedProductInfo(product);
+
+    // Cerrar el diálogo de búsqueda
     setIsProductSelectDialogOpen(false);
+
+    toast.success(`Producto seleccionado: ${product.name}`);
   };
 
   const handleRemoveItem = (index: number) => {
@@ -1267,6 +1260,17 @@ export function Invoices() {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
+          <p className="text-lg font-medium text-gray-700 dark:text-gray-300">Cargando facturas...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -1276,9 +1280,18 @@ export function Invoices() {
             Sistema de facturación con gestión de IDs únicas
           </p>
         </div>
-        <Button onClick={handleOpenCreateDialog} size="lg">
-          <Plus className="h-5 w-5 mr-2" />
-          Nueva Factura
+        <Button onClick={handleOpenCreateDialog} size="lg" disabled={isValidating}>
+          {isValidating ? (
+            <>
+              <Loader2 className="h-5 w-5 mr-2 animate-spin" />
+              Validando...
+            </>
+          ) : (
+            <>
+              <Plus className="h-5 w-5 mr-2" />
+              Nueva Factura
+            </>
+          )}
         </Button>
       </div>
 
@@ -2073,7 +2086,7 @@ export function Invoices() {
           <DialogHeader>
             <DialogTitle>Buscar Producto</DialogTitle>
             <DialogDescription>
-              Haz clic en un producto para agregarlo a la factura
+              Haz clic en un producto para seleccionarlo en el formulario de factura
             </DialogDescription>
           </DialogHeader>
 
@@ -2306,6 +2319,25 @@ export function Invoices() {
                       )}
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* Desglose de métodos de pago */}
+              <div className="border-t border-border pt-4">
+                <h4 className="font-semibold mb-3 text-sm">Métodos de Pago</h4>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span>Efectivo:</span>
+                    <span className="font-medium">{formatCOP(selectedInvoice.payment_cash || 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Transferencias:</span>
+                    <span className="font-medium">{formatCOP(selectedInvoice.payment_transfer || 0)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Otros:</span>
+                    <span className="font-medium">{formatCOP(selectedInvoice.payment_other || 0)}</span>
+                  </div>
                 </div>
               </div>
 

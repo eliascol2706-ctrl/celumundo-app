@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List, X, Printer, Eye } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List, X, Printer, Eye, Loader2 } from 'lucide-react';
 import { getProducts, addProduct, updateProduct, deleteProduct, getDepartments, type Product, type Department, supabase } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -16,7 +16,19 @@ import { jsPDF } from 'jspdf';
 export function Products() {
   const [products, setProducts] = useState<Product[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+
+  // Estados para búsqueda avanzada
+  const [searchCode, setSearchCode] = useState('');
+  const [searchName, setSearchName] = useState('');
+  const [searchDescription, setSearchDescription] = useState('');
+  const [searchCategory, setSearchCategory] = useState('all');
+
+  // Estados para paginación
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [isUnitIdsDialogOpen, setIsUnitIdsDialogOpen] = useState(false);
@@ -52,8 +64,18 @@ export function Products() {
   });
 
   useEffect(() => {
-    loadProducts();
-    loadDepartments();
+    const loadData = async () => {
+      try {
+        setIsLoading(true);
+        await Promise.all([loadProducts(), loadDepartments()]);
+      } catch (error) {
+        console.error('Error loading data:', error);
+        toast.error('Error al cargar los datos');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    loadData();
   }, []);
 
   const loadDepartments = async () => {
@@ -104,12 +126,31 @@ export function Products() {
     return `${safeBaseCode.slice(0, -1)}-${safeVariantNumber.toString().padStart(4, '0')}A`;
   };
 
-  const filteredProducts = products.filter(product =>
-    includesIgnoreAccents(product.name, searchTerm) ||
-    includesIgnoreAccents(product.code, searchTerm) ||
-    (product.full_code && includesIgnoreAccents(product.full_code, searchTerm)) ||
-    includesIgnoreAccents(product.category, searchTerm)
-  );
+  // Filtrado avanzado de productos
+  const filteredProducts = products.filter(product => {
+    const matchesCode = searchCode === '' || includesIgnoreAccents(product.code, searchCode);
+    const matchesName = searchName === '' || includesIgnoreAccents(product.name, searchName);
+    const matchesDescription = searchDescription === '' || includesIgnoreAccents(product.description, searchDescription);
+    const matchesCategory = searchCategory === 'all' || product.category === searchCategory;
+
+    return matchesCode && matchesName && matchesDescription && matchesCategory;
+  });
+
+  // Obtener categorías únicas (filtrar valores vacíos)
+  const uniqueCategories = Array.from(new Set(products.map(p => p.category)))
+    .filter(category => category && category.trim() !== '')
+    .sort();
+
+  // Calcular paginación
+  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
+
+  // Resetear a página 1 cuando cambian los filtros
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchCode, searchName, searchDescription, searchCategory]);
 
   // Calcular precio desde margen
   const calculatePriceFromMargin = (cost: number, margin: number): number => {
@@ -506,6 +547,17 @@ export function Products() {
     }
   };
 
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="text-center space-y-4">
+          <Loader2 className="h-12 w-12 animate-spin text-blue-600 mx-auto" />
+          <p className="text-lg font-medium text-gray-700 dark:text-gray-300">Cargando productos...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -530,26 +582,80 @@ export function Products() {
         </div>
       </div>
 
-      {/* Buscador */}
+      {/* Buscador Avanzado */}
       <Card>
         <CardContent className="pt-6">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              type="text"
-              placeholder="Buscar productos por nombre, código o categoría..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
-            />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div>
+              <Input
+                type="text"
+                placeholder="Buscar por código..."
+                value={searchCode}
+                onChange={(e) => setSearchCode(e.target.value)}
+              />
+            </div>
+            <div>
+              <Input
+                type="text"
+                placeholder="Buscar por nombre..."
+                value={searchName}
+                onChange={(e) => setSearchName(e.target.value)}
+              />
+            </div>
+            <div>
+              <Input
+                type="text"
+                placeholder="Buscar por descripción..."
+                value={searchDescription}
+                onChange={(e) => setSearchDescription(e.target.value)}
+              />
+            </div>
+            <div>
+              <Select value={searchCategory} onValueChange={setSearchCategory}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Todas las categorías" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todas las categorías</SelectItem>
+                  {uniqueCategories.map((category) => (
+                    <SelectItem key={category} value={category}>
+                      {category}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </CardContent>
       </Card>
 
       {/* Lista de productos */}
       <Card>
-        <CardHeader>
+        <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Lista de Productos ({filteredProducts.length})</CardTitle>
+          {totalPages > 1 && (
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                disabled={currentPage === 1}
+              >
+                Anterior
+              </Button>
+              <span className="text-sm text-muted-foreground">
+                Página {currentPage} de {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                disabled={currentPage === totalPages}
+              >
+                Siguiente
+              </Button>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
@@ -565,7 +671,7 @@ export function Products() {
                 </tr>
               </thead>
               <tbody>
-                {filteredProducts.map((product) => {
+                {paginatedProducts.map((product) => {
                   return (
                     <tr key={product.id} className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800/50">
                       <td className="py-3 px-4">
@@ -646,7 +752,7 @@ export function Products() {
                     </tr>
                   );
                 })}
-                {filteredProducts.length === 0 && (
+                {paginatedProducts.length === 0 && (
                   <tr>
                     <td colSpan={6} className="py-8 text-center text-gray-500 dark:text-gray-400">
                       No se encontraron productos
