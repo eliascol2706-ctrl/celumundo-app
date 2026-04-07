@@ -8,6 +8,7 @@ import {
   getCustomers,
   getProducts,
   getColombiaDate,
+  extractColombiaDate,
   deleteDailyClosure,
   updateClosureDate,
   getExpenses,
@@ -37,15 +38,6 @@ export function Closures() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
-
-  const normalizeToColombia = (date: string | Date) => {
-  const d = new Date(date);
-  
-  // Ajuste manual UTC-5 (Colombia)
-  d.setHours(d.getHours() - 5);
-  
-  return d.toISOString().split('T')[0];
-};
 
   useEffect(() => {
     loadData();
@@ -85,14 +77,14 @@ export function Closures() {
     console.log('[DEBUG Closures] Cierres diarios guardados:', dailyClosuresData.map(c => ({ id: c.id, date: c.date, closed_by: c.closed_by })));
     console.log('[DEBUG Closures] Fecha actual Colombia:', getColombiaDate());
     
-    // Detectar cierres incorrectos del día 28 cuando deberían ser del 27
+    // Detectar cierres incorrectos
     const today = getColombiaDate();
     const todayDate = new Date(today + 'T00:00:00');
     todayDate.setDate(todayDate.getDate() - 1);
     const yesterday = todayDate.toISOString().split('T')[0];
     
-    const todayClosures = dailyClosuresData.filter(c => c.date?.split('T')[0] === today);
-    const yesterdayClosures = dailyClosuresData.filter(c => c.date?.split('T')[0] === yesterday);
+    const todayClosures = dailyClosuresData.filter(c => extractColombiaDate(c.date) === today);
+    const yesterdayClosures = dailyClosuresData.filter(c => extractColombiaDate(c.date) === yesterday);
     
     if (todayClosures.length > 0 && yesterdayClosures.length === 0) {
       console.warn('⚠️ ADVERTENCIA: Hay cierres del día de hoy, pero NO hay cierres de ayer.');
@@ -107,7 +99,7 @@ export function Closures() {
     const today = getColombiaDate();
     return invoices.filter(inv => {
       if (!inv.date) return false;
-      const invDate = normalizeToColombia(inv.date);
+      const invDate = extractColombiaDate(inv.date);
       return invDate === today;
     });
   };
@@ -118,7 +110,7 @@ export function Closures() {
     
     // Verificar si ya existe un cierre para hoy
     const hasTodayClosure = dailyClosures.some(closure => {
-    const closureDate = normalizeToColombia(closure.date);
+      const closureDate = extractColombiaDate(closure.date);
       return closureDate === today;
     });
     
@@ -130,7 +122,7 @@ export function Closures() {
     // Verificar si hay facturas de hoy
     const todayInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
-      const invDate = normalizeToColombia(inv.date);
+      const invDate = extractColombiaDate(inv.date);
       return invDate === today;
     });
     
@@ -142,16 +134,16 @@ export function Closures() {
     // Si no hay facturas de hoy, buscar el día anterior sin cierre
     const todayDate = new Date(today + 'T00:00:00');
     todayDate.setDate(todayDate.getDate() - 1);
-    const yesterday = normalizeToColombia(todayDate);
+    const yesterday = todayDate.toISOString().split('T')[0];
     
     const hasYesterdayClosure = dailyClosures.some(closure => {
-      const closureDate = normalizeToColombia(closure.date);
+      const closureDate = extractColombiaDate(closure.date);
       return closureDate === yesterday;
     });
     
     const yesterdayInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
-      const invDate = normalizeToColombia(inv.date);
+      const invDate = extractColombiaDate(inv.date);
       return invDate === yesterday;
     });
     
@@ -171,7 +163,7 @@ export function Closures() {
     
     return invoices.filter(inv => {
       if (!inv.date) return false;
-      const invDate = normalizeToColombia(inv.date);
+      const invDate = extractColombiaDate(inv.date);
       return invDate === dayToClose;
     });
   };
@@ -179,7 +171,7 @@ export function Closures() {
   const getCurrentMonthClosures = () => {
     const currentMonth = getColombiaDate().substring(0, 7);
     return dailyClosures.filter(closure => {
-      const closureDate = normalizeToColombia(closure.date);
+      const closureDate = extractColombiaDate(closure.date);
       return closureDate && closureDate.substring(0, 7) === currentMonth;
     });
   };
@@ -209,7 +201,7 @@ export function Closures() {
       if (!originalInvoice) return false;
       
       // Solo contar la devolución si la factura original es del día que se está cerrando
-      const invoiceDate = originalInvoice.date ? originalInvoice.date.split('T')[0] : '';
+      const invoiceDate = extractColombiaDate(originalInvoice.date);
       return invoiceDate === today;
     });
 
@@ -238,85 +230,74 @@ export function Closures() {
     };
   };
 
-const calculateMonthlyStats = () => {
-  const currentMonthClosures = getCurrentMonthClosures();
-  const totalRevenue = currentMonthClosures.reduce((sum, closure) => sum + closure.total, 0);
+  const calculateMonthlyStats = () => {
+    const currentMonthClosures = getCurrentMonthClosures();
+    const totalRevenue = currentMonthClosures.reduce((sum, closure) => sum + closure.total, 0);
 
-  const previousMonth = new Date();
-  previousMonth.setMonth(previousMonth.getMonth() - 1);
+    // Obtener mes actual y anterior usando fecha de Colombia
+    const currentColombiaDate = getColombiaDate();
+    const currentMonthStr = currentColombiaDate.substring(0, 7);
+    
+    // Calcular mes anterior usando fecha de Colombia
+    const currentDate = new Date(currentColombiaDate + 'T00:00:00');
+    currentDate.setMonth(currentDate.getMonth() - 1);
+    const previousMonthStr = currentDate.toISOString().split('T')[0].substring(0, 7);
 
-  // 🔥 FIX: usar Colombia, no ISO (UTC)
-  const previousMonthStr = normalizeToColombia(previousMonth).substring(0, 7);
-  const currentMonthStr = getColombiaDate().substring(0, 7);
+    const previousMonthInvoices = invoices.filter(inv => {
+      if (!inv.date) return false;
+      const invDate = extractColombiaDate(inv.date);
+      return invDate.substring(0, 7) === previousMonthStr && inv.status === 'paid';
+    });
+    const previousMonthRevenue = previousMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
-  const previousMonthInvoices = invoices.filter(inv => {
-    if (!inv.date) return false;
+    const currentMonthInvoices = invoices.filter(inv => {
+      if (!inv.date) return false;
+      const invDate = extractColombiaDate(inv.date);
+      return invDate.substring(0, 7) === currentMonthStr && inv.status === 'paid';
+    });
+    const currentMonthRevenue = currentMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
-    // 🔥 FIX CLAVE
-    const invDate = normalizeToColombia(inv.date);
+    // Calcular créditos pendientes del mes actual
+    const currentMonthCreditInvoices = invoices.filter(inv => {
+      if (!inv.date) return false;
+      const invDate = extractColombiaDate(inv.date);
+      return invDate.substring(0, 7) === currentMonthStr && inv.is_credit;
+    });
+    const totalPendingCredit = currentMonthCreditInvoices
+      .filter(inv => inv.status === 'pending')
+      .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
 
-    return invDate.substring(0, 7) === previousMonthStr && inv.status === 'paid';
-  });
+    // Calcular créditos pendientes del mes anterior
+    const previousMonthCreditInvoices = invoices.filter(inv => {
+      if (!inv.date) return false;
+      const invDate = extractColombiaDate(inv.date);
+      return invDate.substring(0, 7) === previousMonthStr && inv.is_credit;
+    });
+    const previousMonthPendingCredit = previousMonthCreditInvoices
+      .filter(inv => inv.status === 'pending')
+      .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
 
-  const previousMonthRevenue = previousMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
+    // Calcular gastos del mes actual
+    const currentMonthExpenses = expenses.filter(expense => {
+      if (!expense.date) return false;
+      const expenseDate = extractColombiaDate(expense.date);
+      return expenseDate.substring(0, 7) === currentMonthStr;
+    });
+    const totalExpenses = currentMonthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
-  const currentMonthInvoices = invoices.filter(inv => {
-    if (!inv.date) return false;
-
-    // 🔥 FIX CLAVE
-    const invDate = normalizeToColombia(inv.date);
-
-    return invDate.substring(0, 7) === currentMonthStr && inv.status === 'paid';
-  });
-
-  const currentMonthRevenue = currentMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
-
-  // Créditos pendientes mes actual
-  const currentMonthCreditInvoices = invoices.filter(inv => {
-    if (!inv.date) return false;
-
-    const invDate = normalizeToColombia(inv.date);
-
-    return invDate.substring(0, 7) === currentMonthStr && inv.is_credit;
-  });
-
-  const totalPendingCredit = currentMonthCreditInvoices
-    .filter(inv => inv.status === 'pending')
-    .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
-
-  // Créditos mes anterior
-  const previousMonthCreditInvoices = invoices.filter(inv => {
-    if (!inv.date) return false;
-
-    const invDate = normalizeToColombia(inv.date);
-
-    return invDate.substring(0, 7) === previousMonthStr && inv.is_credit;
-  });
-
-  const previousMonthPendingCredit = previousMonthCreditInvoices
-    .filter(inv => inv.status === 'pending')
-    .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
-
-  // 🔥 FIX TAMBIÉN PARA GASTOS
-  const currentMonthExpenses = expenses.filter(expense => {
-    if (!expense.date) return false;
-
-    const expenseDate = normalizeToColombia(expense.date);
-
-    return expenseDate.substring(0, 7) === currentMonthStr;
-  });
-
-  const totalExpenses = currentMonthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+    // Crear objetos Date para obtener nombres de meses en español
+    const previousMonthDate = new Date(previousMonthStr + '-01T00:00:00');
+    const currentMonthDate = new Date(currentMonthStr + '-01T00:00:00');
 
     const comparisonData = [
       {
         id: 'prev-month',
-        name: previousMonth.toLocaleDateString('es-ES', { month: 'short' }),
+        name: previousMonthDate.toLocaleDateString('es-ES', { month: 'short' }),
         ventas: previousMonthRevenue,
       },
       {
         id: 'current-month',
-        name: new Date().toLocaleDateString('es-ES', { month: 'short' }),
+        name: currentMonthDate.toLocaleDateString('es-ES', { month: 'short' }),
         ventas: currentMonthRevenue,
       },
     ];
@@ -324,12 +305,12 @@ const calculateMonthlyStats = () => {
     const creditComparisonData = [
       {
         id: 'prev-month-credit',
-        name: previousMonth.toLocaleDateString('es-ES', { month: 'short' }),
+        name: previousMonthDate.toLocaleDateString('es-ES', { month: 'short' }),
         creditos: previousMonthPendingCredit,
       },
       {
         id: 'current-month-credit',
-        name: new Date().toLocaleDateString('es-ES', { month: 'short' }),
+        name: currentMonthDate.toLocaleDateString('es-ES', { month: 'short' }),
         creditos: totalPendingCredit,
       },
     ];
@@ -337,7 +318,7 @@ const calculateMonthlyStats = () => {
     // Datos de ventas diarias del mes
     const dailySalesData = currentMonthClosures.map((closure, index) => ({
       id: `day-${index}`,
-      day: normalizeToColombia(closure.date).split('-')[2], // Extraer solo el día del mes
+      day: new Date(closure.date + 'T00:00:00').getDate().toString(),
       sales: closure.total,
     }));
 
@@ -364,10 +345,13 @@ const calculateMonthlyStats = () => {
       hourlyMap.set(i, 0);
     }
 
-    // Sumar ventas por hora
+    // Sumar ventas por hora - USAR ZONA HORARIA DE COLOMBIA
     todayInvoices.forEach(inv => {
       if (inv.date && inv.status === 'paid') {
-        const hour = new Date(inv.date).getHours();
+        // Convertir la fecha a hora de Colombia usando toLocaleString
+        const colombiaDateStr = new Date(inv.date).toLocaleString('en-US', { timeZone: 'America/Bogota' });
+        const colombiaDate = new Date(colombiaDateStr);
+        const hour = colombiaDate.getHours();
         hourlyMap.set(hour, (hourlyMap.get(hour) || 0) + inv.total);
       }
     });
@@ -427,10 +411,10 @@ const calculateMonthlyStats = () => {
       // Verificar si existe cierre mensual del mes anterior
       const hasPreviousMonthClosure = monthlyClosures.some(closure => closure.month === yesterdayMonth);
 
-      // Verificar si realmente hubo facturas en el mes anterior
+      // Verificar si realmente hubo facturas en el mes anterior usando extractColombiaDate
       const previousMonthInvoices = invoices.filter(inv => {
         if (!inv.date) return false;
-        const invDate = typeof inv.date === 'string' ? inv.date.split('T')[0] : inv.date;
+        const invDate = extractColombiaDate(inv.date);
         return invDate.substring(0, 7) === yesterdayMonth;
       });
 
@@ -439,7 +423,7 @@ const calculateMonthlyStats = () => {
       // 2. Hay cierres diarios en total (el sistema está en uso)
       // 3. Realmente hubo facturas en el mes anterior
       if (!hasPreviousMonthClosure && dailyClosures.length > 0 && previousMonthInvoices.length > 0) {
-        const previousMonthDate = new Date(yesterdayStr);
+        const previousMonthDate = new Date(yesterdayStr + 'T00:00:00');
         const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
         return { needed: true, monthName };
       }
