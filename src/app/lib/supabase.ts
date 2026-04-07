@@ -450,11 +450,26 @@ export const getColombiaDate = (): string => {
   return `${year}-${month}-${day}`;
 };
 
+// Función auxiliar para extraer la fecha (YYYY-MM-DD) de un timestamp, considerando zona horaria de Colombia
+export const extractColombiaDate = (timestamp: string): string => {
+  if (!timestamp) return '';
+  // Si el timestamp ya es solo fecha (YYYY-MM-DD), devolverlo tal cual
+  if (timestamp.length === 10 && !timestamp.includes('T')) {
+    return timestamp;
+  }
+  // Convertir el timestamp a fecha en zona de Colombia
+  const date = new Date(timestamp);
+  const colombiaDate = new Date(date.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
+  const year = colombiaDate.getFullYear();
+  const month = String(colombiaDate.getMonth() + 1).padStart(2, '0');
+  const day = String(colombiaDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 // Función para verificar si se puede facturar (validar cierre pendiente)
 export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?: string; requiresMonthlyClose?: boolean }> => {
   const company = getCurrentCompany();
   const colombiaTime = getColombiaDateTime();
-  const currentHour = colombiaTime.getHours();
   const today = getColombiaDate(); // YYYY-MM-DD en zona Colombia
 
   // Calcular el día anterior
@@ -468,18 +483,18 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
       supabase
         .from('daily_closures')
         .select('id, date, closed_at')
-        .eq('company_id', company)
+        .eq('company', company)
         .eq('date', today)
         .limit(1),
       supabase
         .from('daily_closures')
         .select('id')
-        .eq('company_id', company)
+        .eq('company', company)
         .limit(1),
       supabase
         .from('invoices')
         .select('id')
-        .eq('company_id', company)
+        .eq('company', company)
         .gte('date', yesterdayStr + 'T00:00:00')
         .lt('date', today + 'T00:00:00')
         .limit(1)
@@ -492,7 +507,7 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
 
       return {
         canCreate: false,
-        message: `🚫 No se pueden realizar facturas.\n\nYa se realizó el cierre del día ${today} a las ${closureTimeStr}.\n\nPodrás facturar nuevamente a partir de las 12:00 AM del siguiente día.`
+        message: `🚫 No se pueden realizar facturas.\n\nYa se realizó el cierre del día ${today} a las ${closureTimeStr}.\n\nPodrás facturar nuevamente a partir de las 00:00 del siguiente día.`
       };
     }
 
@@ -501,67 +516,24 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
       return { canCreate: true };
     }
 
-    // Si es después de las 12:00 AM, verificar cierre del día anterior
-    if (currentHour >= 0) {
-      // Si NO hubo facturas ayer, NO se requiere cierre, permitir facturar hoy
-      if (!yesterdayInvoicesResult.data || yesterdayInvoicesResult.data.length === 0) {
-        // Verificar si es un nuevo mes y requiere cierre mensual
-        const currentMonth = today.substring(0, 7); // YYYY-MM
-        const yesterdayMonth = yesterdayStr.substring(0, 7); // YYYY-MM
-
-        // Si es día 1 de un nuevo mes (ayer era otro mes)
-        if (currentMonth !== yesterdayMonth) {
-          // Verificar si existe un cierre mensual para el mes anterior
-          const { data: monthlyClosures } = await supabase
-            .from('monthly_closures')
-            .select('id')
-            .eq('company_id', company)
-            .eq('month', yesterdayMonth)
-            .limit(1);
-
-          // Si no existe cierre mensual del mes anterior, no permitir facturar
-          if (!monthlyClosures || monthlyClosures.length === 0) {
-            const previousMonthDate = new Date(yesterdayStr);
-            const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
-
-            return {
-              canCreate: false,
-              requiresMonthlyClose: true,
-              message: `⚠️ Es un nuevo mes. Debes realizar el CIERRE MENSUAL de ${monthName} antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre mensual.`
-            };
-          }
-        }
-
-        return { canCreate: true };
-      }
-
-      // Si hubo facturas ayer, verificar que se haya hecho el cierre del día anterior
-      const { data: yesterdayClosures } = await supabase
-        .from('daily_closures')
-        .select('id')
-        .eq('company_id', company)
-        .eq('date', yesterdayStr)
-        .limit(1);
-
-      if (!yesterdayClosures || yesterdayClosures.length === 0) {
-        return {
-          canCreate: false,
-          message: `⚠️ Debes realizar el CIERRE DEL DÍA de ayer (${yesterdayStr}) antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre diario.`
-        };
-      }
-
+    // Verificar cierre del día anterior si hubo facturas ayer
+    // Si NO hubo facturas ayer, NO se requiere cierre, permitir facturar hoy
+    if (!yesterdayInvoicesResult.data || yesterdayInvoicesResult.data.length === 0) {
       // Verificar si es un nuevo mes y requiere cierre mensual
-      const currentMonth = today.substring(0, 7);
-      const yesterdayMonth = yesterdayStr.substring(0, 7);
+      const currentMonth = today.substring(0, 7); // YYYY-MM
+      const yesterdayMonth = yesterdayStr.substring(0, 7); // YYYY-MM
 
+      // Si es día 1 de un nuevo mes (ayer era otro mes)
       if (currentMonth !== yesterdayMonth) {
+        // Verificar si existe un cierre mensual para el mes anterior
         const { data: monthlyClosures } = await supabase
           .from('monthly_closures')
           .select('id')
-          .eq('company_id', company)
+          .eq('company', company)
           .eq('month', yesterdayMonth)
           .limit(1);
 
+        // Si no existe cierre mensual del mes anterior, no permitir facturar
         if (!monthlyClosures || monthlyClosures.length === 0) {
           const previousMonthDate = new Date(yesterdayStr);
           const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
@@ -575,6 +547,45 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
       }
 
       return { canCreate: true };
+    }
+
+    // Si hubo facturas ayer, verificar que se haya hecho el cierre del día anterior
+    const { data: yesterdayClosures } = await supabase
+      .from('daily_closures')
+      .select('id')
+      .eq('company', company)
+      .eq('date', yesterdayStr)
+      .limit(1);
+
+    if (!yesterdayClosures || yesterdayClosures.length === 0) {
+      return {
+        canCreate: false,
+        message: `⚠️ Debes realizar el CIERRE DEL DÍA de ayer (${yesterdayStr}) antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre diario.`
+      };
+    }
+
+    // Verificar si es un nuevo mes y requiere cierre mensual
+    const currentMonth = today.substring(0, 7);
+    const yesterdayMonth = yesterdayStr.substring(0, 7);
+
+    if (currentMonth !== yesterdayMonth) {
+      const { data: monthlyClosures } = await supabase
+        .from('monthly_closures')
+        .select('id')
+        .eq('company', company)
+        .eq('month', yesterdayMonth)
+        .limit(1);
+
+      if (!monthlyClosures || monthlyClosures.length === 0) {
+        const previousMonthDate = new Date(yesterdayStr);
+        const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+
+        return {
+          canCreate: false,
+          requiresMonthlyClose: true,
+          message: `⚠️ Es un nuevo mes. Debes realizar el CIERRE MENSUAL de ${monthName} antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre mensual.`
+        };
+      }
     }
 
     return { canCreate: true };
