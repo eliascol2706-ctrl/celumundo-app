@@ -280,6 +280,12 @@ export function ThermalInvoicePrint({ invoice, creditPayments = [] }: ThermalInv
             {new Date().toLocaleString('es-ES')}
           </div>
         </div>
+        
+        {/* Espacio adicional para que la factura salga completa de la impresora */}
+        <div style={{
+          height: '50mm',
+          width: '100%',
+        }}></div>
       </div>
     </>
   );

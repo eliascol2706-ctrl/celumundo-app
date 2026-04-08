@@ -1081,8 +1081,151 @@ export function Invoices() {
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  const handlePrint = async () => {
+    if (!invoiceToPrint) return;
+
+    // Cargar los abonos si es factura a crédito
+    let payments: CreditPayment[] = [];
+    if (invoiceToPrint.is_credit) {
+      payments = await getCreditPaymentsByInvoice(invoiceToPrint.id);
+    }
+
+    const doc = new jsPDF();
+    const company = getCurrentCompany();
+    const companyName = company === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
+
+    // Encabezado
+    doc.setFontSize(18);
+    doc.text(companyName, 105, 20, { align: 'center' });
+    doc.setFontSize(14);
+    doc.text('FACTURA DE VENTA', 105, 28, { align: 'center' });
+    doc.setFontSize(10);
+    doc.text(`No. ${invoiceToPrint.number}`, 105, 34, { align: 'center' });
+    doc.line(10, 38, 200, 38);
+
+    // Información del cliente
+    let y = 45;
+    doc.text(`Cliente: ${invoiceToPrint.customer_name || 'Consumidor Final'}`, 10, y);
+    y += 6;
+    if (invoiceToPrint.customer_document) {
+      doc.text(`Documento: ${invoiceToPrint.customer_document}`, 10, y);
+      y += 6;
+    }
+    doc.text(`Fecha: ${new Date(invoiceToPrint.date).toLocaleString('es-ES')}`, 10, y);
+    y += 6;
+    doc.text(`Tipo: ${invoiceToPrint.type === 'regular' ? 'Regular' : 'Al Mayor'}`, 10, y);
+    y += 6;
+    doc.text(`Atendido por: ${invoiceToPrint.attended_by || 'N/A'}`, 10, y);
+    y += 8;
+    doc.line(10, y, 200, y);
+
+    // Productos
+    y += 8;
+    doc.setFontSize(12);
+    doc.text('PRODUCTOS', 105, y, { align: 'center' });
+    y += 8;
+    doc.setFontSize(9);
+
+    invoiceToPrint.items.forEach((item: any) => {
+      doc.text(`${item.productName}`, 10, y);
+      y += 5;
+      doc.text(`  Cantidad: ${item.quantity} x ${formatCOP(item.price)} = ${formatCOP(item.total)}`, 10, y);
+      y += 5;
+      
+      // Mostrar IDs si existen
+      if (item.unitIds && item.unitIds.length > 0) {
+        doc.setFontSize(8);
+        doc.text(`  IDs: ${item.unitIds.join(', ')}`, 10, y);
+        y += 5;
+        doc.setFontSize(9);
+      }
+      
+      y += 3;
+    });
+
+    // Totales
+    y += 5;
+    doc.line(10, y, 200, y);
+    y += 8;
+    doc.setFontSize(10);
+    doc.text(`Subtotal: ${formatCOP(invoiceToPrint.subtotal)}`, 140, y);
+    y += 6;
+    doc.text(`IVA (19%): ${formatCOP(invoiceToPrint.tax)}`, 140, y);
+    y += 6;
+    doc.setFontSize(12);
+    doc.text(`TOTAL: ${formatCOP(invoiceToPrint.total)}`, 140, y);
+    y += 8;
+    doc.setFontSize(10);
+    
+    // Métodos de pago desglosados
+    if (invoiceToPrint.payment_cash || invoiceToPrint.payment_transfer || invoiceToPrint.payment_other) {
+      doc.text('Método de Pago:', 10, y);
+      y += 5;
+      if (invoiceToPrint.payment_cash && invoiceToPrint.payment_cash > 0) {
+        doc.text(`  Efectivo: ${formatCOP(invoiceToPrint.payment_cash)}`, 10, y);
+        y += 5;
+      }
+      if (invoiceToPrint.payment_transfer && invoiceToPrint.payment_transfer > 0) {
+        doc.text(`  Transferencia: ${formatCOP(invoiceToPrint.payment_transfer)}`, 10, y);
+        y += 5;
+      }
+      if (invoiceToPrint.payment_other && invoiceToPrint.payment_other > 0) {
+        doc.text(`  Otros: ${formatCOP(invoiceToPrint.payment_other)}`, 10, y);
+        y += 5;
+      }
+    } else if (invoiceToPrint.payment_method) {
+      doc.text(`Método de Pago: ${invoiceToPrint.payment_method}`, 10, y);
+      y += 5;
+    }
+
+    // NUEVO: Sección de abonos para facturas a crédito
+    if (invoiceToPrint.is_credit && payments.length > 0) {
+      y += 8;
+      doc.line(10, y, 200, y);
+      y += 8;
+      doc.setFontSize(12);
+      doc.text('HISTORIAL DE ABONOS', 105, y, { align: 'center' });
+      y += 8;
+      doc.setFontSize(9);
+      
+      payments.forEach((payment) => {
+        if (y > 270) {
+          doc.addPage();
+          y = 20;
+        }
+        
+        const paymentDate = new Date(payment.date).toLocaleString('es-ES');
+        doc.text(`Fecha: ${paymentDate}`, 10, y);
+        y += 5;
+        doc.text(`Monto: ${formatCOP(payment.amount)}`, 10, y);
+        y += 5;
+        doc.text(`Método: ${payment.payment_method === 'cash' ? 'Efectivo' : payment.payment_method === 'transfer' ? 'Transferencia' : 'Otro'}`, 10, y);
+        y += 5;
+        if (payment.notes) {
+          doc.text(`Nota: ${payment.notes}`, 10, y);
+          y += 5;
+        }
+        doc.text(`Registrado por: ${payment.registered_by}`, 10, y);
+        y += 8;
+      });
+      
+      // Mostrar saldo pendiente
+      const totalAbonos = payments.reduce((sum, p) => sum + p.amount, 0);
+      const saldoPendiente = invoiceToPrint.total - totalAbonos;
+      
+      doc.setFontSize(10);
+      doc.text(`Total Abonado: ${formatCOP(totalAbonos)}`, 140, y);
+      y += 6;
+      doc.setFontSize(12);
+      doc.setTextColor(saldoPendiente > 0 ? 255 : 0, saldoPendiente > 0 ? 150 : 0, 0);
+      doc.text(`Saldo Pendiente: ${formatCOP(saldoPendiente)}`, 140, y);
+      doc.setTextColor(0, 0, 0);
+    }
+
+    // Abrir vista de impresión en lugar de descargar
+    doc.autoPrint();
+    window.open(doc.output('bloburl'), '_blank');
+    toast.success('Abriendo vista de impresión');
   };
 
   const handleThermalPrint = () => {

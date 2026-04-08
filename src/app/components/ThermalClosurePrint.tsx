@@ -322,6 +322,9 @@ export function ThermalClosurePrint({ closureType, closureData, invoices = [] }:
           www.celumundovip.com
         </div>
       </div>
+      
+      {/* Espacio adicional para que el cierre salga completo de la impresora */}
+      <div style={{ height: '50mm', width: '100%' }}></div>
     </div>
   );
 }

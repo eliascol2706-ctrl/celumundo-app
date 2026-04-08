@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List, X, Printer, Eye, Loader2 } from 'lucide-react';
+import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List, X, Printer, Eye, Loader2, FileText } from 'lucide-react';
 import { getProducts, addProduct, updateProduct, deleteProduct, getDepartments, type Product, type Department, supabase } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -12,6 +12,7 @@ import { formatCOP } from '../lib/currency';
 import { copyToClipboard } from '../lib/clipboard';
 import { includesIgnoreAccents } from '../lib/string-utils';
 import { jsPDF } from 'jspdf';
+import { OrderDialog } from '../components/OrderDialog';
 
 export function Products() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -44,6 +45,9 @@ export function Products() {
     stockOrder: 'asc' as 'asc' | 'desc',
     includeZeroStock: true
   });
+
+  // Estado para el sistema de pedidos
+  const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
 
   const [formData, setFormData] = useState({
     code: '',
@@ -566,6 +570,15 @@ export function Products() {
           <p className="text-muted-foreground mt-1">Gestión de inventario</p>
         </div>
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+          <Button
+            variant="outline"
+            onClick={() => setIsOrderDialogOpen(true)}
+            className="border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950 w-full sm:w-auto text-sm"
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            <span className="hidden sm:inline">Realizar Pedido</span>
+            <span className="sm:hidden">Pedido</span>
+          </Button>
           <Button
             variant="outline"
             onClick={() => setIsPrintOptionsOpen(true)}
@@ -1451,6 +1464,13 @@ export function Products() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de Realizar Pedido */}
+      <OrderDialog
+        open={isOrderDialogOpen}
+        onOpenChange={setIsOrderDialogOpen}
+        products={products}
+      />
     </div>
   );
 }
