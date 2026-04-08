@@ -25,6 +25,7 @@ interface DailyClosureDialogProps {
     netRevenue: number;
     pendingCreditBalance: number;
     creditInvoices: number;
+    creditPayments?: any[]; // Abonos a créditos del día
   };
   dayToClose: string; // YYYY-MM-DD date to close
   hourlyData: any[];
@@ -79,7 +80,9 @@ export function DailyClosureDialog({
   const calculatePaymentTotals = () => {
     let totalCash = 0;
     let totalTransfer = 0;
+    let totalOthers = 0;
 
+    // Sumar pagos de facturas pagadas del día
     dailyStats.invoices.forEach(invoice => {
       // Solo contar facturas pagadas (no créditos pendientes)
       if (invoice.status === 'paid' && !invoice.is_credit) {
@@ -106,18 +109,39 @@ export function DailyClosureDialog({
           }
         }
 
-        // También considerar "Otros" como efectivo
+        // Extraer "Otros" pero NO sumarlo a los ingresos - solo para identificación
         const otherMatch = paymentStr.match(/Otros:\s*\$?([\d,.]+)/i);
         if (otherMatch) {
           const otherValue = parseFloat(otherMatch[1].replace(/\./g, '').replace(/,/g, '.'));
           if (!isNaN(otherValue)) {
-            totalCash += otherValue; // Sumar "Otros" a efectivo
+            totalOthers += otherValue; // NO se suma a los ingresos
           }
         }
       }
     });
 
-    return { totalCash, totalTransfer, total: totalCash + totalTransfer };
+    // SUMAR ABONOS A CRÉDITO DEL DÍA
+    if (dailyStats.creditPayments && dailyStats.creditPayments.length > 0) {
+      console.log(`[DEBUG Cierre] Sumando ${dailyStats.creditPayments.length} abonos a crédito del día`);
+      
+      dailyStats.creditPayments.forEach(payment => {
+        const paymentMethod = payment.payment_method?.toLowerCase() || '';
+        const amount = payment.amount || 0;
+        
+        if (paymentMethod.includes('efectivo')) {
+          totalCash += amount;
+          console.log(`[DEBUG Cierre] Abono efectivo: ${amount}`);
+        } else if (paymentMethod.includes('transferencia')) {
+          totalTransfer += amount;
+          console.log(`[DEBUG Cierre] Abono transferencia: ${amount}`);
+        } else if (paymentMethod.includes('otros')) {
+          totalOthers += amount;
+          console.log(`[DEBUG Cierre] Abono otros (no se cuenta): ${amount}`);
+        }
+      });
+    }
+
+    return { totalCash, totalTransfer, totalOthers, total: totalCash + totalTransfer };
   };
 
   const paymentTotals = calculatePaymentTotals();
@@ -217,7 +241,7 @@ export function DailyClosureDialog({
             {phase === 1 && (
               <div className="space-y-6">
                 {/* Top Stats */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                   <Card>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -254,6 +278,22 @@ export function DailyClosureDialog({
                       <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                         {formatCOP(paymentTotals.totalTransfer)}
                       </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Otros
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-2xl font-bold text-gray-600 dark:text-gray-400">
+                        {formatCOP(paymentTotals.totalOthers)}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        No se cuenta en ingresos
+                      </p>
                     </CardContent>
                   </Card>
 

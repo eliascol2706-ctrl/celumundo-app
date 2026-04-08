@@ -11,6 +11,8 @@ import {
   deleteCreditPayment,
   canCreateInvoice,
   getColombiaDateTime,
+  getColombiaDate,
+  extractColombiaDate,
   type CreditPayment,
   supabase
 } from '../lib/supabase';
@@ -90,7 +92,7 @@ export function Invoices() {
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [sortOrder, setSortOrder] = useState<'recent' | 'highest' | 'lowest' | 'oldest'>('recent');
-  const [periodFilter, setPeriodFilter] = useState<'current_month' | 'last_month' | 'last_3_months' | 'last_6_months' | 'last_year' | 'all'>('current_month');
+  const [periodFilter, setPeriodFilter] = useState<'today' | 'yesterday' | 'current_month' | 'last_month' | 'last_3_months' | 'last_6_months' | 'last_year' | 'all'>('today');
   const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
@@ -336,40 +338,91 @@ export function Invoices() {
   const getSortedInvoices = () => {
     // Filtrar por período
     let periodFiltered = invoices;
-    const now = new Date();
-    const currentMonth = now.getMonth();
-    const currentYear = now.getFullYear();
+    const colombiaToday = getColombiaDate(); // YYYY-MM-DD en zona horaria de Colombia
 
     switch (periodFilter) {
-      case 'current_month': {
+      case 'today': {
         periodFiltered = invoices.filter(invoice => {
-          const invoiceDate = new Date(invoice.date);
-          return invoiceDate.getMonth() === currentMonth && invoiceDate.getFullYear() === currentYear;
+          if (!invoice.date) return false;
+          const invoiceDate = extractColombiaDate(invoice.date);
+          return invoiceDate === colombiaToday;
+        });
+        break;
+      }
+      case 'yesterday': {
+        // Calcular ayer en zona horaria de Colombia
+        const todayDate = new Date(colombiaToday + 'T12:00:00');
+        todayDate.setDate(todayDate.getDate() - 1);
+        const year = todayDate.getFullYear();
+        const month = String(todayDate.getMonth() + 1).padStart(2, '0');
+        const day = String(todayDate.getDate()).padStart(2, '0');
+        const colombiaYesterday = `${year}-${month}-${day}`;
+        
+        periodFiltered = invoices.filter(invoice => {
+          if (!invoice.date) return false;
+          const invoiceDate = extractColombiaDate(invoice.date);
+          return invoiceDate === colombiaYesterday;
+        });
+        break;
+      }
+      case 'current_month': {
+        const currentMonth = colombiaToday.substring(0, 7); // YYYY-MM
+        periodFiltered = invoices.filter(invoice => {
+          if (!invoice.date) return false;
+          const invoiceDate = extractColombiaDate(invoice.date);
+          return invoiceDate.substring(0, 7) === currentMonth;
         });
         break;
       }
       case 'last_month': {
-        const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-        const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+        // Calcular mes anterior usando fecha de Colombia
+        const todayDate = new Date(colombiaToday + 'T12:00:00');
+        todayDate.setMonth(todayDate.getMonth() - 1);
+        const year = todayDate.getFullYear();
+        const month = String(todayDate.getMonth() + 1).padStart(2, '0');
+        const lastMonth = `${year}-${month}`;
+        
         periodFiltered = invoices.filter(invoice => {
-          const invoiceDate = new Date(invoice.date);
-          return invoiceDate.getMonth() === lastMonth && invoiceDate.getFullYear() === lastMonthYear;
+          if (!invoice.date) return false;
+          const invoiceDate = extractColombiaDate(invoice.date);
+          return invoiceDate.substring(0, 7) === lastMonth;
         });
         break;
       }
       case 'last_3_months': {
-        const threeMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 3, 1);
-        periodFiltered = invoices.filter(invoice => new Date(invoice.date) >= threeMonthsAgo);
+        const todayDate = new Date(colombiaToday + 'T12:00:00');
+        todayDate.setMonth(todayDate.getMonth() - 3);
+        const threeMonthsAgo = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-01`;
+        
+        periodFiltered = invoices.filter(invoice => {
+          if (!invoice.date) return false;
+          const invoiceDate = extractColombiaDate(invoice.date);
+          return invoiceDate >= threeMonthsAgo;
+        });
         break;
       }
       case 'last_6_months': {
-        const sixMonthsAgo = new Date(now.getFullYear(), now.getMonth() - 6, 1);
-        periodFiltered = invoices.filter(invoice => new Date(invoice.date) >= sixMonthsAgo);
+        const todayDate = new Date(colombiaToday + 'T12:00:00');
+        todayDate.setMonth(todayDate.getMonth() - 6);
+        const sixMonthsAgo = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-01`;
+        
+        periodFiltered = invoices.filter(invoice => {
+          if (!invoice.date) return false;
+          const invoiceDate = extractColombiaDate(invoice.date);
+          return invoiceDate >= sixMonthsAgo;
+        });
         break;
       }
       case 'last_year': {
-        const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), 1);
-        periodFiltered = invoices.filter(invoice => new Date(invoice.date) >= oneYearAgo);
+        const todayDate = new Date(colombiaToday + 'T12:00:00');
+        todayDate.setFullYear(todayDate.getFullYear() - 1);
+        const oneYearAgo = `${todayDate.getFullYear()}-${String(todayDate.getMonth() + 1).padStart(2, '0')}-01`;
+        
+        periodFiltered = invoices.filter(invoice => {
+          if (!invoice.date) return false;
+          const invoiceDate = extractColombiaDate(invoice.date);
+          return invoiceDate >= oneYearAgo;
+        });
         break;
       }
       case 'all':
@@ -1243,6 +1296,10 @@ export function Invoices() {
   // Función para obtener el nombre del período
   const getPeriodName = () => {
     switch (periodFilter) {
+      case 'today':
+        return 'Hoy';
+      case 'yesterday':
+        return 'Ayer';
       case 'current_month':
         return 'Mes Actual';
       case 'last_month':
@@ -1297,7 +1354,7 @@ export function Invoices() {
 
       {/* Estadísticas */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className={periodFilter === 'current_month' ? 'border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/20' : ''}>
+        <Card className={periodFilter === 'today' ? 'border-green-200 dark:border-green-800 bg-green-50/50 dark:bg-green-950/20' : ''}>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-600 dark:text-gray-400">
               {getPeriodName()}
@@ -1374,9 +1431,11 @@ export function Invoices() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="current_month">
-                    <span className="font-medium text-green-600 dark:text-green-400">📅 Mes Actual</span>
+                  <SelectItem value="today">
+                    <span className="font-medium text-green-600 dark:text-green-400">📅 Hoy</span>
                   </SelectItem>
+                  <SelectItem value="yesterday">Ayer</SelectItem>
+                  <SelectItem value="current_month">Mes Actual</SelectItem>
                   <SelectItem value="last_month">Mes Anterior</SelectItem>
                   <SelectItem value="last_3_months">Últimos 3 Meses</SelectItem>
                   <SelectItem value="last_6_months">Últimos 6 Meses</SelectItem>

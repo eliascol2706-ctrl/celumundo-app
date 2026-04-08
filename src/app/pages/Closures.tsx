@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { Calendar, FileText, TrendingUp, AlertTriangle } from 'lucide-react';
 import {
   getInvoices,
@@ -12,6 +12,7 @@ import {
   deleteDailyClosure,
   updateClosureDate,
   getExpenses,
+  getCreditPayments,
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -38,43 +39,26 @@ export function Closures() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
-
-  // Helper function para formatear fechas sin usar UTC
-  const formatDateFromDateObject = (date: Date): string => {
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
-  // Helper function para formatear fechas para visualización
-  const formatDateForDisplay = (dateStr: string): string => {
-    const colombiaDate = extractColombiaDate(dateStr);
-    const [year, month, day] = colombiaDate.split('-');
-    const date = new Date(Number(year), Number(month) - 1, Number(day));
-    return date.toLocaleDateString('es-ES');
-  };
+  const [creditPayments, setCreditPayments] = useState<any[]>([]);
 
   useEffect(() => {
     loadData();
     
-    // DEBUG: Exponer función deleteDailyClosure solo en desarrollo
-    if (process.env.NODE_ENV === 'development') {
-      (window as any).deleteDailyClosure = async (closureId: string) => {
-        const success = await deleteDailyClosure(closureId);
-        if (success) {
-          console.log('✅ Cierre eliminado exitosamente. Recargando datos...');
-          await loadData();
-        } else {
-          console.error('❌ Error al eliminar el cierre.');
-        }
-        return success;
-      };
-    }
+    // Exponer la función deleteDailyClosure globalmente para debugging
+    (window as any).deleteDailyClosure = async (closureId: string) => {
+      const success = await deleteDailyClosure(closureId);
+      if (success) {
+        console.log('✅ Cierre eliminado exitosamente. Recargando datos...');
+        await loadData();
+      } else {
+        console.error('❌ Error al eliminar el cierre.');
+      }
+      return success;
+    };
   }, []);
 
   const loadData = async () => {
-    const [invoicesData, dailyClosuresData, monthlyClosuresData, returnsData, customersData, productsData, expensesData] = await Promise.all([
+    const [invoicesData, dailyClosuresData, monthlyClosuresData, returnsData, customersData, productsData, expensesData, creditPaymentsData] = await Promise.all([
       getInvoices(),
       getDailyClosures(),
       getMonthlyClosures(),
@@ -82,6 +66,7 @@ export function Closures() {
       getCustomers(),
       getProducts(),
       getExpenses(),
+      getCreditPayments(),
     ]);
     setInvoices(invoicesData);
     setDailyClosures(dailyClosuresData);
@@ -90,16 +75,22 @@ export function Closures() {
     setCustomers(customersData);
     setProducts(productsData);
     setExpenses(expensesData);
+    setCreditPayments(creditPaymentsData);
     
     // DEBUG: Ver qué cierres tenemos guardados
     console.log('[DEBUG Closures] Cierres diarios guardados:', dailyClosuresData.map(c => ({ id: c.id, date: c.date, closed_by: c.closed_by })));
     console.log('[DEBUG Closures] Fecha actual Colombia:', getColombiaDate());
     
-    // Detectar cierres incorrectos
+    // Detectar cierres incorrectos - CALCULAR AYER CORRECTAMENTE SIN UTC
     const today = getColombiaDate();
-    const todayDate = new Date(today + 'T12:00:00');
+    // Calcular ayer usando Date pero convirtiendo el resultado
+    const todayDate = new Date(today + 'T12:00:00'); // Usar mediodía para evitar problemas de zona horaria
     todayDate.setDate(todayDate.getDate() - 1);
-    const yesterday = formatDateFromDateObject(todayDate);
+    // Extraer fecha en formato Colombia (no usar toISOString)
+    const year = todayDate.getFullYear();
+    const month = String(todayDate.getMonth() + 1).padStart(2, '0');
+    const day = String(todayDate.getDate()).padStart(2, '0');
+    const yesterday = `${year}-${month}-${day}`;
     
     const todayClosures = dailyClosuresData.filter(c => extractColombiaDate(c.date) === today);
     const yesterdayClosures = dailyClosuresData.filter(c => extractColombiaDate(c.date) === yesterday);
@@ -122,6 +113,7 @@ export function Closures() {
     });
   };
   
+  // Nueva función para obtener el día que se debe cerrar
   const getDayToClose = () => {
     const today = getColombiaDate();
     
@@ -131,6 +123,7 @@ export function Closures() {
       return closureDate === today;
     });
     
+    // Si ya hay cierre de hoy, no se puede cerrar
     if (hasTodayClosure) {
       return null;
     }
@@ -143,13 +136,18 @@ export function Closures() {
     });
     
     if (todayInvoices.length > 0) {
+      // Si hay facturas de hoy, cerrar el día de hoy
       return today;
     }
     
-    // Si no hay facturas de hoy, buscar el día anterior sin cierre
-    const todayDate = new Date(today + 'T12:00:00');
+    // Si no hay facturas de hoy, buscar el día anterior sin cierre - CALCULAR SIN UTC
+    const todayDate = new Date(today + 'T12:00:00'); // Usar mediodía para evitar problemas
     todayDate.setDate(todayDate.getDate() - 1);
-    const yesterday = formatDateFromDateObject(todayDate);
+    // Extraer fecha sin usar toISOString
+    const year = todayDate.getFullYear();
+    const month = String(todayDate.getMonth() + 1).padStart(2, '0');
+    const day = String(todayDate.getDate()).padStart(2, '0');
+    const yesterday = `${year}-${month}-${day}`;
     
     const hasYesterdayClosure = dailyClosures.some(closure => {
       const closureDate = extractColombiaDate(closure.date);
@@ -162,13 +160,16 @@ export function Closures() {
       return invDate === yesterday;
     });
     
+    // Si hay facturas de ayer y no hay cierre, cerrar ayer
     if (yesterdayInvoices.length > 0 && !hasYesterdayClosure) {
       return yesterday;
     }
     
+    // No hay nada que cerrar
     return null;
   };
   
+  // Nueva función para obtener facturas del día a cerrar
   const getInvoicesToClose = () => {
     const dayToClose = getDayToClose();
     if (!dayToClose) return [];
@@ -205,21 +206,33 @@ export function Closures() {
       .filter(inv => inv.status === 'paid')
       .reduce((sum, inv) => sum + inv.total, 0);
 
-    // Filtrar devoluciones por la fecha de la factura original
+    // CAMBIO CRÍTICO: Filtrar devoluciones por la fecha de la factura original, NO por la fecha de la devolución
+    // Ejemplo: Si una factura del día 27 se devuelve el día 28, la devolución cuenta para el cierre del día 27
     const todayReturns = returns.filter(ret => {
+      // Buscar la factura original
       const originalInvoice = invoices.find(inv => inv.id === ret.invoice_id);
       if (!originalInvoice) return false;
       
+      // Solo contar la devolución si la factura original es del día que se está cerrando
       const invoiceDate = extractColombiaDate(originalInvoice.date);
       return invoiceDate === today;
     });
 
     const totalReturns = todayReturns.reduce((sum, ret) => sum + ret.total, 0);
     
+    // FILTRAR ABONOS A CRÉDITO DEL DÍA - usar extractColombiaDate para evitar problemas de zona horaria
+    const todayCreditPayments = creditPayments.filter(payment => {
+      if (!payment.date) return false;
+      const paymentDate = extractColombiaDate(payment.date);
+      return paymentDate === today;
+    });
+    
     console.log(`[DEBUG Cierres] Día a cerrar: ${today}`);
     console.log(`[DEBUG Cierres] Facturas del día: ${todayInvoices.length}`);
     console.log(`[DEBUG Cierres] Devoluciones que afectan este día: ${todayReturns.length}`);
     console.log(`[DEBUG Cierres] Total devoluciones: ${formatCOP(totalReturns)}`);
+    console.log(`[DEBUG Cierres] Abonos a crédito del día: ${todayCreditPayments.length}`);
+    console.log(`[DEBUG Cierres] Total abonos: ${formatCOP(todayCreditPayments.reduce((sum, p) => sum + p.amount, 0))}`);
 
     return {
       totalInvoices,
@@ -236,6 +249,7 @@ export function Closures() {
         .reduce((sum, inv) => {
           return sum + inv.items.reduce((itemSum: number, item: any) => itemSum + item.quantity, 0);
         }, 0),
+      creditPayments: todayCreditPayments, // Incluir abonos del día
     };
   };
 
@@ -243,12 +257,14 @@ export function Closures() {
     const currentMonthClosures = getCurrentMonthClosures();
     const totalRevenue = currentMonthClosures.reduce((sum, closure) => sum + closure.total, 0);
 
+    // Obtener mes actual y anterior usando fecha de Colombia - SIN UTC
     const currentColombiaDate = getColombiaDate();
     const currentMonthStr = currentColombiaDate.substring(0, 7);
     
-    // Calcular mes anterior
-    const currentDate = new Date(currentColombiaDate + 'T12:00:00');
+    // Calcular mes anterior usando fecha de Colombia - SIN toISOString
+    const currentDate = new Date(currentColombiaDate + 'T12:00:00'); // Mediodía para evitar problemas
     currentDate.setMonth(currentDate.getMonth() - 1);
+    // Extraer mes anterior sin usar toISOString
     const prevYear = currentDate.getFullYear();
     const prevMonth = String(currentDate.getMonth() + 1).padStart(2, '0');
     const previousMonthStr = `${prevYear}-${prevMonth}`;
@@ -267,6 +283,7 @@ export function Closures() {
     });
     const currentMonthRevenue = currentMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
+    // Calcular créditos pendientes del mes actual
     const currentMonthCreditInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
       const invDate = extractColombiaDate(inv.date);
@@ -276,6 +293,7 @@ export function Closures() {
       .filter(inv => inv.status === 'pending')
       .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
 
+    // Calcular créditos pendientes del mes anterior
     const previousMonthCreditInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
       const invDate = extractColombiaDate(inv.date);
@@ -285,6 +303,7 @@ export function Closures() {
       .filter(inv => inv.status === 'pending')
       .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
 
+    // Calcular gastos del mes actual
     const currentMonthExpenses = expenses.filter(expense => {
       if (!expense.date) return false;
       const expenseDate = extractColombiaDate(expense.date);
@@ -292,6 +311,7 @@ export function Closures() {
     });
     const totalExpenses = currentMonthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
+    // Crear objetos Date para obtener nombres de meses en español
     const previousMonthDate = new Date(previousMonthStr + '-01T12:00:00');
     const currentMonthDate = new Date(currentMonthStr + '-01T12:00:00');
 
@@ -321,6 +341,7 @@ export function Closures() {
       },
     ];
 
+    // Datos de ventas diarias del mes
     const dailySalesData = currentMonthClosures.map((closure, index) => ({
       id: `day-${index}`,
       day: new Date(closure.date + 'T12:00:00').getDate().toString(),
@@ -350,9 +371,10 @@ export function Closures() {
       hourlyMap.set(i, 0);
     }
 
-    // Sumar ventas por hora usando zona horaria de Colombia
+    // Sumar ventas por hora - USAR ZONA HORARIA DE COLOMBIA
     todayInvoices.forEach(inv => {
       if (inv.date && inv.status === 'paid') {
+        // Convertir la fecha a hora de Colombia usando toLocaleString
         const colombiaDateStr = new Date(inv.date).toLocaleString('en-US', { timeZone: 'America/Bogota' });
         const colombiaDate = new Date(colombiaDateStr);
         const hour = colombiaDate.getHours();
@@ -360,8 +382,9 @@ export function Closures() {
       }
     });
 
-    // Convertir a array - mostrar todas las horas
+    // Convertir a array - usar solo horas con ventas o todas las horas del día
     return Array.from(hourlyMap.entries())
+      .filter(([_, sales]) => sales > 0 || true) // Mostrar todas las horas
       .map(([hour, sales]) => ({
         hour: `${hour.toString().padStart(2, '0')}:00`,
         sales,
@@ -389,36 +412,48 @@ export function Closures() {
       .slice(0, 10);
   };
 
-  // Memoizar cálculos pesados
-  const dailyStats = useMemo(() => calculateDailyStats(), [invoices, dailyClosures, returns]);
-  const monthlyStats = useMemo(() => calculateMonthlyStats(), [invoices, dailyClosures, expenses]);
-  const hourlyData = useMemo(() => calculateHourlyData(), [invoices]);
-  const topProducts = useMemo(() => calculateTopProducts(), [invoices]);
+  const dailyStats = calculateDailyStats();
+  const monthlyStats = calculateMonthlyStats();
+  const hourlyData = calculateHourlyData();
+  const topProducts = calculateTopProducts();
 
   const hasCurrentMonthClosure = () => {
     const currentMonth = getColombiaDate().substring(0, 7);
     return monthlyClosures.some(closure => closure.month === currentMonth);
   };
 
+  // Verificar si es un nuevo mes sin cierre mensual del mes anterior
   const needsMonthlyClose = () => {
     const today = getColombiaDate();
     
-    const todayDate = new Date(today + 'T12:00:00');
+    // Calcular ayer sin usar toISOString - SIN UTC
+    const todayDate = new Date(today + 'T12:00:00'); // Mediodía para evitar problemas
     todayDate.setDate(todayDate.getDate() - 1);
-    const yesterdayStr = formatDateFromDateObject(todayDate);
+    // Extraer fecha sin usar toISOString
+    const year = todayDate.getFullYear();
+    const month = String(todayDate.getMonth() + 1).padStart(2, '0');
+    const day = String(todayDate.getDate()).padStart(2, '0');
+    const yesterdayStr = `${year}-${month}-${day}`;
 
     const currentMonth = today.substring(0, 7);
     const yesterdayMonth = yesterdayStr.substring(0, 7);
 
+    // Si es día 1 de un nuevo mes (ayer era otro mes)
     if (currentMonth !== yesterdayMonth) {
+      // Verificar si existe cierre mensual del mes anterior
       const hasPreviousMonthClosure = monthlyClosures.some(closure => closure.month === yesterdayMonth);
 
+      // Verificar si realmente hubo facturas en el mes anterior usando extractColombiaDate
       const previousMonthInvoices = invoices.filter(inv => {
         if (!inv.date) return false;
         const invDate = extractColombiaDate(inv.date);
         return invDate.substring(0, 7) === yesterdayMonth;
       });
 
+      // Solo pedir el cierre mensual si:
+      // 1. NO existe un cierre mensual del mes anterior
+      // 2. Hay cierres diarios en total (el sistema está en uso)
+      // 3. Realmente hubo facturas en el mes anterior
       if (!hasPreviousMonthClosure && dailyClosures.length > 0 && previousMonthInvoices.length > 0) {
         const previousMonthDate = new Date(yesterdayStr + 'T12:00:00');
         const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
@@ -668,7 +703,7 @@ export function Closures() {
                           {paginatedClosures.map((closure) => (
                             <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
                               <td className="py-2 px-3 text-sm">
-                                {formatDateForDisplay(closure.date)}
+                                {new Date(closure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}
                               </td>
                               <td className="py-2 px-3 text-center text-sm">{closure.total_invoices}</td>
                               <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_cash)}</td>
@@ -845,7 +880,7 @@ export function Closures() {
                     {monthlyStats.closures.map((closure) => (
                       <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
                         <td className="py-2 px-3 text-sm">
-                          {formatDateForDisplay(closure.date)}
+                          {new Date(closure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}
                         </td>
                         <td className="py-2 px-3 text-center text-sm">{closure.total_invoices}</td>
                         <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_cash)}</td>
@@ -899,7 +934,7 @@ export function Closures() {
                           {paginatedClosures.map((closure) => (
                             <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
                               <td className="py-2 px-3 text-sm">
-                                {new Date(closure.month + '-01T12:00:00').toLocaleDateString('es-ES', { month: 'long' })}
+                                {new Date(closure.month + '-01').toLocaleDateString('es-ES', { month: 'long', timeZone: 'UTC' })}
                               </td>
                               <td className="py-2 px-3 text-center text-sm">{closure.year}</td>
                               <td className="py-2 px-3 text-center text-sm">{closure.totalInvoices}</td>
