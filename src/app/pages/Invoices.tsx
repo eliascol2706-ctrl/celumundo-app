@@ -14,6 +14,7 @@ import {
   getColombiaDate,
   extractColombiaDate,
   confirmInvoicePayment,
+  getCustomers,
   type CreditPayment,
   supabase
 } from '../lib/supabase';
@@ -157,6 +158,12 @@ export function Invoices() {
   // Dialog de confirmar pago de factura pendiente
   const [isConfirmPaymentDialogOpen, setIsConfirmPaymentDialogOpen] = useState(false);
   const [invoiceToConfirm, setInvoiceToConfirm] = useState<Invoice | null>(null);
+
+  // Estados para selector de clientes existentes
+  const [customers, setCustomers] = useState<{ id: string; name: string; document: string }[]>([]);
+  const [showExistingCustomers, setShowExistingCustomers] = useState(false);
+  const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
 
   // Manejar entrada de código de barras
   useEffect(() => {
@@ -329,12 +336,14 @@ export function Invoices() {
   const loadData = async () => {
     try {
       setIsLoading(true);
-      const [invoicesData, productsData] = await Promise.all([
+      const [invoicesData, productsData, customersData] = await Promise.all([
         getInvoices(),
         getProducts(),
+        getCustomers(),
       ]);
       setInvoices(invoicesData);
       setProducts(productsData);
+      setCustomers(customersData);
     } catch (error) {
       console.error('Error loading data:', error);
       toast.error('Error al cargar los datos');
@@ -531,6 +540,11 @@ export function Invoices() {
       setInvoiceItems([]);
       setCurrentItem({ productId: '', quantity: '1', price: '' });
       setSelectedProductInfo(null);
+      setShowExistingCustomers(false);
+      setSelectedCustomerId('');
+      setEditingInvoiceId(null);
+      setIsCredit(false);
+      setIsPendingConfirmation(false);
       setIsCreateDialogOpen(true);
 
       // Recargar productos cada vez que se abre el diálogo para mostrar productos recién creados
@@ -752,8 +766,8 @@ export function Invoices() {
       }
     }
 
-    // Si es crédito O factura pendiente, crear directamente sin pasar por el diálogo de pago
-    if (isCredit || isPendingConfirmation) {
+    // Si es crédito O factura pendiente O editando factura existente, crear directamente sin pasar por el diálogo de pago
+    if (isCredit || isPendingConfirmation || editingInvoiceId) {
       await handleConfirmPayment();
       return;
     }
@@ -812,7 +826,66 @@ export function Invoices() {
         paymentMethodStr = paymentMethods.join(', ');
       }
 
-      // Crear factura
+      // Si estamos editando una factura existente (agregar productos a factura pendiente)
+      if (editingInvoiceId) {
+        const { data: updatedInvoice, error: updateError } = await supabase
+          .from('invoices')
+          .update({
+            items: invoiceItems.map(item => ({
+              productId: item.productId,
+              productName: item.productName,
+              productCode: item.productCode,
+              quantity: item.quantity,
+              price: item.price,
+              total: item.total,
+              unitIds: item.unitIds || []
+            })),
+            subtotal,
+            tax,
+            total,
+            credit_balance: total, // Actualizar saldo
+          })
+          .eq('id', editingInvoiceId)
+          .eq('company', company)
+          .select()
+          .single();
+        
+        if (updateError) {
+          console.error('Error updating invoice:', updateError);
+          throw new Error('Error al actualizar factura');
+        }
+
+        // Registrar movimientos de inventario para los nuevos productos
+        for (const item of invoiceItems) {
+          await addMovement({
+            type: 'sale',
+            product_id: item.productId,
+            quantity: item.quantity,
+            unit_price: item.price,
+            total: item.total,
+            notes: `Venta - Factura ${updatedInvoice.number} (actualizada)`,
+            invoice_number: updatedInvoice.number,
+            unit_ids: item.unitIds
+          });
+        }
+
+        toast.success('Factura actualizada exitosamente');
+        setIsCreateDialogOpen(false);
+        setIsPaymentDialogOpen(false);
+        setEditingInvoiceId(null);
+        await loadData();
+        
+        // Resetear formulario
+        setInvoiceItems([]);
+        setFormData({ customerName: '', customerDocument: '' });
+        setIsCredit(false);
+        setIsPendingConfirmation(false);
+        setShowExistingCustomers(false);
+        setSelectedCustomerId('');
+        return;
+      }
+
+      // Crear factura nueva
       const invoiceData = {
         company,
         number: nextNumber || '00001',
@@ -886,36 +959,39 @@ export function Invoices() {
         }
       }
 
-      // Actualizar stock y registrar movimientos
-      for (const item of invoiceItems) {
-        const product = products.find(p => p.id === item.productId);
-        if (!product) continue;
+      // Actualizar stock y registrar movimientos (SOLO si NO es factura en confirmación)
+      // Las facturas en confirmación NO modifican el stock hasta que se aprueben
+      if (!isPendingConfirmation) {
+        for (const item of invoiceItems) {
+          const product = products.find(p => p.id === item.productId);
+          if (!product) continue;
 
-        const updates: any = {
-          stock: product.stock - item.quantity
-        };
+          const updates: any = {
+            stock: product.stock - item.quantity
+          };
 
-        // Si usa IDs, remover las IDs vendidas
-        if (item.useUnitIds && item.unitIds) {
-          const updatedIds = (product.registered_ids || []).filter(
-            id => !item.unitIds!.includes(id)
-          );
-          updates.registered_ids = updatedIds;
+          // Si usa IDs, remover las IDs vendidas
+          if (item.useUnitIds && item.unitIds) {
+            const updatedIds = (product.registered_ids || []).filter(
+              id => !item.unitIds!.includes(id)
+            );
+            updates.registered_ids = updatedIds;
+          }
+
+          await updateProduct(item.productId, updates);
+
+          // Registrar movimiento
+          await addMovement({
+            type: 'exit',
+            product_id: item.productId,
+            product_name: item.productName,
+            quantity: item.quantity,
+            reason: 'Venta - Factura',
+            reference: nextNumber || '00001',
+            user_name: user?.username || 'Usuario',
+            unit_ids: item.unitIds || []
+          });
         }
-
-        await updateProduct(item.productId, updates);
-
-        // Registrar movimiento
-        await addMovement({
-          type: 'exit',
-          product_id: item.productId,
-          product_name: item.productName,
-          quantity: item.quantity,
-          reason: 'Venta - Factura',
-          reference: nextNumber || '00001',
-          user_name: user?.username || 'Usuario',
-          unit_ids: item.unitIds || []
-        });
       }
 
       const successMessage = isPendingConfirmation 
@@ -936,6 +1012,9 @@ export function Invoices() {
       setIsCredit(false); // Resetear estado de crédito
       setIsPendingConfirmation(false); // NUEVO: Resetear estado de confirmación
       setInvoiceType('regular'); // Resetear tipo de factura
+      setShowExistingCustomers(false); // Resetear selector de clientes
+      setSelectedCustomerId(''); // Resetear cliente seleccionado
+      setEditingInvoiceId(null); // Resetear factura en edición
     } catch (error) {
       console.error('Error:', error);
       toast.error(error instanceof Error ? error.message : 'Error al crear factura');
@@ -987,6 +1066,38 @@ export function Invoices() {
       });
       
       if (result) {
+        // AHORA reducir stock y registrar movimientos (porque la factura se está aprobando)
+        for (const item of invoiceToConfirm.items) {
+          const product = products.find(p => p.id === item.productId);
+          if (!product) continue;
+
+          const updates: any = {
+            stock: product.stock - item.quantity
+          };
+
+          // Si usa IDs, remover las IDs vendidas
+          if (item.unitIds && item.unitIds.length > 0) {
+            const updatedIds = (product.registered_ids || []).filter(
+              id => !item.unitIds!.includes(id)
+            );
+            updates.registered_ids = updatedIds;
+          }
+
+          await updateProduct(item.productId, updates);
+
+          // Registrar movimiento
+          await addMovement({
+            type: 'exit',
+            product_id: item.productId,
+            product_name: item.productName,
+            quantity: item.quantity,
+            reason: 'Venta - Factura',
+            reference: invoiceToConfirm.number,
+            user_name: getCurrentUser()?.username || 'Usuario',
+            unit_ids: item.unitIds || []
+          });
+        }
+
         toast.success('Pago confirmado exitosamente');
         setIsConfirmPaymentDialogOpen(false);
         setInvoiceToConfirm(null);
@@ -999,6 +1110,91 @@ export function Invoices() {
       toast.error('Error al confirmar el pago');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // Manejar eliminación de factura en confirmación
+  const handleDeletePendingConfirmation = async (invoice: Invoice) => {
+    const confirmed = confirm(
+      `¿Estás seguro de eliminar la factura ${invoice.number}?\n\n` +
+      `Total: ${formatCOP(invoice.total)}\n` +
+      `Cliente: ${invoice.customer_name || 'Consumidor Final'}\n\n` +
+      `Nota: Esta factura está "En Confirmación", por lo que NO afectó el stock.\n` +
+      `Esta acción no se puede deshacer.`
+    );
+
+    if (!confirmed) return;
+
+    setIsSubmitting(true);
+
+    try {
+      const company = getCurrentCompany();
+
+      // NO devolver stock porque las facturas en confirmación NO modifican el stock
+      // Solo eliminar la factura directamente
+
+      // Eliminar la factura
+      const { error: deleteError } = await supabase
+        .from('invoices')
+        .delete()
+        .eq('id', invoice.id)
+        .eq('company', company);
+
+      if (deleteError) {
+        console.error('Error deleting invoice:', deleteError);
+        throw new Error('Error al eliminar factura');
+      }
+
+      toast.success('Factura eliminada exitosamente');
+      await loadData();
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error('Error al eliminar factura');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Manejar selección de cliente existente
+  const handleSelectExistingCustomer = async (customerId: string) => {
+    setSelectedCustomerId(customerId);
+    const customer = customers.find(c => c.id === customerId);
+    
+    if (!customer) return;
+    
+    setFormData({
+      ...formData,
+      customerName: customer.name,
+      customerDocument: customer.document
+    });
+    
+    // Buscar factura pendiente del cliente (crédito)
+    const pendingInvoice = invoices.find(inv => 
+      inv.customer_document === customer.document &&
+      inv.status === 'pending' &&
+      inv.type === 'wholesale' &&
+      inv.is_credit
+    );
+    
+    if (pendingInvoice) {
+      const shouldLoadInvoice = confirm(
+        `Este cliente tiene una factura a crédito pendiente:\n\n` +
+        `Factura: ${pendingInvoice.number}\n` +
+        `Saldo: ${formatCOP(pendingInvoice.credit_balance || pendingInvoice.total)}\n\n` +
+        `¿Deseas cargar esa factura para agregar o modificar productos?`
+      );
+      
+      if (shouldLoadInvoice) {
+        // Cargar items de la factura pendiente
+        setInvoiceItems(pendingInvoice.items.map(item => ({
+          ...item,
+          availableIds: [] // Resetear IDs disponibles
+        })));
+        setEditingInvoiceId(pendingInvoice.id);
+        setIsCredit(true); // Mantener como crédito
+        
+        toast.success(`Factura ${pendingInvoice.number} cargada. Puedes agregar o modificar productos.`);
+      }
     }
   };
 
@@ -1758,25 +1954,37 @@ export function Invoices() {
                       <div className="flex items-center justify-center gap-2">
                         {/* Botón Aprobar (solo para facturas en confirmación) */}
                         {invoice.status === 'pending_confirmation' && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              setInvoiceToConfirm(invoice);
-                              setPaymentData({
-                                cash: invoice.total,
-                                transfer: 0,
-                                other: 0,
-                                note: ''
-                              });
-                              setIsConfirmPaymentDialogOpen(true);
-                            }}
-                            className="border-green-600 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
-                            title="Aprobar Factura"
-                          >
-                            <Check className="h-4 w-4 mr-1" />
-                            Aprobar
-                          </Button>
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => {
+                                setInvoiceToConfirm(invoice);
+                                setPaymentData({
+                                  cash: invoice.total,
+                                  transfer: 0,
+                                  other: 0,
+                                  note: ''
+                                });
+                                setIsConfirmPaymentDialogOpen(true);
+                              }}
+                              className="border-green-600 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+                              title="Aprobar Factura"
+                            >
+                              <Check className="h-4 w-4 mr-1" />
+                              Aprobar
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleDeletePendingConfirmation(invoice)}
+                              className="border-red-600 text-red-600 hover:bg-red-50 dark:hover:bg-red-950"
+                              title="Eliminar Factura"
+                              disabled={isSubmitting}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </>
                         )}
                         <Button
                           variant="ghost"
@@ -1897,8 +2105,8 @@ export function Invoices() {
                   </div>
                 )}
 
-                {/* Checkbox de Factura en Confirmación */}
-                {!isCredit && (
+                {/* Checkbox de Factura en Confirmación (solo para facturas regulares) */}
+                {!isCredit && invoiceType === 'regular' && (
                   <div className="flex items-center space-x-2 p-3 bg-yellow-50 dark:bg-yellow-950 rounded-lg border border-yellow-200 dark:border-yellow-800">
                     <input
                       type="checkbox"
@@ -1919,6 +2127,69 @@ export function Invoices() {
                 )}
 
                 {/* Información del cliente */}
+                {/* Selector de cliente existente (solo para facturas al mayor) */}
+                {invoiceType === 'wholesale' && (
+                  <div className="space-y-3 p-4 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <div className="flex items-center justify-between">
+                      <Label className="text-blue-900 dark:text-blue-100 font-semibold">
+                        {showExistingCustomers ? '👤 Cliente Existente' : '➕ Nuevo Cliente'}
+                      </Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setShowExistingCustomers(!showExistingCustomers);
+                          if (showExistingCustomers) {
+                            // Limpiar al volver a nuevo cliente
+                            setFormData({ ...formData, customerName: '', customerDocument: '' });
+                            setInvoiceItems([]);
+                            setEditingInvoiceId(null);
+                            setSelectedCustomerId('');
+                          }
+                        }}
+                        className="border-blue-600 text-blue-600 hover:bg-blue-100 dark:hover:bg-blue-900"
+                      >
+                        {showExistingCustomers ? '➕ Nuevo Cliente' : '👤 Cliente Existente'}
+                      </Button>
+                    </div>
+                    
+                    {showExistingCustomers && (
+                      <div className="space-y-2">
+                        <Label htmlFor="existingCustomer">Seleccionar Cliente</Label>
+                        <Select
+                          value={selectedCustomerId}
+                          onValueChange={handleSelectExistingCustomer}
+                        >
+                          <SelectTrigger className="bg-white dark:bg-gray-800">
+                            <SelectValue placeholder="Selecciona un cliente..." />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {customers.length === 0 && (
+                              <div className="p-4 text-center text-gray-500">
+                                No hay clientes registrados
+                              </div>
+                            )}
+                            {customers.map((customer) => (
+                              <SelectItem key={customer.id} value={customer.id}>
+                                {customer.name} - {customer.document}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {editingInvoiceId && (
+                          <div className="flex items-center gap-2 p-2 bg-green-50 dark:bg-green-950 rounded border border-green-200 dark:border-green-800">
+                            <Info className="h-4 w-4 text-green-600" />
+                            <span className="text-xs text-green-700 dark:text-green-300">
+                              Factura cargada. Puedes agregar/eliminar productos.
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 <div className="space-y-2">
                   <Label htmlFor="customerName">
                     Nombre del Cliente {isCredit && invoiceType === 'wholesale' && <span className="text-red-500">*</span>}
@@ -1930,6 +2201,7 @@ export function Invoices() {
                       setFormData({ ...formData, customerName: e.target.value })
                     }
                     placeholder="Consumidor Final"
+                    disabled={showExistingCustomers && invoiceType === 'wholesale'}
                   />
                 </div>
 
@@ -1947,6 +2219,7 @@ export function Invoices() {
                       })
                     }
                     placeholder="CC, NIT, etc."
+                    disabled={showExistingCustomers && invoiceType === 'wholesale'}
                   />
                 </div>
 
@@ -2270,7 +2543,13 @@ export function Invoices() {
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => setIsCreateDialogOpen(false)}
+                onClick={() => {
+                  setIsCreateDialogOpen(false);
+                  // Resetear estados al cancelar
+                  setShowExistingCustomers(false);
+                  setSelectedCustomerId('');
+                  setEditingInvoiceId(null);
+                }}
               >
                 Cancelar
               </Button>
