@@ -13,6 +13,7 @@ import {
   updateClosureDate,
   getExpenses,
   getCreditPayments,
+  getExchanges,
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -40,6 +41,7 @@ export function Closures() {
   const [products, setProducts] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [creditPayments, setCreditPayments] = useState<any[]>([]);
+  const [exchanges, setExchanges] = useState<any[]>([]);
 
   useEffect(() => {
     loadData();
@@ -58,7 +60,7 @@ export function Closures() {
   }, []);
 
   const loadData = async () => {
-    const [invoicesData, dailyClosuresData, monthlyClosuresData, returnsData, customersData, productsData, expensesData, creditPaymentsData] = await Promise.all([
+    const [invoicesData, dailyClosuresData, monthlyClosuresData, returnsData, customersData, productsData, expensesData, creditPaymentsData, exchangesData] = await Promise.all([
       getInvoices(),
       getDailyClosures(),
       getMonthlyClosures(),
@@ -67,6 +69,7 @@ export function Closures() {
       getProducts(),
       getExpenses(),
       getCreditPayments(),
+      getExchanges(),
     ]);
     setInvoices(invoicesData);
     setDailyClosures(dailyClosuresData);
@@ -76,6 +79,7 @@ export function Closures() {
     setProducts(productsData);
     setExpenses(expensesData);
     setCreditPayments(creditPaymentsData);
+    setExchanges(exchangesData);
     
     // DEBUG: Ver qué cierres tenemos guardados
     console.log('[DEBUG Closures] Cierres diarios guardados:', dailyClosuresData.map(c => ({ id: c.id, date: c.date, closed_by: c.closed_by })));
@@ -202,8 +206,10 @@ export function Closures() {
       .filter(inv => inv.status === 'pending')
       .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
 
+    // CORRECCIÓN: Incluir facturas pagadas, parcialmente devueltas y completamente devueltas
+    // Estas facturas SÍ generaron ingresos brutos, las devoluciones se restan por separado
     const grossRevenue = todayInvoices
-      .filter(inv => inv.status === 'paid')
+      .filter(inv => inv.status === 'paid' || inv.status === 'partial_return' || inv.status === 'returned')
       .reduce((sum, inv) => sum + inv.total, 0);
 
     // CAMBIO CRÍTICO: Filtrar devoluciones por la fecha de la factura original, NO por la fecha de la devolución
@@ -226,6 +232,13 @@ export function Closures() {
       const paymentDate = extractColombiaDate(payment.date);
       return paymentDate === today;
     });
+
+    // FILTRAR CAMBIOS DEL DÍA - usar extractColombiaDate para evitar problemas de zona horaria
+    const todayExchanges = exchanges.filter(exchange => {
+      if (!exchange.date) return false;
+      const exchangeDate = extractColombiaDate(exchange.date);
+      return exchangeDate === today;
+    });
     
     console.log(`[DEBUG Cierres] Día a cerrar: ${today}`);
     console.log(`[DEBUG Cierres] Facturas del día: ${todayInvoices.length}`);
@@ -233,6 +246,7 @@ export function Closures() {
     console.log(`[DEBUG Cierres] Total devoluciones: ${formatCOP(totalReturns)}`);
     console.log(`[DEBUG Cierres] Abonos a crédito del día: ${todayCreditPayments.length}`);
     console.log(`[DEBUG Cierres] Total abonos: ${formatCOP(todayCreditPayments.reduce((sum, p) => sum + p.amount, 0))}`);
+    console.log(`[DEBUG Cierres] Cambios del día: ${todayExchanges.length}`);
 
     return {
       totalInvoices,
@@ -250,6 +264,7 @@ export function Closures() {
           return sum + inv.items.reduce((itemSum: number, item: any) => itemSum + item.quantity, 0);
         }, 0),
       creditPayments: todayCreditPayments, // Incluir abonos del día
+      exchanges: todayExchanges, // NUEVO: Incluir cambios del día
     };
   };
 
@@ -488,6 +503,8 @@ export function Closures() {
       paid: 'Pagada',
       pending: 'Pendiente',
       cancelled: 'Cancelada',
+      partial_return: 'Parcialmente Devuelta',
+      returned: 'Devuelta Completa',
     };
     return labels[status] || status;
   };

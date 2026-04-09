@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Plus, Package, TrendingUp, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Search, Plus, Package, TrendingUp, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight, Trash2, Edit } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
 import { Textarea } from '../components/ui/textarea';
 import { formatCOP } from '../lib/currency';
-import { getExchanges, getProducts, getInvoices, addExchange, getCurrentUser, getExchangesStats, extractColombiaDate, type Exchange, type Product, type Invoice } from '../lib/supabase';
+import { getExchanges, getProducts, getInvoices, addExchange, deleteExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, type Exchange, type Product, type Invoice } from '../lib/supabase';
 import { toast } from 'sonner';
 
 export default function Exchanges() {
@@ -52,7 +52,9 @@ export default function Exchanges() {
   const [newUnitIds, setNewUnitIds] = useState<string[]>([]);
   
   // Diferencia de precio
-  const [paymentMethod, setPaymentMethod] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState(''); // Mantener por compatibilidad
+  const [paymentCash, setPaymentCash] = useState(0);
+  const [paymentTransfer, setPaymentTransfer] = useState(0);
   const [notes, setNotes] = useState('');
 
   const itemsPerPage = 10;
@@ -101,6 +103,8 @@ export default function Exchanges() {
     setNewPrice(0);
     setNewUnitIds([]);
     setPaymentMethod('');
+    setPaymentCash(0);
+    setPaymentTransfer(0);
     setNotes('');
   };
 
@@ -214,13 +218,38 @@ export default function Exchanges() {
       }
     }
     
-    // Validar método de pago si hay diferencia positiva
+    // Validar método de pago si hay diferencia
     const difference = calculatePriceDifference();
-    if (difference > 0 && !paymentMethod) {
-      return 'Debes seleccionar un método de pago para la diferencia';
+    if (difference !== 0) {
+      const totalPayment = paymentCash + paymentTransfer;
+      if (Math.abs(totalPayment - Math.abs(difference)) > 0.01) {
+        return `El total (Efectivo + Transferencia) debe ser igual a la diferencia: ${formatCOP(Math.abs(difference))}`;
+      }
     }
     
     return null;
+  };
+
+  const handleDelete = async (exchangeId: string, exchangeNumber: string) => {
+    if (!confirm(`¿Estás seguro de eliminar el cambio ${exchangeNumber}?\n\nEsto revertirá los movimientos de inventario.`)) {
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      const success = await deleteExchange(exchangeId);
+      if (success) {
+        toast.success('Cambio eliminado exitosamente');
+        await loadData();
+      } else {
+        toast.error('Error al eliminar el cambio');
+      }
+    } catch (error) {
+      console.error('Error deleting exchange:', error);
+      toast.error('Error al eliminar el cambio');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -239,7 +268,7 @@ export default function Exchanges() {
       const newTotal = newPrice * newQuantity;
 
       const exchangeData = {
-        date: new Date().toISOString(),
+        date: getColombiaDateTime().toISOString(), // Usar fecha y hora de Colombia (GMT-5)
         type: exchangeType,
         invoice_id: exchangeType === 'invoice' ? selectedInvoice?.id : undefined,
         invoice_number: exchangeType === 'invoice' ? selectedInvoice?.number : undefined,
@@ -257,8 +286,10 @@ export default function Exchanges() {
         new_total: newTotal,
         new_unit_ids: newProduct.use_unit_ids ? newUnitIds : undefined,
         price_difference: priceDifference,
-        payment_method: priceDifference !== 0 ? paymentMethod : undefined,
-        payment_amount: priceDifference > 0 ? priceDifference : undefined,
+        payment_method: priceDifference !== 0 ? (paymentCash > 0 && paymentTransfer > 0 ? 'Mixto' : paymentCash > 0 ? 'Efectivo' : 'Transferencia') : undefined,
+        payment_amount: Math.abs(priceDifference),
+        payment_cash: paymentCash,
+        payment_transfer: paymentTransfer,
         notes: notes || undefined,
         registered_by: currentUser.username,
       };
@@ -412,6 +443,7 @@ export default function Exchanges() {
                       <th className="text-left py-3 px-3 text-sm font-medium">Producto Nuevo</th>
                       <th className="text-right py-3 px-3 text-sm font-medium">Diferencia</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Registrado por</th>
+                      <th className="text-center py-3 px-3 text-sm font-medium">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -455,6 +487,19 @@ export default function Exchanges() {
                           </span>
                         </td>
                         <td className="py-3 px-3 text-sm">{exchange.registered_by}</td>
+                        <td className="py-3 px-3">
+                          <div className="flex items-center justify-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleDelete(exchange.id, exchange.exchange_number)}
+                              disabled={isLoading}
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -796,26 +841,87 @@ export default function Exchanges() {
                 </div>
 
                 {priceDifference > 0 && (
-                  <div className="space-y-2">
-                    <Label>Método de Pago (Cliente paga diferencia)</Label>
-                    <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Seleccionar método de pago" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="Efectivo">Efectivo</SelectItem>
-                        <SelectItem value="Transferencia">Transferencia</SelectItem>
-                        <SelectItem value="Tarjeta">Tarjeta</SelectItem>
-                        <SelectItem value="Otros">Otros</SelectItem>
-                      </SelectContent>
-                    </Select>
+                  <div className="space-y-4">
+                    <p className="text-sm font-medium text-green-700 dark:text-green-300">
+                      Cliente paga diferencia
+                    </p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Efectivo</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={paymentCash || ''}
+                          onChange={(e) => setPaymentCash(parseFloat(e.target.value) || 0)}
+                          className="text-lg font-semibold"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Transferencia</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={paymentTransfer || ''}
+                          onChange={(e) => setPaymentTransfer(parseFloat(e.target.value) || 0)}
+                          className="text-lg font-semibold"
+                        />
+                      </div>
+                    </div>
+                    <div className="p-2 bg-green-50 dark:bg-green-950/30 rounded">
+                      <p className="text-xs text-green-700 dark:text-green-300">
+                        Total ingresado: <span className="font-bold">COP {formatCOP(paymentCash + paymentTransfer)}</span>
+                      </p>
+                      {Math.abs((paymentCash + paymentTransfer) - priceDifference) > 0.01 && (
+                        <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                          ⚠️ Debe sumar exactamente COP {formatCOP(priceDifference)}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 )}
 
                 {priceDifference < 0 && (
-                  <p className="text-sm text-muted-foreground">
-                    Se debe devolver COP {formatCOP(Math.abs(priceDifference))} al cliente
-                  </p>
+                  <div className="space-y-4">
+                    <p className="text-sm font-medium text-orange-700 dark:text-orange-300">
+                      Se devuelve al cliente
+                    </p>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label>Efectivo</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={paymentCash || ''}
+                          onChange={(e) => setPaymentCash(parseFloat(e.target.value) || 0)}
+                          className="text-lg font-semibold"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Transferencia</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={paymentTransfer || ''}
+                          onChange={(e) => setPaymentTransfer(parseFloat(e.target.value) || 0)}
+                          className="text-lg font-semibold"
+                        />
+                      </div>
+                    </div>
+                    <div className="p-2 bg-orange-50 dark:bg-orange-950/30 rounded">
+                      <p className="text-xs text-orange-700 dark:text-orange-300">
+                        Total a devolver: <span className="font-bold">COP {formatCOP(paymentCash + paymentTransfer)}</span>
+                      </p>
+                      {Math.abs((paymentCash + paymentTransfer) - Math.abs(priceDifference)) > 0.01 && (
+                        <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                          ⚠️ Debe sumar exactamente COP {formatCOP(Math.abs(priceDifference))}
+                        </p>
+                      )}
+                    </div>
+                  </div>
                 )}
 
                 {priceDifference === 0 && (
