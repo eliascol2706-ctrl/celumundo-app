@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { RotateCcw, Search, Plus, X, AlertCircle, CheckCircle, Package } from 'lucide-react';
+import { RotateCcw, Search, Plus, X, AlertCircle, CheckCircle, Package, FileText, Calendar } from 'lucide-react';
 import { 
   getInvoices, 
   getReturns, 
@@ -32,6 +32,13 @@ export function Returns() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'full' | 'partial'>('all');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 10;
+  
+  // Estados para el modal de selección de facturas
+  const [isInvoiceSelectorOpen, setIsInvoiceSelectorOpen] = useState(false);
+  const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
+  const [invoicePeriodFilter, setInvoicePeriodFilter] = useState<'today' | 'yesterday' | 'current_month' | 'last_month' | 'all'>('all');
 
   useEffect(() => {
     loadData();
@@ -214,6 +221,65 @@ export function Returns() {
     }
   };
 
+  // Reset page cuando cambian los filtros
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, filterType]);
+
+  // Filtrar facturas por período y búsqueda
+  const getFilteredInvoicesForSelector = () => {
+    let filtered = getEligibleInvoices();
+    const now = new Date();
+    
+    // Filtrar por período
+    if (invoicePeriodFilter !== 'all') {
+      filtered = filtered.filter(invoice => {
+        const invoiceDate = new Date(invoice.date);
+        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        
+        switch (invoicePeriodFilter) {
+          case 'today':
+            return invoiceDate >= today;
+          case 'yesterday':
+            return invoiceDate >= yesterday && invoiceDate < today;
+          case 'current_month':
+            return invoiceDate.getMonth() === now.getMonth() && 
+                   invoiceDate.getFullYear() === now.getFullYear();
+          case 'last_month': {
+            const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            const currentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+            return invoiceDate >= lastMonth && invoiceDate < currentMonth;
+          }
+          default:
+            return true;
+        }
+      });
+    }
+    
+    // Filtrar por búsqueda
+    if (invoiceSearchTerm.trim()) {
+      filtered = filtered.filter(invoice =>
+        invoice.number.toLowerCase().includes(invoiceSearchTerm.toLowerCase()) ||
+        (invoice.customer_name?.toLowerCase() || '').includes(invoiceSearchTerm.toLowerCase())
+      );
+    }
+    
+    return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  };
+
+  const handleOpenInvoiceSelector = () => {
+    setInvoiceSearchTerm('');
+    setInvoicePeriodFilter('all');
+    setIsInvoiceSelectorOpen(true);
+  };
+
+  const handleSelectInvoiceFromModal = (invoice: Invoice) => {
+    handleInvoiceSelect(invoice.id);
+    setIsInvoiceSelectorOpen(false);
+  };
+
   // Filtrar devoluciones
   const getFilteredReturns = () => {
     let filtered = returns;
@@ -236,6 +302,12 @@ export function Returns() {
   };
 
   const filteredReturns = getFilteredReturns();
+
+  // Paginación
+  const totalPages = Math.ceil(filteredReturns.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedReturns = filteredReturns.slice(startIndex, endIndex);
 
   return (
     <div className="space-y-6">
@@ -354,7 +426,7 @@ export function Returns() {
                 </tr>
               </thead>
               <tbody>
-                {filteredReturns.map((ret) => (
+                {paginatedReturns.map((ret) => (
                   <tr key={ret.id} className="border-b border-border hover:bg-muted/50">
                     <td className="py-3 px-3 text-sm font-medium">{ret.return_number}</td>
                     <td className="py-3 px-3 text-sm">{ret.invoice_number}</td>
@@ -385,7 +457,7 @@ export function Returns() {
                     </td>
                   </tr>
                 ))}
-                {filteredReturns.length === 0 && (
+                {paginatedReturns.length === 0 && (
                   <tr>
                     <td colSpan={7} className="py-8 text-center text-muted-foreground">
                       {searchTerm || filterType !== 'all'
@@ -397,6 +469,57 @@ export function Returns() {
               </tbody>
             </table>
           </div>
+
+          {/* Paginación */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-6 pt-4 border-t border-border">
+              <div className="text-sm text-muted-foreground">
+                Mostrando {startIndex + 1} - {Math.min(endIndex, filteredReturns.length)} de {filteredReturns.length} devoluciones
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Anterior
+                </Button>
+                <div className="flex items-center gap-1">
+                  {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => {
+                    if (
+                      page === 1 ||
+                      page === totalPages ||
+                      (page >= currentPage - 1 && page <= currentPage + 1)
+                    ) {
+                      return (
+                        <Button
+                          key={page}
+                          variant={currentPage === page ? 'default' : 'outline'}
+                          size="sm"
+                          onClick={() => setCurrentPage(page)}
+                          className="min-w-[40px]"
+                        >
+                          {page}
+                        </Button>
+                      );
+                    } else if (page === currentPage - 2 || page === currentPage + 2) {
+                      return <span key={page} className="px-2 text-muted-foreground">...</span>;
+                    }
+                    return null;
+                  })}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Siguiente
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -416,21 +539,39 @@ export function Returns() {
             {/* Selección de factura */}
             <div className="space-y-2">
               <Label>Seleccionar Factura</Label>
-              <Select 
-                value={selectedInvoice?.id || ''} 
-                onValueChange={handleInvoiceSelect}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecciona una factura..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {getEligibleInvoices().map((invoice) => (
-                    <SelectItem key={invoice.id} value={invoice.id}>
-                      {invoice.number} - {invoice.customer_name || 'Sin nombre'} - {formatCOP(invoice.total)} - {new Date(invoice.date).toLocaleDateString('es-ES')}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              {selectedInvoice ? (
+                <Card className="bg-primary/5 border-primary/20">
+                  <CardContent className="pt-4 pb-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <FileText className="h-4 w-4 text-primary" />
+                          <span className="font-medium text-sm">{selectedInvoice.number}</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {selectedInvoice.customer_name || 'Sin nombre'} • {formatCOP(selectedInvoice.total)}
+                        </p>
+                      </div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleOpenInvoiceSelector}
+                      >
+                        Cambiar
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : (
+                <Button 
+                  variant="outline" 
+                  className="w-full justify-start h-auto py-3"
+                  onClick={handleOpenInvoiceSelector}
+                >
+                  <FileText className="h-4 w-4 mr-2" />
+                  <span>Selecciona una factura...</span>
+                </Button>
+              )}
             </div>
 
             {selectedInvoice && (
@@ -548,6 +689,153 @@ export function Returns() {
             >
               <CheckCircle className="h-4 w-4 mr-2" />
               Confirmar Devolución
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de selección de facturas */}
+      <Dialog open={isInvoiceSelectorOpen} onOpenChange={setIsInvoiceSelectorOpen}>
+        <DialogContent className="sm:max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="h-5 w-5 text-primary" />
+              Seleccionar Factura
+            </DialogTitle>
+            <DialogDescription>
+              Busca y selecciona una factura para procesar la devolución
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Filtros */}
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3 py-4">
+            {/* Buscador */}
+            <div className="relative md:col-span-2">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Buscar por número o cliente..."
+                value={invoiceSearchTerm}
+                onChange={(e) => setInvoiceSearchTerm(e.target.value)}
+                className="pl-10"
+              />
+            </div>
+
+            {/* Filtros de período */}
+            <Button
+              variant={invoicePeriodFilter === 'today' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setInvoicePeriodFilter('today')}
+              className="text-xs"
+            >
+              Hoy
+            </Button>
+            <Button
+              variant={invoicePeriodFilter === 'yesterday' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setInvoicePeriodFilter('yesterday')}
+              className="text-xs"
+            >
+              Ayer
+            </Button>
+            <Button
+              variant={invoicePeriodFilter === 'current_month' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setInvoicePeriodFilter('current_month')}
+              className="text-xs"
+            >
+              Mes Actual
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <Button
+              variant={invoicePeriodFilter === 'last_month' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setInvoicePeriodFilter('last_month')}
+              className="text-xs"
+            >
+              Mes Pasado
+            </Button>
+            <Button
+              variant={invoicePeriodFilter === 'all' ? 'default' : 'outline'}
+              size="sm"
+              onClick={() => setInvoicePeriodFilter('all')}
+              className="text-xs md:col-span-2"
+            >
+              Todas las Facturas
+            </Button>
+          </div>
+
+          {/* Lista de facturas */}
+          <div className="flex-1 overflow-y-auto border border-border rounded-lg mt-4">
+            <div className="space-y-2 p-4">
+              {getFilteredInvoicesForSelector().length === 0 ? (
+                <div className="text-center py-8 text-muted-foreground">
+                  <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                  <p>No se encontraron facturas</p>
+                  <p className="text-sm mt-1">Intenta ajustar los filtros</p>
+                </div>
+              ) : (
+                getFilteredInvoicesForSelector().map((invoice) => (
+                  <Card
+                    key={invoice.id}
+                    className="cursor-pointer hover:bg-muted/50 transition-colors border-border"
+                    onClick={() => handleSelectInvoiceFromModal(invoice)}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <FileText className="h-4 w-4 text-primary" />
+                            <span className="font-semibold">{invoice.number}</span>
+                            <span className="text-xs px-2 py-1 rounded-full bg-primary/10 text-primary">
+                              {invoice.invoice_type === 'regular' ? 'Regular' : 'Al Mayor'}
+                            </span>
+                          </div>
+                          
+                          <div className="grid grid-cols-2 gap-2 text-sm">
+                            <div>
+                              <span className="text-muted-foreground">Cliente:</span>{' '}
+                              <span className="font-medium">{invoice.customer_name || 'Sin nombre'}</span>
+                            </div>
+                            <div>
+                              <span className="text-muted-foreground">Fecha:</span>{' '}
+                              <span>{new Date(invoice.date).toLocaleDateString('es-ES')}</span>
+                            </div>
+                          </div>
+
+                          <div className="text-xs text-muted-foreground">
+                            <span className="font-medium">Productos:</span>{' '}
+                            {invoice.items.slice(0, 3).map(item => item.productName).join(', ')}
+                            {invoice.items.length > 3 && ` +${invoice.items.length - 3} más`}
+                          </div>
+                        </div>
+
+                        <div className="text-right space-y-1">
+                          <div className="text-xl font-bold text-primary">
+                            {formatCOP(invoice.total)}
+                          </div>
+                          <div className="text-xs text-muted-foreground">
+                            {invoice.items.length} {invoice.items.length === 1 ? 'producto' : 'productos'}
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="mt-4">
+            <Button 
+              type="button" 
+              variant="outline" 
+              onClick={() => setIsInvoiceSelectorOpen(false)}
+            >
+              <X className="h-4 w-4 mr-2" />
+              Cancelar
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
-import { User, CreditCard, DollarSign, FileText, Plus, Search, Eye, Printer, Trash2 } from 'lucide-react';
-import { getCustomers, getInvoices, getCreditPaymentsByInvoice, addCreditPayment, deleteCreditPayment, type Customer, type Invoice, type CreditPayment, getCurrentUser } from '../lib/supabase';
+import { User, CreditCard, DollarSign, FileText, Plus, Search, Eye, Printer, Trash2, XCircle, AlertTriangle } from 'lucide-react';
+import { getCustomers, getInvoices, getCreditPaymentsByInvoice, addCreditPayment, deleteCreditPayment, cancelCreditInvoice, type Customer, type Invoice, type CreditPayment, getCurrentUser } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -133,6 +133,25 @@ export function Customers() {
       toast.error('Error al eliminar el abono');
     }
     setIsDeletingId(null);
+  };
+
+  const handleCancelCreditInvoice = async (invoiceId: string, invoiceNumber: string) => {
+    if (!confirm(`⚠️ ADVERTENCIA: ¿Está seguro de cancelar esta factura de crédito?\n\nFactura: ${invoiceNumber}\n\nEsta acción:\n✓ Reintegrará los productos al inventario\n✓ Eliminará todos los abonos registrados\n✓ Eliminará completamente la factura\n✗ NO se puede deshacer\n\n¿Desea continuar?`)) {
+      return;
+    }
+
+    setIsSubmitting(true);
+    const result = await cancelCreditInvoice(invoiceId);
+    if (result) {
+      toast.success('Factura de crédito cancelada exitosamente');
+      // Cerrar el modal si está abierto
+      setIsViewDialogOpen(false);
+      // Recargar todos los datos
+      await loadData();
+    } else {
+      toast.error('Error al cancelar la factura de crédito');
+    }
+    setIsSubmitting(false);
   };
 
   // Filtrar facturas de crédito por cliente
@@ -707,6 +726,15 @@ export function Customers() {
               >
                 <Plus className="h-4 w-4 mr-2" />
                 Registrar Abono
+              </Button>
+            )}
+            {selectedInvoice && selectedInvoice.status === 'pending' && (
+              <Button 
+                onClick={() => handleCancelCreditInvoice(selectedInvoice.id, selectedInvoice.number)}
+                className="bg-red-600 hover:bg-red-700"
+              >
+                <XCircle className="h-4 w-4 mr-2" />
+                Cancelar Factura
               </Button>
             )}
           </DialogFooter>

@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Plus, Search, Eye, FileText, Printer, Download, X, Info, Scan, Hash, RotateCcw, CreditCard, Trash2, Receipt, Calendar, Loader2 } from 'lucide-react';
+import { Plus, Search, Eye, FileText, Printer, Download, X, Info, Scan, Hash, RotateCcw, CreditCard, Trash2, Receipt, Calendar, Loader2, Check } from 'lucide-react';
 import { 
   getInvoices, 
   getProducts, 
@@ -13,6 +13,7 @@ import {
   getColombiaDateTime,
   getColombiaDate,
   extractColombiaDate,
+  confirmInvoicePayment,
   type CreditPayment,
   supabase
 } from '../lib/supabase';
@@ -53,8 +54,9 @@ interface Invoice {
   subtotal: number;
   tax: number;
   total: number;
-  status: 'pending' | 'paid' | 'cancelled';
+  status: 'pending' | 'paid' | 'cancelled' | 'pending_confirmation'; // ACTUALIZADO
   payment_method?: string;
+  payment_note?: string; // NUEVO
   payment_cash?: number;
   payment_transfer?: number;
   payment_other?: number;
@@ -127,6 +129,7 @@ export function Invoices() {
   });
   
   const [isCredit, setIsCredit] = useState(false); // NUEVO: Para ventas a crédito
+  const [isPendingConfirmation, setIsPendingConfirmation] = useState(false); // NUEVO: Para facturas en confirmación
   
   const [invoiceItems, setInvoiceItems] = useState<InvoiceItem[]>([]);
   const [currentItem, setCurrentItem] = useState({
@@ -148,7 +151,12 @@ export function Invoices() {
     cash: 0,
     transfer: 0,
     other: 0,
+    note: '', // NUEVO: Nota adicional del pago
   });
+
+  // Dialog de confirmar pago de factura pendiente
+  const [isConfirmPaymentDialogOpen, setIsConfirmPaymentDialogOpen] = useState(false);
+  const [invoiceToConfirm, setInvoiceToConfirm] = useState<Invoice | null>(null);
 
   // Manejar entrada de código de barras
   useEffect(() => {
@@ -744,18 +752,19 @@ export function Invoices() {
       }
     }
 
-    // Si es crédito, crear directamente sin pasar por el diálogo de pago
-    if (isCredit) {
+    // Si es crédito O factura pendiente, crear directamente sin pasar por el diálogo de pago
+    if (isCredit || isPendingConfirmation) {
       await handleConfirmPayment();
       return;
     }
 
-    // Si NO es crédito, abrir diálogo de método de pago
+    // Si NO es crédito ni pendiente, abrir diálogo de método de pago
     const { total } = calculateTotals();
     setPaymentData({
       cash: total,
       transfer: 0,
       other: 0,
+      note: '',
     });
     setIsPaymentDialogOpen(true);
   };
@@ -774,9 +783,9 @@ export function Invoices() {
         }
       }
       
-      // Si NO es crédito, validar que la suma sea igual al total
+      // Si NO es crédito NI pendiente de confirmación, validar que la suma sea igual al total
       const { subtotal, tax, total } = calculateTotals();
-      if (!isCredit) {
+      if (!isCredit && !isPendingConfirmation) {
         const paymentTotal = paymentData.cash + paymentData.transfer + paymentData.other;
         
         if (Math.abs(paymentTotal - total) > 0.01) {
@@ -793,9 +802,9 @@ export function Invoices() {
         company_name: company 
       });
 
-      // Formatear métodos de pago (solo si NO es crédito)
+      // Formatear métodos de pago (solo si NO es crédito NI pendiente de confirmación)
       let paymentMethodStr = '';
-      if (!isCredit) {
+      if (!isCredit && !isPendingConfirmation) {
         const paymentMethods = [];
         if (paymentData.cash > 0) paymentMethods.push(`Efectivo: ${formatCOP(paymentData.cash)}`);
         if (paymentData.transfer > 0) paymentMethods.push(`Transferencia: ${formatCOP(paymentData.transfer)}`);
@@ -823,11 +832,12 @@ export function Invoices() {
         subtotal,
         tax,
         total,
-        status: isCredit ? ('pending' as const) : ('paid' as const),
-        payment_method: isCredit ? undefined : paymentMethodStr,
-        payment_cash: isCredit ? undefined : paymentData.cash,
-        payment_transfer: isCredit ? undefined : paymentData.transfer,
-        payment_other: isCredit ? undefined : paymentData.other,
+        status: isPendingConfirmation ? ('pending_confirmation' as const) : (isCredit ? ('pending' as const) : ('paid' as const)), // ACTUALIZADO: Usar status para pending_confirmation
+        payment_method: (isCredit || isPendingConfirmation) ? undefined : paymentMethodStr,
+        payment_cash: (isCredit || isPendingConfirmation) ? undefined : paymentData.cash,
+        payment_transfer: (isCredit || isPendingConfirmation) ? undefined : paymentData.transfer,
+        payment_other: (isCredit || isPendingConfirmation) ? undefined : paymentData.other,
+        payment_note: (!isCredit && !isPendingConfirmation && paymentData.note) ? paymentData.note : undefined, // NUEVO
         attended_by: user?.username || 'Usuario',
         is_credit: isCredit,
         credit_balance: isCredit ? total : undefined,
@@ -908,7 +918,10 @@ export function Invoices() {
         });
       }
 
-      toast.success('Factura creada exitosamente');
+      const successMessage = isPendingConfirmation 
+        ? 'Factura creada en estado "En Confirmación"' 
+        : 'Factura creada exitosamente';
+      toast.success(successMessage);
       setIsCreateDialogOpen(false);
       setIsPaymentDialogOpen(false);
       setInvoiceToPrint(newInvoice as Invoice);
@@ -921,6 +934,7 @@ export function Invoices() {
       setCurrentItem({ productId: '', quantity: '1', price: '' });
       setSelectedProductInfo(null);
       setIsCredit(false); // Resetear estado de crédito
+      setIsPendingConfirmation(false); // NUEVO: Resetear estado de confirmación
       setInvoiceType('regular'); // Resetear tipo de factura
     } catch (error) {
       console.error('Error:', error);
@@ -942,6 +956,52 @@ export function Invoices() {
       setCreditPayments([]);
     }
   };
+
+  // Manejar confirmación de pago de factura pendiente
+  const handleConfirmInvoicePayment = async () => {
+    if (!invoiceToConfirm) return;
+    
+    // Validar que el total coincida
+    const paymentTotal = paymentData.cash + paymentData.transfer + paymentData.other;
+    if (Math.abs(paymentTotal - invoiceToConfirm.total) > 0.01) {
+      toast.error(`El total de los pagos debe ser igual al total de la factura (${formatCOP(invoiceToConfirm.total)})`);
+      return;
+    }
+    
+    setIsSubmitting(true);
+    
+    try {
+      // Formatear método de pago
+      const paymentMethods = [];
+      if (paymentData.cash > 0) paymentMethods.push(`Efectivo: ${formatCOP(paymentData.cash)}`);
+      if (paymentData.transfer > 0) paymentMethods.push(`Transferencia: ${formatCOP(paymentData.transfer)}`);
+      if (paymentData.other > 0) paymentMethods.push(`Otros: ${formatCOP(paymentData.other)}`);
+      const paymentMethodStr = paymentMethods.join(', ');
+      
+      const result = await confirmInvoicePayment(invoiceToConfirm.id, {
+        payment_method: paymentMethodStr,
+        payment_cash: paymentData.cash,
+        payment_transfer: paymentData.transfer,
+        payment_other: paymentData.other,
+        payment_note: paymentData.note || undefined
+      });
+      
+      if (result) {
+        toast.success('Pago confirmado exitosamente');
+        setIsConfirmPaymentDialogOpen(false);
+        setInvoiceToConfirm(null);
+        await loadData();
+      } else {
+        toast.error('Error al confirmar el pago');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error('Error al confirmar el pago');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
     /* CODIGO BASURA COMENTADO - ELIMINAR
     // if (!confirm(`¿Deseas devolver ${item.quantity} unidad(es) de "${item.productName}"?`)) {
       return;
@@ -1680,18 +1740,44 @@ export function Invoices() {
                             ? 'bg-green-100 text-green-700'
                             : invoice.status === 'pending'
                             ? 'bg-yellow-100 text-yellow-700'
+                            : invoice.status === 'pending_confirmation'
+                            ? 'bg-orange-100 text-orange-700'
                             : 'bg-red-100 text-red-700'
                         }`}
                       >
                         {invoice.status === 'paid'
-                          ? 'Pagada'
+                          ? '✅ Pagada'
                           : invoice.status === 'pending'
-                          ? 'Pendiente'
-                          : 'Cancelada'}
+                          ? '⏳ Pendiente'
+                          : invoice.status === 'pending_confirmation'
+                          ? '⚠️ En Confirmación'
+                          : '❌ Cancelada'}
                       </span>
                     </td>
                     <td className="py-3 px-4">
                       <div className="flex items-center justify-center gap-2">
+                        {/* Botón Aprobar (solo para facturas en confirmación) */}
+                        {invoice.status === 'pending_confirmation' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setInvoiceToConfirm(invoice);
+                              setPaymentData({
+                                cash: invoice.total,
+                                transfer: 0,
+                                other: 0,
+                                note: ''
+                              });
+                              setIsConfirmPaymentDialogOpen(true);
+                            }}
+                            className="border-green-600 text-green-600 hover:bg-green-50 dark:hover:bg-green-950"
+                            title="Aprobar Factura"
+                          >
+                            <Check className="h-4 w-4 mr-1" />
+                            Aprobar
+                          </Button>
+                        )}
                         <Button
                           variant="ghost"
                           size="sm"
@@ -1794,7 +1880,10 @@ export function Invoices() {
                       type="checkbox"
                       id="isCredit"
                       checked={isCredit}
-                      onChange={(e) => setIsCredit(e.target.checked)}
+                      onChange={(e) => {
+                        setIsCredit(e.target.checked);
+                        if (e.target.checked) setIsPendingConfirmation(false); // Deshabilitar confirmación si se activa crédito
+                      }}
                       className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
                     />
                     <Label htmlFor="isCredit" className="text-sm font-semibold text-blue-900 dark:text-blue-100 cursor-pointer">
@@ -1803,6 +1892,27 @@ export function Invoices() {
                     {isCredit && (
                       <span className="ml-2 px-2 py-1 bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300 text-xs font-medium rounded-full">
                         Pendiente de Pago
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Checkbox de Factura en Confirmación */}
+                {!isCredit && (
+                  <div className="flex items-center space-x-2 p-3 bg-yellow-50 dark:bg-yellow-950 rounded-lg border border-yellow-200 dark:border-yellow-800">
+                    <input
+                      type="checkbox"
+                      id="isPendingConfirmation"
+                      checked={isPendingConfirmation}
+                      onChange={(e) => setIsPendingConfirmation(e.target.checked)}
+                      className="w-4 h-4 text-yellow-600 bg-gray-100 border-gray-300 rounded focus:ring-yellow-500"
+                    />
+                    <Label htmlFor="isPendingConfirmation" className="text-sm font-semibold text-yellow-900 dark:text-yellow-100 cursor-pointer">
+                      Factura en Confirmación
+                    </Label>
+                    {isPendingConfirmation && (
+                      <span className="ml-2 px-2 py-1 bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300 text-xs font-medium rounded-full">
+                        Requiere Confirmación de Pago
                       </span>
                     )}
                   </div>
@@ -2819,6 +2929,115 @@ export function Invoices() {
             <Button onClick={handlePrint}>
               <Printer className="h-4 w-4 mr-2" />
               Imprimir Normal
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Confirmar Pago de Factura Pendiente */}
+      <Dialog open={isConfirmPaymentDialogOpen} onOpenChange={setIsConfirmPaymentDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Check className="h-5 w-5 text-green-600" />
+              Confirmar Pago de Factura
+            </DialogTitle>
+            <DialogDescription>
+              Ingrese los detalles del pago para confirmar la factura.
+            </DialogDescription>
+          </DialogHeader>
+
+          {invoiceToConfirm && (
+            <div className="space-y-4">
+              {/* Resumen de la factura */}
+              <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg space-y-2">
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Factura:</span>
+                  <span className="text-sm font-semibold">{invoiceToConfirm.number}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-sm text-gray-600 dark:text-gray-400">Cliente:</span>
+                  <span className="text-sm font-semibold">{invoiceToConfirm.customer_name || 'Consumidor Final'}</span>
+                </div>
+                <div className="flex justify-between border-t pt-2 dark:border-gray-700">
+                  <span className="text-sm font-semibold">Total a Pagar:</span>
+                  <span className="text-lg font-bold text-green-600">{formatCOP(invoiceToConfirm.total)}</span>
+                </div>
+              </div>
+
+              {/* Método de pago */}
+              <div className="space-y-2">
+                <Label htmlFor="cashPayment">Efectivo</Label>
+                <Input
+                  id="cashPayment"
+                  type="number"
+                  value={paymentData.cash}
+                  onChange={(e) => setPaymentData({ ...paymentData, cash: parseFloat(e.target.value) || 0 })}
+                  min="0"
+                  step="1000"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="transferPayment">Transferencia</Label>
+                <Input
+                  id="transferPayment"
+                  type="number"
+                  value={paymentData.transfer}
+                  onChange={(e) => setPaymentData({ ...paymentData, transfer: parseFloat(e.target.value) || 0 })}
+                  min="0"
+                  step="1000"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="otherPayment">Otros</Label>
+                <Input
+                  id="otherPayment"
+                  type="number"
+                  value={paymentData.other}
+                  onChange={(e) => setPaymentData({ ...paymentData, other: parseFloat(e.target.value) || 0 })}
+                  min="0"
+                  step="1000"
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="paymentNoteConfirm">Nota Adicional (Opcional)</Label>
+                <Input
+                  id="paymentNoteConfirm"
+                  type="text"
+                  placeholder="Ej: Pagado con tarjeta terminación 1234..."
+                  value={paymentData.note}
+                  onChange={(e) => setPaymentData({ ...paymentData, note: e.target.value })}
+                />
+              </div>
+
+              {/* Resumen del pago */}
+              <div className="p-3 bg-blue-50 dark:bg-blue-950 rounded border border-blue-200 dark:border-blue-800">
+                <div className="flex justify-between text-sm">
+                  <span>Total pagando:</span>
+                  <span className="font-bold">
+                    {formatCOP(paymentData.cash + paymentData.transfer + paymentData.other)}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setIsConfirmPaymentDialogOpen(false)}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleConfirmInvoicePayment}
+              className="bg-green-600 hover:bg-green-700"
+              disabled={isSubmitting}
+            >
+              {isSubmitting ? 'Confirmando...' : 'Confirmar Pago'}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -56,20 +56,22 @@ export interface Invoice {
   number: string;
   date: string;
   type: 'regular' | 'wholesale';
+  invoice_type?: 'regular' | 'wholesale'; // Alias para compatibilidad
   customer_name?: string;
   customer_document?: string;
   items: InvoiceItem[];
   subtotal: number;
   tax: number;
   total: number;
-  status: 'pending' | 'paid' | 'cancelled' | 'partial_return' | 'returned';
+  status: 'pending' | 'paid' | 'cancelled' | 'partial_return' | 'returned' | 'pending_confirmation'; // ACTUALIZADO: Agregado 'pending_confirmation'
   payment_method?: string;
   payment_cash?: number;
   payment_transfer?: number;
   payment_other?: number;
-  attended_by?: string; // NUEVO: Usuario que atendió
-  is_credit?: boolean; // NUEVO: Si es una venta a crédito
-  credit_balance?: number; // NUEVO: Saldo pendiente por pagar
+  payment_note?: string; // NUEVO: Nota adicional del pago
+  attended_by?: string; // Usuario que atendió
+  is_credit?: boolean; // Si es una venta a crédito
+  credit_balance?: number; // Saldo pendiente por pagar
   created_at?: string;
   updated_at?: string;
 }
@@ -164,6 +166,61 @@ export interface User {
   password: string;
   role: 'admin' | 'seller';
   company?: 'celumundo' | 'repuestos';
+}
+
+export interface Exchange {
+  id: string;
+  company: 'celumundo' | 'repuestos';
+  exchange_number: string;
+  date: string;
+  type: 'invoice' | 'direct';
+  invoice_id?: string;
+  invoice_number?: string;
+  customer_name?: string;
+  original_product_id: string;
+  original_product_name: string;
+  original_quantity: number;
+  original_price: number;
+  original_total: number;
+  original_unit_ids?: string[];
+  new_product_id: string;
+  new_product_name: string;
+  new_quantity: number;
+  new_price: number;
+  new_total: number;
+  new_unit_ids?: string[];
+  price_difference: number;
+  payment_method?: string;
+  payment_amount?: number;
+  notes?: string;
+  registered_by: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface Warranty {
+  id: string;
+  company: 'celumundo' | 'repuestos';
+  warranty_number: string;
+  date: string;
+  product_id: string;
+  product_name: string;
+  product_code: string;
+  quantity: number;
+  unit_ids?: string[];
+  notes?: string;
+  discount_from_stock: boolean;
+  status: 'pending' | 'sent' | 'returned' | 'resolved' | 'cancelled';
+  sent_date?: string;
+  returned_date?: string;
+  resolved_date?: string;
+  sent_notes?: string;
+  return_notes?: string;
+  resolution_notes?: string;
+  registered_by: string;
+  updated_by?: string;
+  updated_at?: string;
+  created_at?: string;
 }
 
 export interface Session {
@@ -507,7 +564,7 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
 
       return {
         canCreate: false,
-        message: `🚫 No se pueden realizar facturas.\n\nYa se realizó el cierre del día ${today} a las ${closureTimeStr}.\n\nPodrás facturar nuevamente a partir de las 00:00 del siguiente día.`
+        message: `🚫 No se pueden realizar facturas.\n\nYa se realizó el cierre del día ${today} a las ${closureTimeStr}.\n\nPodrás facturar nuevamente a partir de las 12:00 AM del siguiente día.`
       };
     }
 
@@ -696,6 +753,147 @@ export const deleteInvoice = async (id: string): Promise<boolean> => {
     return false;
   }
   return true;
+};
+
+// Cancelar factura de crédito y reintegrar inventario
+export const cancelCreditInvoice = async (invoiceId: string): Promise<boolean> => {
+  try {
+    const company = getCurrentCompany();
+    const currentUser = getCurrentUser();
+    
+    // 1. Obtener la factura completa
+    const { data: invoice, error: invoiceError } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('id', invoiceId)
+      .eq('company', company)
+      .single();
+    
+    if (invoiceError || !invoice) {
+      console.error('Error fetching invoice:', invoiceError);
+      return false;
+    }
+
+    // 2. Reintegrar productos al inventario
+    for (const item of invoice.items) {
+      // Obtener el producto actual
+      const { data: product, error: productError } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', item.productId)
+        .eq('company', company)
+        .single();
+      
+      if (productError || !product) {
+        console.error('Error fetching product:', productError);
+        continue; // Continuar con el siguiente producto
+      }
+
+      // Preparar actualización del producto
+      const updatedStock = product.stock + item.quantity;
+      let updatedRegisteredIds = [...(product.registered_ids || [])];
+      
+      // Si el item tiene unitIds, reintegrarlos al principio del array
+      if (product.use_unit_ids && item.unitIds && item.unitIds.length > 0) {
+        updatedRegisteredIds = [...item.unitIds, ...updatedRegisteredIds];
+      }
+
+      // Actualizar el producto
+      const { error: updateError } = await supabase
+        .from('products')
+        .update({
+          stock: updatedStock,
+          registered_ids: updatedRegisteredIds
+        })
+        .eq('id', item.productId)
+        .eq('company', company);
+      
+      if (updateError) {
+        console.error('Error updating product stock:', updateError);
+        // No retornamos false aquí para intentar procesar todos los productos
+      }
+
+      // Registrar movimiento de inventario
+      await supabase
+        .from('movements')
+        .insert([{
+          type: 'entry',
+          product_id: item.productId,
+          product_name: item.productName,
+          quantity: item.quantity,
+          reason: `Cancelación de crédito - Factura ${invoice.number}`,
+          reference: invoice.number,
+          user_name: currentUser?.username || 'Sistema',
+          unit_ids: item.unitIds || [],
+          company
+        }]);
+    }
+
+    // 3. Eliminar todos los abonos relacionados
+    const { error: paymentsError } = await supabase
+      .from('credit_payments')
+      .delete()
+      .eq('invoice_id', invoiceId)
+      .eq('company', company);
+    
+    if (paymentsError) {
+      console.error('Error deleting credit payments:', paymentsError);
+      // Continuar con la eliminación de la factura
+    }
+
+    // 4. Eliminar la factura
+    const { error: deleteError } = await supabase
+      .from('invoices')
+      .delete()
+      .eq('id', invoiceId)
+      .eq('company', company);
+    
+    if (deleteError) {
+      console.error('Error deleting invoice:', deleteError);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error canceling credit invoice:', error);
+    return false;
+  }
+};
+
+// Confirmar pago de factura pendiente
+export const confirmInvoicePayment = async (
+  invoiceId: string,
+  paymentData: {
+    payment_method: string;
+    payment_cash?: number;
+    payment_transfer?: number;
+    payment_other?: number;
+    payment_note?: string;
+  }
+): Promise<Invoice | null> => {
+  const company = getCurrentCompany();
+  
+  const { data, error } = await supabase
+    .from('invoices')
+    .update({
+      status: 'paid', // CORREGIDO: Usar 'status' en lugar de 'payment_status'
+      payment_method: paymentData.payment_method,
+      payment_cash: paymentData.payment_cash || 0,
+      payment_transfer: paymentData.payment_transfer || 0,
+      payment_other: paymentData.payment_other || 0,
+      payment_note: paymentData.payment_note || null,
+    })
+    .eq('id', invoiceId)
+    .eq('company', company)
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error confirming invoice payment:', error);
+    return null;
+  }
+  
+  return data;
 };
 
 // ============================================
@@ -1393,4 +1591,412 @@ export const deleteCreditPayment = async (id: string): Promise<boolean> => {
     return false;
   }
   return true;
+};
+
+// ============================================
+// CAMBIOS
+// ============================================
+
+export const getExchanges = async (): Promise<Exchange[]> => {
+  try {
+    const company = getCurrentCompany();
+    const { data, error } = await supabase
+      .from('exchanges')
+      .select('*')
+      .eq('company', company)
+      .order('date', { ascending: false });
+    
+    if (error) {
+      // Verificar si es un error de tabla no existente
+      if (error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('does not exist')) {
+        console.error('⚠️ La tabla "exchanges" no existe en Supabase.');
+        console.error('📋 SOLUCIÓN: Ejecuta el script SQL provisto por el sistema');
+        console.error('1. Ve a https://app.supabase.com/');
+        console.error('2. Abre SQL Editor → New Query');
+        console.error('3. Copia y ejecuta el script SQL de exchanges');
+        console.error('4. Recarga la página');
+        return [];
+      }
+      
+      console.error('Error fetching exchanges:', error);
+      return [];
+    }
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching exchanges:', error);
+    return [];
+  }
+};
+
+export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_number' | 'company' | 'created_at' | 'updated_at'>): Promise<Exchange | null> => {
+  const company = getCurrentCompany();
+  
+  // Generar número de cambio usando fecha de Colombia
+  const today = getColombiaDate().replace(/-/g, '');
+  const prefix = `C${today}`;
+  
+  // Buscar último número del día
+  const { data: lastExchange } = await supabase
+    .from('exchanges')
+    .select('exchange_number')
+    .eq('company', company)
+    .like('exchange_number', `${prefix}%`)
+    .order('exchange_number', { ascending: false })
+    .limit(1)
+    .single();
+  
+  let nextSequence = 1;
+  if (lastExchange) {
+    const lastSequence = parseInt(lastExchange.exchange_number.slice(-4));
+    nextSequence = lastSequence + 1;
+  }
+  
+  const exchange_number = `${prefix}-${nextSequence.toString().padStart(4, '0')}`;
+  
+  // Usar la fecha y hora actual de Colombia
+  const colombiaDateTime = getColombiaDateTime().toISOString();
+  
+  // Crear registro de cambio
+  const { data, error } = await supabase
+    .from('exchanges')
+    .insert([{ 
+      ...exchangeData, 
+      company, 
+      exchange_number,
+      date: colombiaDateTime 
+    }])
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error adding exchange:', error);
+    return null;
+  }
+  
+  // 1. Devolver el producto original al inventario
+  await addMovement({
+    type: 'entry',
+    product_id: exchangeData.original_product_id,
+    product_name: exchangeData.original_product_name,
+    quantity: exchangeData.original_quantity,
+    reason: 'Cambio - Producto devuelto',
+    reference: exchange_number,
+    user_name: exchangeData.registered_by,
+    unit_ids: exchangeData.original_unit_ids || []
+  });
+  
+  const { data: originalProduct } = await supabase
+    .from('products')
+    .select('*')
+    .eq('id', exchangeData.original_product_id)
+    .single();
+  
+  if (originalProduct) {
+    const newStock = originalProduct.stock + exchangeData.original_quantity;
+    let newRegisteredIds = originalProduct.registered_ids || [];
+    
+    // Si el producto usa IDs únicas, agregarlas de vuelta
+    if (originalProduct.use_unit_ids && exchangeData.original_unit_ids && exchangeData.original_unit_ids.length > 0) {
+      newRegisteredIds = [...exchangeData.original_unit_ids, ...newRegisteredIds];
+    }
+    
+    await updateProduct(exchangeData.original_product_id, { 
+      stock: newStock,
+      registered_ids: newRegisteredIds
+    });
+  }
+  
+  // 2. Sacar el producto nuevo del inventario
+  await addMovement({
+    type: 'exit',
+    product_id: exchangeData.new_product_id,
+    product_name: exchangeData.new_product_name,
+    quantity: exchangeData.new_quantity,
+    reason: 'Cambio - Producto entregado',
+    reference: exchange_number,
+    user_name: exchangeData.registered_by,
+    unit_ids: exchangeData.new_unit_ids || []
+  });
+  
+  const { data: newProduct } = await supabase
+    .from('products')
+    .select('*')
+    .eq('id', exchangeData.new_product_id)
+    .single();
+  
+  if (newProduct) {
+    const newStock = newProduct.stock - exchangeData.new_quantity;
+    let newRegisteredIds = newProduct.registered_ids || [];
+    
+    // Si el producto usa IDs únicas, removerlas
+    if (newProduct.use_unit_ids && exchangeData.new_unit_ids && exchangeData.new_unit_ids.length > 0) {
+      newRegisteredIds = newRegisteredIds.filter(id => !exchangeData.new_unit_ids?.includes(id));
+    }
+    
+    await updateProduct(exchangeData.new_product_id, { 
+      stock: newStock,
+      registered_ids: newRegisteredIds
+    });
+  }
+  
+  return data;
+};
+
+export const getExchangesStats = async () => {
+  const exchanges = await getExchanges();
+  
+  const totalExchanges = exchanges.length;
+  const exchangesByInvoice = exchanges.filter(e => e.type === 'invoice').length;
+  const directExchanges = exchanges.filter(e => e.type === 'direct').length;
+  
+  // Calcular diferencia total (cuánto han pagado los clientes por diferencias)
+  const totalPositiveDifference = exchanges
+    .filter(e => e.price_difference > 0)
+    .reduce((sum, e) => sum + (e.payment_amount || 0), 0);
+  
+  // Calcular diferencia total negativa (cuánto se les ha devuelto a los clientes)
+  const totalNegativeDifference = exchanges
+    .filter(e => e.price_difference < 0)
+    .reduce((sum, e) => sum + Math.abs(e.price_difference), 0);
+  
+  return {
+    totalExchanges,
+    exchangesByInvoice,
+    directExchanges,
+    totalPositiveDifference,
+    totalNegativeDifference
+  };
+};
+
+/**
+ * Calcula el impacto de cambios en los ingresos
+ */
+export const calculateExchangeImpact = (exchanges: Exchange[]): number => {
+  // El impacto neto es la suma de todas las diferencias de precio que se cobraron
+  return exchanges.reduce((sum, ex) => {
+    // Solo contar las diferencias que se pagaron realmente
+    if (ex.price_difference > 0 && ex.payment_amount) {
+      return sum + ex.payment_amount;
+    } else if (ex.price_difference < 0) {
+      return sum + ex.price_difference; // Negativo, resta de ingresos
+    }
+    return sum;
+  }, 0);
+};
+
+/**
+ * Calcula los ingresos netos considerando cambios
+ */
+export const calculateNetRevenueWithExchanges = (invoices: Invoice[], exchanges: Exchange[]): number => {
+  const totalRevenue = invoices
+    .filter(inv => inv.status === 'paid' || inv.status === 'partial_return' || inv.status === 'returned')
+    .reduce((sum, inv) => sum + inv.total, 0);
+  
+  // Sumar el impacto de los cambios (positivo si se cobró, negativo si se devolvió)
+  const exchangeImpact = calculateExchangeImpact(exchanges);
+  
+  return totalRevenue + exchangeImpact;
+};
+
+// ============================================
+// GARANTÍAS
+// ============================================
+
+export const getWarranties = async (): Promise<Warranty[]> => {
+  try {
+    const company = getCurrentCompany();
+    const { data, error } = await supabase
+      .from('warranties')
+      .select('*')
+      .eq('company', company)
+      .order('date', { ascending: false });
+    
+    if (error) {
+      if (error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('does not exist')) {
+        console.error('⚠️ La tabla "warranties" no existe en Supabase.');
+        console.error('📋 SOLUCIÓN: Ejecuta el script SQL en /supabase_warranties_script.sql');
+        return [];
+      }
+      console.error('Error fetching warranties:', error);
+      return [];
+    }
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching warranties:', error);
+    return [];
+  }
+};
+
+export const addWarranty = async (warrantyData: Omit<Warranty, 'id' | 'warranty_number' | 'company' | 'created_at' | 'updated_at'>): Promise<Warranty | null> => {
+  const company = getCurrentCompany();
+  
+  const today = getColombiaDateTime();
+  const { data: warrantyNumber } = await supabase.rpc('generate_warranty_number', { 
+    p_company: company,
+    p_date: today.toISOString()
+  });
+  
+  if (!warrantyNumber) {
+    console.error('Error generating warranty number');
+    return null;
+  }
+  
+  const colombiaDateTime = today.toISOString();
+  
+  const { data, error } = await supabase
+    .from('warranties')
+    .insert([{ 
+      ...warrantyData, 
+      company: company, 
+      warranty_number: warrantyNumber,
+      date: colombiaDateTime 
+    }])
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error adding warranty:', error);
+    return null;
+  }
+  
+  if (warrantyData.discount_from_stock) {
+    await addMovement({
+      type: 'exit',
+      product_id: warrantyData.product_id,
+      product_name: warrantyData.product_name,
+      quantity: warrantyData.quantity,
+      reason: 'Garantía - Producto enviado',
+      reference: warrantyNumber,
+      user_name: warrantyData.registered_by,
+      unit_ids: warrantyData.unit_ids || []
+    });
+    
+    const { data: product } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', warrantyData.product_id)
+      .single();
+    
+    if (product) {
+      const newStock = product.stock - warrantyData.quantity;
+      let newRegisteredIds = product.registered_ids || [];
+      
+      if (product.use_unit_ids && warrantyData.unit_ids && warrantyData.unit_ids.length > 0) {
+        newRegisteredIds = newRegisteredIds.filter(id => !warrantyData.unit_ids?.includes(id));
+      }
+      
+      await updateProduct(warrantyData.product_id, { 
+        stock: newStock,
+        registered_ids: newRegisteredIds
+      });
+    }
+  }
+  
+  return data;
+};
+
+export const updateWarrantyStatus = async (
+  id: string, 
+  status: Warranty['status'], 
+  notes?: { sent_notes?: string; return_notes?: string; resolution_notes?: string },
+  updatedBy?: string
+): Promise<Warranty | null> => {
+  const updates: Partial<Warranty> = {
+    status,
+    updated_by: updatedBy,
+    updated_at: getColombiaDateTime().toISOString()
+  };
+  
+  if (status === 'sent') {
+    updates.sent_date = getColombiaDateTime().toISOString();
+    if (notes?.sent_notes) updates.sent_notes = notes.sent_notes;
+  } else if (status === 'returned') {
+    updates.returned_date = getColombiaDateTime().toISOString();
+    if (notes?.return_notes) updates.return_notes = notes.return_notes;
+  } else if (status === 'resolved') {
+    updates.resolved_date = getColombiaDateTime().toISOString();
+    if (notes?.resolution_notes) updates.resolution_notes = notes.resolution_notes;
+  }
+  
+  const { data, error } = await supabase
+    .from('warranties')
+    .update(updates)
+    .eq('id', id)
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error updating warranty status:', error);
+    return null;
+  }
+  
+  if (status === 'resolved') {
+    const { data: warranty } = await supabase
+      .from('warranties')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (warranty && warranty.discount_from_stock) {
+      await addMovement({
+        type: 'entry',
+        product_id: warranty.product_id,
+        product_name: warranty.product_name,
+        quantity: warranty.quantity,
+        reason: 'Garantía - Producto devuelto',
+        reference: warranty.warranty_number,
+        user_name: updatedBy || 'Sistema',
+        unit_ids: warranty.unit_ids || []
+      });
+      
+      const { data: product } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', warranty.product_id)
+        .single();
+      
+      if (product) {
+        const newStock = product.stock + warranty.quantity;
+        let newRegisteredIds = product.registered_ids || [];
+        
+        if (product.use_unit_ids && warranty.unit_ids && warranty.unit_ids.length > 0) {
+          newRegisteredIds = [...warranty.unit_ids, ...newRegisteredIds];
+        }
+        
+        await updateProduct(warranty.product_id, { 
+          stock: newStock,
+          registered_ids: newRegisteredIds
+        });
+      }
+    }
+  }
+  
+  return data;
+};
+
+export const getWarrantiesStats = async () => {
+  const warranties = await getWarranties();
+  
+  const totalWarranties = warranties.length;
+  const pendingWarranties = warranties.filter(w => w.status === 'pending').length;
+  const sentWarranties = warranties.filter(w => w.status === 'sent').length;
+  const returnedWarranties = warranties.filter(w => w.status === 'returned').length;
+  const resolvedWarranties = warranties.filter(w => w.status === 'resolved').length;
+  const cancelledWarranties = warranties.filter(w => w.status === 'cancelled').length;
+  
+  const activeWarranties = warranties.filter(w => w.status === 'pending' || w.status === 'sent' || w.status === 'returned');
+  const totalActiveUnits = activeWarranties.reduce((sum, w) => sum + w.quantity, 0);
+  
+  const resolutionRate = totalWarranties > 0 ? (resolvedWarranties / totalWarranties) * 100 : 0;
+  
+  return {
+    totalWarranties,
+    pendingWarranties,
+    sentWarranties,
+    returnedWarranties,
+    resolvedWarranties,
+    cancelledWarranties,
+    totalActiveUnits,
+    resolutionRate
+  };
 };

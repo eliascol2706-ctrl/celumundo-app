@@ -12,6 +12,8 @@ import { Closures } from './pages/Closures';
 import { Departments } from './pages/Departments';
 import { Returns } from './pages/Returns';
 import { Customers } from './pages/Customers';
+import Exchanges from './pages/Exchanges';
+import Warranties from './pages/Warranties';
 import { getCurrentUser } from './lib/supabase';
 
 // Componente para proteger rutas
@@ -51,6 +53,14 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allowedRoles={['admin']}>
             <Products />
+          </ProtectedRoute>
+        )
+      },
+      { 
+        path: 'garantias', 
+        element: (
+          <ProtectedRoute allowedRoles={['admin', 'seller']}>
+            <Warranties />
           </ProtectedRoute>
         )
       },
@@ -115,6 +125,14 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
             <Returns />
+          </ProtectedRoute>
+        )
+      },
+      { 
+        path: 'cambios', 
+        element: (
+          <ProtectedRoute allowedRoles={['admin', 'seller']}>
+            <Exchanges />
           </ProtectedRoute>
         )
       },

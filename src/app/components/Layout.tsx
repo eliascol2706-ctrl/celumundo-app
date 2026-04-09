@@ -22,7 +22,9 @@ import {
   Search,
   Settings,
   Eye,
-  EyeOff
+  EyeOff,
+  RefreshCw,
+  Shield
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { getCurrentUser, logoutUser, getSession, getProducts, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession, canCreateInvoice } from '../lib/supabase';
@@ -41,6 +43,7 @@ const adminNavigation = [
       { name: 'Dashboard', href: '/', icon: LayoutDashboard },
       { name: 'Departamentos', href: '/departamentos', icon: FolderOpen },
       { name: 'Productos', href: '/productos', icon: Package },
+      { name: 'Garantías', href: '/garantias', icon: Shield },
     ]
   },
   // Sección 2: Operaciones
@@ -49,6 +52,7 @@ const adminNavigation = [
     items: [
       { name: 'Facturación', href: '/facturacion', icon: FileText },
       { name: 'Devoluciones', href: '/devoluciones', icon: RotateCcw },
+      { name: 'Cambios', href: '/cambios', icon: RefreshCw },
       { name: 'Clientes', href: '/clientes', icon: Users },
       { name: 'Movimientos', href: '/movimientos', icon: ArrowRightLeft },
     ]
@@ -71,6 +75,7 @@ const sellerNavigation = [
     items: [
       { name: 'Facturación', href: '/facturacion', icon: FileText },
       { name: 'Devoluciones', href: '/devoluciones', icon: RotateCcw },
+      { name: 'Cambios', href: '/cambios', icon: RefreshCw },
       { name: 'Clientes', href: '/clientes', icon: Users },
     ]
   },
