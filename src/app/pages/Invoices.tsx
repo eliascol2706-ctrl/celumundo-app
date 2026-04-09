@@ -793,6 +793,7 @@ export function Invoices() {
       if (isCredit && invoiceType === 'wholesale') {
         if (!formData.customerName || !formData.customerDocument) {
           toast.error('Para ventas a crédito debe ingresar nombre y documento del cliente');
+          setIsSubmitting(false);
           return;
         }
       }
@@ -804,6 +805,7 @@ export function Invoices() {
         
         if (Math.abs(paymentTotal - total) > 0.01) {
           toast.error(`El total de los pagos (${formatCOP(paymentTotal)}) debe ser igual al total de la factura (${formatCOP(total)})`);
+          setIsSubmitting(false);
           return;
         }
       }
@@ -858,14 +860,14 @@ export function Invoices() {
         // Registrar movimientos de inventario para los nuevos productos
         for (const item of invoiceItems) {
           await addMovement({
-            type: 'sale',
+            type: 'exit',
             product_id: item.productId,
+            product_name: item.productName,
             quantity: item.quantity,
-            unit_price: item.price,
-            total: item.total,
-            notes: `Venta - Factura ${updatedInvoice.number} (actualizada)`,
-            invoice_number: updatedInvoice.number,
-            unit_ids: item.unitIds
+            reason: 'Venta - Factura',
+            reference: updatedInvoice.number,
+            user_name: getCurrentUser()?.username || 'Usuario',
+            unit_ids: item.unitIds || []
           });
         }
 
@@ -882,6 +884,7 @@ export function Invoices() {
         setIsPendingConfirmation(false);
         setShowExistingCustomers(false);
         setSelectedCustomerId('');
+        setIsSubmitting(false);
         return;
       }
 
