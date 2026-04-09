@@ -26,6 +26,7 @@ interface DailyClosureDialogProps {
     pendingCreditBalance: number;
     creditInvoices: number;
     creditPayments?: any[]; // Abonos a créditos del día
+    exchanges?: any[]; // NUEVO: Cambios del día
   };
   dayToClose: string; // YYYY-MM-DD date to close
   hourlyData: any[];
@@ -137,6 +138,29 @@ export function DailyClosureDialog({
         } else if (paymentMethod.includes('otros')) {
           totalOthers += amount;
           console.log(`[DEBUG Cierre] Abono otros (no se cuenta): ${amount}`);
+        }
+      });
+    }
+
+    // SUMAR/RESTAR CAMBIOS DEL DÍA
+    if (dailyStats.exchanges && dailyStats.exchanges.length > 0) {
+      console.log(`[DEBUG Cierre] Procesando ${dailyStats.exchanges.length} cambios del día`);
+      
+      dailyStats.exchanges.forEach(exchange => {
+        const cashAmount = exchange.payment_cash || 0;
+        const transferAmount = exchange.payment_transfer || 0;
+        const priceDifference = exchange.price_difference || 0;
+        
+        if (priceDifference > 0) {
+          // Cliente paga diferencia (suma a ingresos)
+          totalCash += cashAmount;
+          totalTransfer += transferAmount;
+          console.log(`[DEBUG Cierre] Cambio positivo - Efectivo: ${cashAmount}, Transferencia: ${transferAmount}`);
+        } else if (priceDifference < 0) {
+          // Se devuelve al cliente (resta de ingresos)
+          totalCash -= cashAmount;
+          totalTransfer -= transferAmount;
+          console.log(`[DEBUG Cierre] Cambio negativo (devolución) - Efectivo: ${cashAmount}, Transferencia: ${transferAmount}`);
         }
       });
     }
@@ -385,7 +409,7 @@ export function DailyClosureDialog({
             {phase === 2 && (
               <div className="space-y-6">
                 {/* Invoice Type Stats */}
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-4 gap-4">
                   <Card>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -441,6 +465,22 @@ export function DailyClosureDialog({
                       >
                         Ver detalles
                       </Button>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Cambios Realizados
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-3xl font-bold text-orange-600 dark:text-orange-400">
+                        {dailyStats.exchanges?.length || 0}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Cambios del día
+                      </p>
                     </CardContent>
                   </Card>
                 </div>

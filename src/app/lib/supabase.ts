@@ -190,8 +190,10 @@ export interface Exchange {
   new_total: number;
   new_unit_ids?: string[];
   price_difference: number;
-  payment_method?: string;
-  payment_amount?: number;
+  payment_method?: string; // Mantener por compatibilidad
+  payment_amount?: number; // Mantener por compatibilidad
+  payment_cash?: number; // NUEVO: Monto en efectivo
+  payment_transfer?: number; // NUEVO: Monto en transferencia
   notes?: string;
   registered_by: string;
   created_at?: string;
@@ -1796,6 +1798,119 @@ export const calculateNetRevenueWithExchanges = (invoices: Invoice[], exchanges:
   const exchangeImpact = calculateExchangeImpact(exchanges);
   
   return totalRevenue + exchangeImpact;
+};
+
+/**
+ * Elimina un cambio y revierte los movimientos de inventario
+ */
+export const deleteExchange = async (exchangeId: string): Promise<boolean> => {
+  try {
+    const company = getCurrentCompany();
+    const user = getCurrentUser();
+    
+    if (!user) {
+      console.error('No hay usuario autenticado');
+      return false;
+    }
+    
+    // Obtener el cambio antes de eliminarlo
+    const { data: exchange, error: fetchError } = await supabase
+      .from('exchanges')
+      .select('*')
+      .eq('id', exchangeId)
+      .eq('company', company)
+      .single();
+    
+    if (fetchError || !exchange) {
+      console.error('Error al obtener el cambio:', fetchError);
+      return false;
+    }
+    
+    // 1. REVERTIR: Sacar el producto original del inventario (el que devolvieron)
+    // Porque al crear el cambio se AGREGÓ al inventario
+    await addMovement({
+      type: 'exit',
+      product_id: exchange.original_product_id,
+      product_name: exchange.original_product_name,
+      quantity: exchange.original_quantity,
+      reason: 'Cambio eliminado - Revertir devolución',
+      reference: exchange.exchange_number,
+      user_name: user.username,
+      unit_ids: exchange.original_unit_ids || []
+    });
+    
+    const { data: originalProduct } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', exchange.original_product_id)
+      .single();
+    
+    if (originalProduct) {
+      const newStock = originalProduct.stock - exchange.original_quantity;
+      let newRegisteredIds = originalProduct.registered_ids || [];
+      
+      // Si el producto usa IDs únicas, removerlas
+      if (originalProduct.use_unit_ids && exchange.original_unit_ids && exchange.original_unit_ids.length > 0) {
+        newRegisteredIds = newRegisteredIds.filter(id => !exchange.original_unit_ids?.includes(id));
+      }
+      
+      await updateProduct(exchange.original_product_id, { 
+        stock: newStock,
+        registered_ids: newRegisteredIds
+      });
+    }
+    
+    // 2. REVERTIR: Devolver el producto nuevo al inventario (el que entregaron)
+    // Porque al crear el cambio se RESTÓ del inventario
+    await addMovement({
+      type: 'entry',
+      product_id: exchange.new_product_id,
+      product_name: exchange.new_product_name,
+      quantity: exchange.new_quantity,
+      reason: 'Cambio eliminado - Devolver producto',
+      reference: exchange.exchange_number,
+      user_name: user.username,
+      unit_ids: exchange.new_unit_ids || []
+    });
+    
+    const { data: newProduct } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', exchange.new_product_id)
+      .single();
+    
+    if (newProduct) {
+      const newStock = newProduct.stock + exchange.new_quantity;
+      let newRegisteredIds = newProduct.registered_ids || [];
+      
+      // Si el producto usa IDs únicas, agregarlas de vuelta
+      if (newProduct.use_unit_ids && exchange.new_unit_ids && exchange.new_unit_ids.length > 0) {
+        newRegisteredIds = [...exchange.new_unit_ids, ...newRegisteredIds];
+      }
+      
+      await updateProduct(exchange.new_product_id, { 
+        stock: newStock,
+        registered_ids: newRegisteredIds
+      });
+    }
+    
+    // 3. Eliminar el cambio de la base de datos
+    const { error: deleteError } = await supabase
+      .from('exchanges')
+      .delete()
+      .eq('id', exchangeId)
+      .eq('company', company);
+    
+    if (deleteError) {
+      console.error('Error al eliminar el cambio:', deleteError);
+      return false;
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error en deleteExchange:', error);
+    return false;
+  }
 };
 
 // ============================================
