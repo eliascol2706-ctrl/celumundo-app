@@ -832,14 +832,14 @@ export function Movements() {
             }
 
             .label-note {
-              font-size: 5.5pt !important;
-              font-weight: 300 !important;
+              font-size: 7pt !important;
+              font-weight: 700 !important;
               text-align: center !important;
-              letter-spacing: 0.1px !important;
+              letter-spacing: 0.2px !important;
               line-height: 1 !important;
               margin: 0.2mm 0 0.3mm 0 !important;
               font-family: Arial, Helvetica, sans-serif !important;
-              color: #333333 !important;
+              color: #000000 !important;
             }
 
             .label-reference { 
@@ -918,14 +918,14 @@ export function Movements() {
               }
 
               .label-note {
-                font-size: 5.5pt !important;
-                font-weight: 300 !important;
+                font-size: 7pt !important;
+                font-weight: 700 !important;
                 text-align: center !important;
-                letter-spacing: 0.1px !important;
+                letter-spacing: 0.2px !important;
                 line-height: 1 !important;
                 margin: 0.2mm 0 0.3mm 0 !important;
                 font-family: Arial, Helvetica, sans-serif !important;
-                color: #333333 !important;
+                color: #000000 !important;
               }
             }
           </style>
