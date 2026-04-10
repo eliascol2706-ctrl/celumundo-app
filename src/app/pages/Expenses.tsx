@@ -6,7 +6,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
@@ -471,6 +471,9 @@ export function Expenses() {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Registrar Nuevo Gasto</DialogTitle>
+            <DialogDescription>
+              Ingresa los detalles del gasto empresarial
+            </DialogDescription>
           </DialogHeader>
           <form onSubmit={handleSubmit}>
             <div className="grid grid-cols-2 gap-4 py-4">

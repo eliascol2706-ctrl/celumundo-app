@@ -526,21 +526,12 @@ export function Layout() {
             return;
           }
 
-          // Si estamos en la página de facturación, disparar evento para abrir el modal
-          if (location.pathname === '/facturacion') {
-            window.dispatchEvent(new CustomEvent('openCreateInvoiceDialog'));
-          } else {
-            // Si no estamos en facturación, navegar primero y luego abrir el modal
-            navigate('/facturacion');
-            // Esperar un poco para que se monte el componente y luego disparar el evento
-            setTimeout(() => {
-              window.dispatchEvent(new CustomEvent('openCreateInvoiceDialog'));
-            }, 100);
-          }
+          // Ir directo a factura regular
+          navigate('/facturacion/regular');
         }}
         className="fixed bottom-4 right-4 lg:bottom-6 lg:right-6 z-50 p-3 lg:p-4 rounded-full shadow-xl transition-all duration-300 group bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 hover:scale-110 hover:shadow-2xl cursor-pointer text-white"
         aria-label="Nueva Factura"
-        title="Crear Nueva Factura"
+        title="Crear Nueva Factura Regular"
       >
         <div className="relative">
           <FileText className="h-5 w-5 lg:h-6 lg:w-6" />

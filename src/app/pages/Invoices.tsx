@@ -62,6 +62,9 @@ interface Invoice {
   payment_transfer?: number;
   payment_other?: number;
   attended_by?: string;
+  is_credit?: boolean; // Si es una venta a crédito
+  credit_balance?: number; // Saldo pendiente por pagar
+  due_date?: string; // Fecha de vencimiento para créditos
   created_at?: string;
   updated_at?: string;
 }
@@ -1065,7 +1068,8 @@ export function Invoices() {
         payment_cash: paymentData.cash,
         payment_transfer: paymentData.transfer,
         payment_other: paymentData.other,
-        payment_note: paymentData.note || undefined
+        payment_note: paymentData.note || undefined,
+        update_date: true // ✅ Actualizar la fecha al día actual
       });
       
       if (result) {

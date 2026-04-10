@@ -4,7 +4,10 @@ import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
 import { Products } from './pages/Products';
-import { Invoices } from './pages/Invoices';
+import { InvoicesMenu } from './pages/InvoicesMenu';
+import { RegularInvoice } from './pages/RegularInvoice';
+import { CreditInvoice } from './pages/CreditInvoice';
+import { InvoicesHistory } from './pages/InvoicesHistory';
 import { Movements } from './pages/Movements';
 import { Expenses } from './pages/Expenses';
 import { Reports } from './pages/Reports';
@@ -12,6 +15,8 @@ import { Closures } from './pages/Closures';
 import { Departments } from './pages/Departments';
 import { Returns } from './pages/Returns';
 import { Customers } from './pages/Customers';
+import { CustomersNew } from './pages/CustomersNew';
+import { CustomerProfile } from './pages/CustomerProfile';
 import Exchanges from './pages/Exchanges';
 import Warranties from './pages/Warranties';
 import { getCurrentUser } from './lib/supabase';
@@ -68,7 +73,31 @@ export const router = createBrowserRouter([
         path: 'facturacion', 
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <Invoices />
+            <InvoicesMenu />
+          </ProtectedRoute>
+        )
+      },
+      { 
+        path: 'facturacion/regular', 
+        element: (
+          <ProtectedRoute allowedRoles={['admin', 'seller']}>
+            <RegularInvoice />
+          </ProtectedRoute>
+        )
+      },
+      { 
+        path: 'facturacion/credito', 
+        element: (
+          <ProtectedRoute allowedRoles={['admin', 'seller']}>
+            <CreditInvoice />
+          </ProtectedRoute>
+        )
+      },
+      { 
+        path: 'facturacion/historial', 
+        element: (
+          <ProtectedRoute allowedRoles={['admin', 'seller']}>
+            <InvoicesHistory />
           </ProtectedRoute>
         )
       },
@@ -108,7 +137,15 @@ export const router = createBrowserRouter([
         path: 'clientes', 
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <Customers />
+            <CustomersNew />
+          </ProtectedRoute>
+        )
+      },
+      { 
+        path: 'customers/:document', 
+        element: (
+          <ProtectedRoute allowedRoles={['admin', 'seller']}>
+            <CustomerProfile />
           </ProtectedRoute>
         )
       },

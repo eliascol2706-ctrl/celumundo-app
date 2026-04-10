@@ -48,6 +48,7 @@ export function DailyClosureDialog({
   const [phase, setPhase] = useState<Phase>(1);
   const [invoiceFilter, setInvoiceFilter] = useState<'all' | 'regular' | 'wholesale'>('all');
   const [showInvoiceDetails, setShowInvoiceDetails] = useState(false);
+  const [showExchangeDetails, setShowExchangeDetails] = useState(false);
   const [closedByName, setClosedByName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -174,6 +175,7 @@ export function DailyClosureDialog({
     setPhase(1);
     setInvoiceFilter('all');
     setShowInvoiceDetails(false);
+    setShowExchangeDetails(false);
     setClosedByName('');
     setIsLoading(false);
     setIsSuccess(false);
@@ -237,19 +239,35 @@ export function DailyClosureDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" aria-describedby={isLoading || isSuccess ? "status-description" : undefined}>
         {isLoading ? (
-          <div className="py-16 text-center">
-            <Loader2 className="h-16 w-16 mx-auto text-green-600 dark:text-green-400 animate-spin mb-4" />
-            <h3 className="text-xl font-bold mb-2">Procesando Cierre...</h3>
-            <p className="text-muted-foreground">Por favor espera un momento</p>
-          </div>
+          <>
+            <DialogHeader className="sr-only">
+              <DialogTitle>Procesando Cierre</DialogTitle>
+              <DialogDescription id="status-description">
+                El cierre diario está siendo procesado
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-16 text-center">
+              <Loader2 className="h-16 w-16 mx-auto text-green-600 dark:text-green-400 animate-spin mb-4" />
+              <h3 className="text-xl font-bold mb-2">Procesando Cierre...</h3>
+              <p className="text-muted-foreground">Por favor espera un momento</p>
+            </div>
+          </>
         ) : isSuccess ? (
-          <div className="py-16 text-center">
-            <CheckCircle className="h-16 w-16 mx-auto text-green-600 dark:text-green-400 mb-4" />
-            <h3 className="text-xl font-bold mb-2">¡Cierre Realizado Exitosamente!</h3>
-            <p className="text-muted-foreground">El cierre diario ha sido registrado correctamente</p>
-          </div>
+          <>
+            <DialogHeader className="sr-only">
+              <DialogTitle>Cierre Exitoso</DialogTitle>
+              <DialogDescription id="status-description">
+                El cierre diario ha sido completado con éxito
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-16 text-center">
+              <CheckCircle className="h-16 w-16 mx-auto text-green-600 dark:text-green-400 mb-4" />
+              <h3 className="text-xl font-bold mb-2">¡Cierre Realizado Exitosamente!</h3>
+              <p className="text-muted-foreground">El cierre diario ha sido registrado correctamente</p>
+            </div>
+          </>
         ) : (
           <>
             <DialogHeader>
@@ -409,7 +427,7 @@ export function DailyClosureDialog({
             {phase === 2 && (
               <div className="space-y-6">
                 {/* Invoice Type Stats */}
-                <div className="grid grid-cols-4 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <Card>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -471,6 +489,51 @@ export function DailyClosureDialog({
                   <Card>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Facturas a Crédito
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-3xl font-bold text-amber-600 dark:text-amber-400">
+                        {dailyStats.creditInvoices}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Pendiente: {formatCOP(dailyStats.pendingCreditBalance)}
+                      </p>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Payments and Exchanges Stats */}
+                <div className="grid grid-cols-2 gap-4">
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        Pagos de Crédito Recibidos
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="text-3xl font-bold text-emerald-600 dark:text-emerald-400">
+                        {dailyStats.creditPayments?.length || 0}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Total: {formatCOP(dailyStats.creditPayments?.reduce((sum, p) => sum + p.amount, 0) || 0)}
+                      </p>
+                      {dailyStats.creditPayments && dailyStats.creditPayments.length > 0 && (
+                        <div className="mt-3 space-y-1">
+                          <div className="text-xs">
+                            💵 Efectivo: {formatCOP(dailyStats.creditPayments.filter(p => p.payment_method?.toLowerCase().includes('efectivo')).reduce((sum, p) => sum + p.amount, 0))}
+                          </div>
+                          <div className="text-xs">
+                            🏦 Transferencia: {formatCOP(dailyStats.creditPayments.filter(p => p.payment_method?.toLowerCase().includes('transferencia')).reduce((sum, p) => sum + p.amount, 0))}
+                          </div>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
                         Cambios Realizados
                       </CardTitle>
                     </CardHeader>
@@ -481,6 +544,13 @@ export function DailyClosureDialog({
                       <p className="text-xs text-muted-foreground mt-2">
                         Cambios del día
                       </p>
+                      <Button 
+                        variant="link" 
+                        className="p-0 h-auto mt-2"
+                        onClick={() => { setShowExchangeDetails(true); }}
+                      >
+                        Ver detalles
+                      </Button>
                     </CardContent>
                   </Card>
                 </div>
@@ -530,6 +600,114 @@ export function DailyClosureDialog({
                             ))}
                           </tbody>
                         </table>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
+                {/* Exchange Details Table */}
+                {showExchangeDetails && (
+                  <Card>
+                    <CardHeader>
+                      <div className="flex items-center justify-between">
+                        <CardTitle>
+                          Cambios Realizados
+                        </CardTitle>
+                        <Button variant="ghost" size="sm" onClick={() => setShowExchangeDetails(false)}>
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="overflow-x-auto max-h-60">
+                        <table className="w-full">
+                          <thead>
+                            <tr className="border-b border-border">
+                              <th className="text-left py-2 px-3 text-sm font-medium">Número</th>
+                              <th className="text-left py-2 px-3 text-sm font-medium">Producto Original</th>
+                              <th className="text-left py-2 px-3 text-sm font-medium">Producto Nuevo</th>
+                              <th className="text-right py-2 px-3 text-sm font-medium">Diferencia</th>
+                              <th className="text-left py-2 px-3 text-sm font-medium">Pago</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dailyStats.exchanges?.map((exchange) => {
+                              const priceDiff = exchange.price_difference || 0;
+                              const cashAmount = exchange.payment_cash || 0;
+                              const transferAmount = exchange.payment_transfer || 0;
+                              const isPositive = priceDiff > 0;
+                              
+                              return (
+                                <tr key={exchange.id} className="border-b border-border">
+                                  <td className="py-2 px-3 text-sm font-medium">{exchange.exchange_number}</td>
+                                  <td className="py-2 px-3 text-sm">
+                                    <div>{exchange.original_product_name}</div>
+                                    <div className="text-xs text-muted-foreground">Cant: {exchange.original_quantity}</div>
+                                  </td>
+                                  <td className="py-2 px-3 text-sm">
+                                    <div>{exchange.new_product_name}</div>
+                                    <div className="text-xs text-muted-foreground">Cant: {exchange.new_quantity}</div>
+                                  </td>
+                                  <td className="py-2 px-3 text-right">
+                                    <span className={`text-sm font-medium ${
+                                      isPositive
+                                        ? 'text-green-600 dark:text-green-400'
+                                        : priceDiff < 0
+                                        ? 'text-red-600 dark:text-red-400'
+                                        : 'text-muted-foreground'
+                                    }`}>
+                                      {isPositive ? '+' : ''}{formatCOP(priceDiff)}
+                                    </span>
+                                    <div className="text-xs text-muted-foreground">
+                                      {isPositive ? 'Cliente paga' : priceDiff < 0 ? 'Se devuelve' : 'Sin diferencia'}
+                                    </div>
+                                  </td>
+                                  <td className="py-2 px-3 text-sm">
+                                    {cashAmount > 0 && (
+                                      <div className="text-xs">
+                                        💵 {formatCOP(cashAmount)}
+                                      </div>
+                                    )}
+                                    {transferAmount > 0 && (
+                                      <div className="text-xs">
+                                        🏦 {formatCOP(transferAmount)}
+                                      </div>
+                                    )}
+                                    {cashAmount === 0 && transferAmount === 0 && (
+                                      <span className="text-xs text-muted-foreground">Sin pago</span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      
+                      {/* Resumen de Cambios */}
+                      <div className="mt-4 pt-4 border-t border-border">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="bg-green-50 dark:bg-green-950/30 p-3 rounded-lg">
+                            <p className="text-xs text-muted-foreground mb-1">Cliente Pagó (Suma)</p>
+                            <p className="text-sm font-bold text-green-600 dark:text-green-400">
+                              + COP {formatCOP(
+                                dailyStats.exchanges
+                                  ?.filter(e => (e.price_difference || 0) > 0)
+                                  .reduce((sum, e) => sum + (e.payment_cash || 0) + (e.payment_transfer || 0), 0) || 0
+                              )}
+                            </p>
+                          </div>
+                          <div className="bg-red-50 dark:bg-red-950/30 p-3 rounded-lg">
+                            <p className="text-xs text-muted-foreground mb-1">Se Devolvió (Resta)</p>
+                            <p className="text-sm font-bold text-red-600 dark:text-red-400">
+                              - COP {formatCOP(
+                                dailyStats.exchanges
+                                  ?.filter(e => (e.price_difference || 0) < 0)
+                                  .reduce((sum, e) => sum + (e.payment_cash || 0) + (e.payment_transfer || 0), 0) || 0
+                              )}
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>

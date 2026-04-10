@@ -5,7 +5,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Textarea } from '../components/ui/textarea';
 import { formatCOP } from '../lib/currency';
 import { getExchanges, getProducts, getInvoices, addExchange, deleteExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, type Exchange, type Product, type Invoice } from '../lib/supabase';
@@ -545,6 +545,9 @@ export default function Exchanges() {
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Registrar Nuevo Cambio</DialogTitle>
+            <DialogDescription>
+              Complete el formulario para registrar un cambio de producto.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-6">
@@ -963,6 +966,9 @@ export default function Exchanges() {
             <DialogTitle>
               {selectingFor === 'original' ? 'Seleccionar Producto Original' : 'Seleccionar Producto Nuevo'}
             </DialogTitle>
+            <DialogDescription>
+              Busca y selecciona el producto para el cambio.
+            </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 flex-1 overflow-hidden flex flex-col">

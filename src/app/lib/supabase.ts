@@ -72,6 +72,7 @@ export interface Invoice {
   attended_by?: string; // Usuario que atendió
   is_credit?: boolean; // Si es una venta a crédito
   credit_balance?: number; // Saldo pendiente por pagar
+  due_date?: string; // Fecha de vencimiento para créditos
   created_at?: string;
   updated_at?: string;
 }
@@ -83,8 +84,14 @@ export interface Customer {
   document: string;
   phone?: string;
   email?: string;
+  address?: string;
+  credit_limit: number; // Cupo de crédito aprobado
+  payment_term: number; // Plazo de pago en días (ej: 30 días)
+  status: 'active' | 'overdue' | 'blocked'; // Estado del cliente
+  blocked: boolean; // Si está bloqueado para nuevas ventas
   total_credit: number; // Total en crédito
   total_paid: number; // Total pagado
+  notes?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -97,7 +104,20 @@ export interface CreditPayment {
   date: string;
   amount: number;
   payment_method: string;
+  proof_url?: string; // URL del comprobante de pago
   notes?: string;
+  registered_by: string;
+  created_at?: string;
+}
+
+export interface CreditHistory {
+  id: string;
+  company: 'celumundo' | 'repuestos';
+  customer_document: string;
+  event_type: 'payment' | 'invoice' | 'status_change' | 'credit_limit_change' | 'note';
+  description: string;
+  amount?: number;
+  reference_id?: string; // ID de factura o pago relacionado
   registered_by: string;
   created_at?: string;
 }
@@ -522,7 +542,38 @@ export const extractColombiaDate = (timestamp: string): string => {
   const year = colombiaDate.getFullYear();
   const month = String(colombiaDate.getMonth() + 1).padStart(2, '0');
   const day = String(colombiaDate.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const result = `${year}-${month}-${day}`;
+  
+  // Debug temporal
+  if (timestamp.includes('2025-04')) {
+    console.log('[extractColombiaDate] DEBUG:', {
+      input: timestamp,
+      output: result,
+      dateObj: date.toISOString(),
+      colombiaDateObj: colombiaDate.toISOString()
+    });
+  }
+  
+  return result;
+};
+
+// Función auxiliar para extraer la fecha y hora completa, considerando zona horaria de Colombia
+export const extractColombiaDateTime = (timestamp: string): string => {
+  if (!timestamp) return '';
+  // Si el timestamp ya es solo fecha (YYYY-MM-DD), devolver con hora 00:00:00
+  if (timestamp.length === 10 && !timestamp.includes('T')) {
+    return `${timestamp} 00:00:00`;
+  }
+  // Convertir el timestamp a fecha/hora en zona de Colombia
+  const date = new Date(timestamp);
+  const colombiaDate = new Date(date.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
+  const year = colombiaDate.getFullYear();
+  const month = String(colombiaDate.getMonth() + 1).padStart(2, '0');
+  const day = String(colombiaDate.getDate()).padStart(2, '0');
+  const hours = String(colombiaDate.getHours()).padStart(2, '0');
+  const minutes = String(colombiaDate.getMinutes()).padStart(2, '0');
+  const seconds = String(colombiaDate.getSeconds()).padStart(2, '0');
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 };
 
 // Función para verificar si se puede facturar (validar cierre pendiente)
@@ -531,84 +582,145 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
   const colombiaTime = getColombiaDateTime();
   const today = getColombiaDate(); // YYYY-MM-DD en zona Colombia
 
-  // Calcular el día anterior
-  const todayDate = new Date(today + 'T00:00:00');
-  todayDate.setDate(todayDate.getDate() - 1);
-  const yesterdayStr = todayDate.toISOString().split('T')[0];
+  // Calcular el día anterior usando zona horaria de Colombia
+  const colombiaDate = new Date(colombiaTime);
+  colombiaDate.setDate(colombiaDate.getDate() - 1);
+  const yesterdayStr = `${colombiaDate.getFullYear()}-${String(colombiaDate.getMonth() + 1).padStart(2, '0')}-${String(colombiaDate.getDate()).padStart(2, '0')}`;
+
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('[canCreateInvoice] 🔍 VALIDACIÓN DE FACTURACIÓN');
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('[canCreateInvoice] Fecha/Hora Colombia actual:', colombiaTime.toISOString());
+  console.log('[canCreateInvoice] HOY (Colombia):', today);
+  console.log('[canCreateInvoice] AYER (Colombia):', yesterdayStr);
+  console.log('[canCreateInvoice] Empresa:', company);
 
   try {
-    // OPTIMIZACIÓN: Hacer todas las consultas en paralelo
-    const [todayClosuresResult, anyClosuresResult, yesterdayInvoicesResult] = await Promise.all([
-      supabase
-        .from('daily_closures')
-        .select('id, date, closed_at')
-        .eq('company', company)
-        .eq('date', today)
-        .limit(1),
-      supabase
-        .from('daily_closures')
-        .select('id')
-        .eq('company', company)
-        .limit(1),
-      supabase
-        .from('invoices')
-        .select('id')
-        .eq('company', company)
-        .gte('date', yesterdayStr + 'T00:00:00')
-        .lt('date', today + 'T00:00:00')
-        .limit(1)
-    ]);
+    // PASO 1: Verificar si ya se hizo el cierre del día ACTUAL
+    const { data: todayClosures } = await supabase
+      .from('daily_closures')
+      .select('id, date, closed_at')
+      .eq('company', company)
+      .eq('date', today)
+      .limit(1);
 
-    // Verificar si ya se hizo el cierre del día actual
-    if (todayClosuresResult.data && todayClosuresResult.data.length > 0) {
-      const closureDate = new Date(todayClosuresResult.data[0].closed_at);
-      const closureTimeStr = closureDate.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    if (todayClosures && todayClosures.length > 0) {
+      const closureDate = new Date(todayClosures[0].closed_at);
+      const closureColombiaTime = new Date(closureDate.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
+      const closureTimeStr = closureColombiaTime.toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
+      console.log('[canCreateInvoice] ❌ Ya existe cierre de HOY');
       return {
         canCreate: false,
         message: `🚫 No se pueden realizar facturas.\n\nYa se realizó el cierre del día ${today} a las ${closureTimeStr}.\n\nPodrás facturar nuevamente a partir de las 12:00 AM del siguiente día.`
       };
     }
 
-    // Si no hay ningún cierre previo, permitir facturar (primera vez)
-    if (!anyClosuresResult.data || anyClosuresResult.data.length === 0) {
-      return { canCreate: true };
+    // PASO 2: Verificar si existe algún cierre previo (primera vez)
+    const { data: anyClosures, error: anyClosuresError } = await supabase
+      .from('daily_closures')
+      .select('id, date')
+      .eq('company', company)
+      .limit(10);
+
+    console.log('[canCreateInvoice] Consulta de cierres previos:', { 
+      closures: anyClosures, 
+      count: anyClosures?.length || 0,
+      error: anyClosuresError 
+    });
+
+    // Solo permitir sin validaciones si NO hay cierres previos Y NO hay facturas de ayer
+    if (!anyClosures || anyClosures.length === 0) {
+      console.log('[canCreateInvoice] ℹ️ No hay cierres previos en BD');
+      // Continuar para validar si hay facturas de ayer
+      // NO retornar aquí, seguir con PASO 3
+    } else {
+      console.log('[canCreateInvoice] ℹ️ Existen', anyClosures.length, 'cierres previos en BD');
     }
 
-    // Verificar cierre del día anterior si hubo facturas ayer
-    // Si NO hubo facturas ayer, NO se requiere cierre, permitir facturar hoy
-    if (!yesterdayInvoicesResult.data || yesterdayInvoicesResult.data.length === 0) {
-      // Verificar si es un nuevo mes y requiere cierre mensual
+    // PASO 3: Obtener TODAS las facturas del día anterior para validar con extractColombiaDate
+    const { data: allInvoices } = await supabase
+      .from('invoices')
+      .select('id, date, number')
+      .eq('company', company);
+
+    console.log('[canCreateInvoice] Total facturas en BD:', allInvoices?.length || 0);
+
+    // Filtrar facturas del día anterior usando extractColombiaDate
+    const yesterdayInvoices = (allInvoices || []).filter(inv => {
+      const invDate = extractColombiaDate(inv.date);
+      const isYesterday = invDate === yesterdayStr;
+      if (isYesterday) {
+        console.log('[canCreateInvoice] Factura de AYER encontrada:', {
+          number: inv.number,
+          date: inv.date,
+          extractedDate: invDate,
+          yesterday: yesterdayStr
+        });
+      }
+      return isYesterday;
+    });
+
+    console.log('[canCreateInvoice] Facturas de ayer:', yesterdayInvoices.length);
+    
+    // Debug: Mostrar todas las fechas únicas
+    const uniqueDates = [...new Set((allInvoices || []).map(inv => extractColombiaDate(inv.date)))];
+    console.log('[canCreateInvoice] Fechas únicas en BD:', uniqueDates.sort().reverse().slice(0, 5));
+
+    // PASO 4: Si NO hubo facturas AYER
+    if (yesterdayInvoices.length === 0) {
+      console.log('[canCreateInvoice] ℹ️ No hay facturas de ayer');
+      
       const currentMonth = today.substring(0, 7); // YYYY-MM
       const yesterdayMonth = yesterdayStr.substring(0, 7); // YYYY-MM
 
-      // Si es día 1 de un nuevo mes (ayer era otro mes)
+      // Si es día 1 de un nuevo mes (ayer era último día de otro mes)
       if (currentMonth !== yesterdayMonth) {
-        // Verificar si existe un cierre mensual para el mes anterior
-        const { data: monthlyClosures } = await supabase
-          .from('monthly_closures')
-          .select('id')
-          .eq('company', company)
-          .eq('month', yesterdayMonth)
-          .limit(1);
+        console.log('[canCreateInvoice] Es un nuevo mes, verificar cierre mensual del mes anterior');
 
-        // Si no existe cierre mensual del mes anterior, no permitir facturar
-        if (!monthlyClosures || monthlyClosures.length === 0) {
-          const previousMonthDate = new Date(yesterdayStr);
-          const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+        // Verificar si HUBO facturas en el mes anterior
+        const previousMonthInvoices = (allInvoices || []).filter(inv => {
+          const invDate = extractColombiaDate(inv.date);
+          return invDate.startsWith(yesterdayMonth);
+        });
 
-          return {
-            canCreate: false,
-            requiresMonthlyClose: true,
-            message: `⚠️ Es un nuevo mes. Debes realizar el CIERRE MENSUAL de ${monthName} antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre mensual.`
-          };
+        console.log('[canCreateInvoice] Facturas del mes anterior:', previousMonthInvoices.length);
+
+        // Solo pedir cierre mensual si HUBO facturas en el mes anterior
+        if (previousMonthInvoices.length > 0) {
+          // Verificar si existe un cierre mensual para el mes anterior
+          const { data: monthlyClosures } = await supabase
+            .from('monthly_closures')
+            .select('id')
+            .eq('company', company)
+            .eq('month', yesterdayMonth)
+            .limit(1);
+
+          if (!monthlyClosures || monthlyClosures.length === 0) {
+            const previousMonthDate = new Date(yesterdayStr + 'T12:00:00');
+            const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'America/Bogota' });
+
+            console.log('[canCreateInvoice] ❌ Falta cierre mensual del mes anterior');
+            return {
+              canCreate: false,
+              requiresMonthlyClose: true,
+              message: `⚠️ Es un nuevo mes. Debes realizar el CIERRE MENSUAL de ${monthName} antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre mensual.`
+            };
+          }
         }
       }
 
+      // Si no hay cierres previos en el sistema, es primera vez, permitir
+      if (!anyClosures || anyClosures.length === 0) {
+        console.log('[canCreateInvoice] ✅ Primera vez en el sistema, permitir facturar');
+        return { canCreate: true };
+      }
+
+      console.log('[canCreateInvoice] ✅ No hay facturas de ayer pero hay cierres previos, permitir facturar');
       return { canCreate: true };
     }
 
-    // Si hubo facturas ayer, verificar que se haya hecho el cierre del día anterior
+    // PASO 5: Si hubo facturas AYER, verificar que se haya hecho el cierre del día anterior
     const { data: yesterdayClosures } = await supabase
       .from('daily_closures')
       .select('id')
@@ -617,39 +729,58 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
       .limit(1);
 
     if (!yesterdayClosures || yesterdayClosures.length === 0) {
+      const yesterdayDate = new Date(yesterdayStr + 'T12:00:00');
+      const yesterdayFormatted = yesterdayDate.toLocaleDateString('es-ES', { timeZone: 'America/Bogota' });
+
+      console.log('[canCreateInvoice] ❌ Falta cierre del día anterior');
       return {
         canCreate: false,
-        message: `⚠️ Debes realizar el CIERRE DEL DÍA de ayer (${yesterdayStr}) antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre diario.`
+        message: `⚠️ Debes realizar el CIERRE DEL DÍA de ayer (${yesterdayFormatted}) antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre diario.`
       };
     }
 
-    // Verificar si es un nuevo mes y requiere cierre mensual
+    // PASO 6: Verificar si es un nuevo mes y requiere cierre mensual
     const currentMonth = today.substring(0, 7);
     const yesterdayMonth = yesterdayStr.substring(0, 7);
 
     if (currentMonth !== yesterdayMonth) {
-      const { data: monthlyClosures } = await supabase
-        .from('monthly_closures')
-        .select('id')
-        .eq('company', company)
-        .eq('month', yesterdayMonth)
-        .limit(1);
+      console.log('[canCreateInvoice] Es un nuevo mes después de cerrar ayer, verificar cierre mensual');
 
-      if (!monthlyClosures || monthlyClosures.length === 0) {
-        const previousMonthDate = new Date(yesterdayStr);
-        const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
+      // Verificar si HUBO facturas en el mes anterior
+      const previousMonthInvoices = (allInvoices || []).filter(inv => {
+        const invDate = extractColombiaDate(inv.date);
+        return invDate.startsWith(yesterdayMonth);
+      });
 
-        return {
-          canCreate: false,
-          requiresMonthlyClose: true,
-          message: `⚠️ Es un nuevo mes. Debes realizar el CIERRE MENSUAL de ${monthName} antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre mensual.`
-        };
+      console.log('[canCreateInvoice] Facturas del mes anterior:', previousMonthInvoices.length);
+
+      // Solo pedir cierre mensual si HUBO facturas en el mes anterior
+      if (previousMonthInvoices.length > 0) {
+        const { data: monthlyClosures } = await supabase
+          .from('monthly_closures')
+          .select('id')
+          .eq('company', company)
+          .eq('month', yesterdayMonth)
+          .limit(1);
+
+        if (!monthlyClosures || monthlyClosures.length === 0) {
+          const previousMonthDate = new Date(yesterdayStr + 'T12:00:00');
+          const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'America/Bogota' });
+
+          console.log('[canCreateInvoice] ❌ Falta cierre mensual del mes anterior');
+          return {
+            canCreate: false,
+            requiresMonthlyClose: true,
+            message: `⚠️ Es un nuevo mes. Debes realizar el CIERRE MENSUAL de ${monthName} antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre mensual.`
+          };
+        }
       }
     }
 
+    console.log('[canCreateInvoice] ✅ Todas las validaciones pasaron, permitir facturar');
     return { canCreate: true };
   } catch (error) {
-    console.error('Error in canCreateInvoice:', error);
+    console.error('[canCreateInvoice] Error:', error);
     return { canCreate: false, message: 'Error al verificar permisos de facturación' };
   }
 };
@@ -679,25 +810,57 @@ export const addInvoice = async (invoice: Omit<Invoice, 'id' | 'number' | 'compa
     throw new Error(validation.message || 'No se puede crear la factura');
   }
   
-  // Obtener el siguiente número de factura
-  const { data: nextNumber } = await supabase.rpc('get_next_invoice_number', { company_name: company });
-  
   // Usar la fecha y hora actual de Colombia
   const colombiaDateTime = getColombiaDateTime().toISOString();
   
-  const { data, error } = await supabase
-    .from('invoices')
-    .insert([{ 
-      ...invoice, 
-      company, 
-      number: nextNumber,
-      date: colombiaDateTime // Guardar con fecha y hora completa de Colombia
-    }])
-    .select()
-    .single();
+  // Intentar insertar con retry en caso de duplicate key
+  let data = null;
+  let nextNumber = '';
+  const maxRetries = 5;
   
-  if (error) {
-    console.error('Error adding invoice:', error);
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    // Obtener el siguiente número de factura
+    const { data: invoiceNumber } = await supabase.rpc('get_next_invoice_number', { company_name: company });
+    nextNumber = invoiceNumber;
+    console.log(`🔄 Attempting to create invoice ${nextNumber} (attempt ${attempt + 1}/${maxRetries})`);
+    
+    const result = await supabase
+      .from('invoices')
+      .insert([{ 
+        ...invoice, 
+        company, 
+        number: nextNumber,
+        date: colombiaDateTime
+      }])
+      .select()
+      .single();
+    
+    if (result.error) {
+      // Si es error de duplicate key, reintentar
+      if (result.error.code === '23505') {
+        console.log(`⚠️ Duplicate invoice number detected, retrying... (attempt ${attempt + 1}/${maxRetries})`);
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+          continue;
+        } else {
+          console.error('Max retries reached with duplicate key error');
+          return null;
+        }
+      }
+      
+      // Si es otro tipo de error, loguear y retornar null inmediatamente
+      console.error('Error adding invoice:', result.error);
+      return null;
+    }
+    
+    // Éxito
+    console.log(`✅ Invoice created successfully: ${nextNumber}`);
+    data = result.data;
+    break;
+  }
+  
+  if (!data) {
+    console.error('Failed to create invoice after all retries');
     return null;
   }
   
@@ -871,20 +1034,29 @@ export const confirmInvoicePayment = async (
     payment_transfer?: number;
     payment_other?: number;
     payment_note?: string;
+    update_date?: boolean; // Nueva opción para actualizar la fecha al día de hoy
   }
 ): Promise<Invoice | null> => {
   const company = getCurrentCompany();
   
+  // Preparar los datos a actualizar
+  const updateData: any = {
+    status: 'paid', // CORREGIDO: Usar 'status' en lugar de 'payment_status'
+    payment_method: paymentData.payment_method,
+    payment_cash: paymentData.payment_cash || 0,
+    payment_transfer: paymentData.payment_transfer || 0,
+    payment_other: paymentData.payment_other || 0,
+    payment_note: paymentData.payment_note || null,
+  };
+
+  // Si se solicita actualizar la fecha, usar la fecha actual de Colombia
+  if (paymentData.update_date) {
+    updateData.date = getColombiaDateTime();
+  }
+  
   const { data, error } = await supabase
     .from('invoices')
-    .update({
-      status: 'paid', // CORREGIDO: Usar 'status' en lugar de 'payment_status'
-      payment_method: paymentData.payment_method,
-      payment_cash: paymentData.payment_cash || 0,
-      payment_transfer: paymentData.payment_transfer || 0,
-      payment_other: paymentData.payment_other || 0,
-      payment_note: paymentData.payment_note || null,
-    })
+    .update(updateData)
     .eq('id', invoiceId)
     .eq('company', company)
     .select()
@@ -1596,6 +1768,204 @@ export const deleteCreditPayment = async (id: string): Promise<boolean> => {
 };
 
 // ============================================
+// HISTORIAL DE CRÉDITO
+// ============================================
+
+export const getCreditHistory = async (customerDocument: string): Promise<CreditHistory[]> => {
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('credit_history')
+    .select('*')
+    .eq('company', company)
+    .eq('customer_document', customerDocument)
+    .order('created_at', { ascending: false });
+  
+  if (error) {
+    console.error('Error fetching credit history:', error);
+    return [];
+  }
+  return data || [];
+};
+
+export const addCreditHistory = async (history: Omit<CreditHistory, 'id' | 'company' | 'created_at'>): Promise<CreditHistory | null> => {
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('credit_history')
+    .insert([{ ...history, company }])
+    .select()
+    .single();
+  
+  if (error) {
+    console.error('Error adding credit history:', error);
+    return null;
+  }
+  return data;
+};
+
+// ============================================
+// MÉTRICAS Y ANÁLISIS DE CRÉDITO
+// ============================================
+
+export const getCreditMetrics = async () => {
+  const company = getCurrentCompany();
+  const customers = await getCustomers();
+  const invoices = await getInvoices();
+  const creditInvoices = invoices.filter(inv => inv.is_credit && inv.status !== 'cancelled');
+  
+  // Total de cartera
+  const totalPortfolio = creditInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+  
+  // Cartera vencida
+  const today = new Date();
+  const overdueInvoices = creditInvoices.filter(inv => {
+    if (!inv.due_date) return false;
+    const dueDate = new Date(inv.due_date);
+    return dueDate < today && (inv.credit_balance || 0) > 0;
+  });
+  const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+  
+  // Pagos de la semana
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  const payments = await getCreditPayments();
+  const weekPayments = payments.filter(p => new Date(p.date) >= weekAgo);
+  const weekPaymentsTotal = weekPayments.reduce((sum, p) => sum + p.amount, 0);
+  
+  // Indicador de riesgo
+  const riskPercentage = totalPortfolio > 0 ? (overdueAmount / totalPortfolio) * 100 : 0;
+  let riskLevel: 'low' | 'medium' | 'high' = 'low';
+  if (riskPercentage > 50) riskLevel = 'high';
+  else if (riskPercentage > 25) riskLevel = 'medium';
+  
+  return {
+    totalPortfolio,
+    overdueAmount,
+    weekPaymentsTotal,
+    weekPaymentsCount: weekPayments.length,
+    riskLevel,
+    riskPercentage
+  };
+};
+
+export const getTopDebtors = async (limit: number = 5) => {
+  const customers = await getCustomers();
+  const invoices = await getInvoices();
+  
+  const customersWithDebt = customers.map(customer => {
+    const customerInvoices = invoices.filter(inv => 
+      inv.customer_document === customer.document && 
+      inv.is_credit && 
+      (inv.credit_balance || 0) > 0
+    );
+    
+    const totalDebt = customerInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+    
+    // Calcular días de mora (mayor de todas las facturas)
+    const today = new Date();
+    let maxOverdueDays = 0;
+    customerInvoices.forEach(inv => {
+      if (inv.due_date) {
+        const dueDate = new Date(inv.due_date);
+        if (dueDate < today) {
+          const overdueDays = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+          if (overdueDays > maxOverdueDays) {
+            maxOverdueDays = overdueDays;
+          }
+        }
+      }
+    });
+    
+    return {
+      ...customer,
+      totalDebt,
+      overdueDays: maxOverdueDays
+    };
+  }).filter(c => c.totalDebt > 0);
+  
+  return customersWithDebt
+    .sort((a, b) => b.totalDebt - a.totalDebt)
+    .slice(0, limit);
+};
+
+export const getAgingReport = async () => {
+  const invoices = await getInvoices();
+  const creditInvoices = invoices.filter(inv => 
+    inv.is_credit && 
+    (inv.credit_balance || 0) > 0 &&
+    inv.status !== 'cancelled'
+  );
+  
+  const today = new Date();
+  
+  const ranges = {
+    current: { label: '0-30 días', min: 0, max: 30, amount: 0, count: 0 },
+    thirtyToSixty: { label: '31-60 días', min: 31, max: 60, amount: 0, count: 0 },
+    sixtyToNinety: { label: '61-90 días', min: 61, max: 90, amount: 0, count: 0 },
+    overNinety: { label: 'Más de 90 días', min: 91, max: Infinity, amount: 0, count: 0 }
+  };
+  
+  creditInvoices.forEach(inv => {
+    if (!inv.due_date) return;
+    
+    const dueDate = new Date(inv.due_date);
+    const overdueDays = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+    const balance = inv.credit_balance || 0;
+    
+    if (overdueDays >= 0 && overdueDays <= 30) {
+      ranges.current.amount += balance;
+      ranges.current.count++;
+    } else if (overdueDays >= 31 && overdueDays <= 60) {
+      ranges.thirtyToSixty.amount += balance;
+      ranges.thirtyToSixty.count++;
+    } else if (overdueDays >= 61 && overdueDays <= 90) {
+      ranges.sixtyToNinety.amount += balance;
+      ranges.sixtyToNinety.count++;
+    } else if (overdueDays > 90) {
+      ranges.overNinety.amount += balance;
+      ranges.overNinety.count++;
+    }
+  });
+  
+  return ranges;
+};
+
+export const getRecentPayments = async (limit: number = 10): Promise<CreditPayment[]> => {
+  const payments = await getCreditPayments();
+  return payments.slice(0, limit);
+};
+
+export const updateCustomerStatus = async (customerDocument: string): Promise<void> => {
+  const customer = await getCustomerByDocument(customerDocument);
+  if (!customer) return;
+  
+  const invoices = await getInvoices();
+  const customerInvoices = invoices.filter(inv => 
+    inv.customer_document === customerDocument &&
+    inv.is_credit &&
+    (inv.credit_balance || 0) > 0
+  );
+  
+  const today = new Date();
+  let hasOverdue = false;
+  
+  for (const inv of customerInvoices) {
+    if (inv.due_date) {
+      const dueDate = new Date(inv.due_date);
+      if (dueDate < today) {
+        hasOverdue = true;
+        break;
+      }
+    }
+  }
+  
+  const newStatus = customer.blocked ? 'blocked' : (hasOverdue ? 'overdue' : 'active');
+  
+  if (customer.status !== newStatus) {
+    await updateCustomer(customer.id, { status: newStatus });
+  }
+};
+
+// ============================================
 // CAMBIOS
 // ============================================
 
@@ -1632,46 +2002,78 @@ export const getExchanges = async (): Promise<Exchange[]> => {
 
 export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_number' | 'company' | 'created_at' | 'updated_at'>): Promise<Exchange | null> => {
   const company = getCurrentCompany();
-  
-  // Generar número de cambio usando fecha de Colombia
-  const today = getColombiaDate().replace(/-/g, '');
-  const prefix = `C${today}`;
-  
-  // Buscar último número del día
-  const { data: lastExchange } = await supabase
-    .from('exchanges')
-    .select('exchange_number')
-    .eq('company', company)
-    .like('exchange_number', `${prefix}%`)
-    .order('exchange_number', { ascending: false })
-    .limit(1)
-    .single();
-  
-  let nextSequence = 1;
-  if (lastExchange) {
-    const lastSequence = parseInt(lastExchange.exchange_number.slice(-4));
-    nextSequence = lastSequence + 1;
-  }
-  
-  const exchange_number = `${prefix}-${nextSequence.toString().padStart(4, '0')}`;
-  
-  // Usar la fecha y hora actual de Colombia
   const colombiaDateTime = getColombiaDateTime().toISOString();
   
-  // Crear registro de cambio
-  const { data, error } = await supabase
-    .from('exchanges')
-    .insert([{ 
-      ...exchangeData, 
-      company, 
-      exchange_number,
-      date: colombiaDateTime 
-    }])
-    .select()
-    .single();
+  // Función auxiliar para generar número de cambio
+  const generateExchangeNumber = async (): Promise<string> => {
+    const today = getColombiaDate().replace(/-/g, '');
+    // Usar "C" para Repuestos VIP y "V" para Celumundo VIP
+    const companyPrefix = company === 'repuestos' ? 'C' : 'V';
+    const prefix = `${companyPrefix}${today}`;
+    
+    const { data: exchanges } = await supabase
+      .from('exchanges')
+      .select('exchange_number')
+      .eq('company', company)
+      .like('exchange_number', `${prefix}%`)
+      .order('exchange_number', { ascending: false })
+      .limit(1);
+    
+    let nextSequence = 1;
+    if (exchanges && exchanges.length > 0) {
+      const lastSequence = parseInt(exchanges[0].exchange_number.slice(-4));
+      nextSequence = lastSequence + 1;
+    }
+    
+    return `${prefix}-${nextSequence.toString().padStart(4, '0')}`;
+  };
   
-  if (error) {
-    console.error('Error adding exchange:', error);
+  // Intentar insertar con retry automático en caso de duplicate key
+  let data = null;
+  let exchange_number = '';
+  const maxRetries = 5;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    exchange_number = await generateExchangeNumber();
+    console.log(`🔄 Attempting to create exchange ${exchange_number} (attempt ${attempt + 1}/${maxRetries})`);
+    
+    const result = await supabase
+      .from('exchanges')
+      .insert([{ 
+        ...exchangeData, 
+        company, 
+        exchange_number,
+        date: colombiaDateTime 
+      }])
+      .select()
+      .single();
+    
+    if (result.error) {
+      // Si es error de duplicate key, reintentar
+      if (result.error.code === '23505') {
+        console.log(`⚠️ Duplicate key detected, retrying... (attempt ${attempt + 1}/${maxRetries})`);
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+          continue;
+        } else {
+          console.error('Max retries reached with duplicate key error');
+          return null;
+        }
+      }
+      
+      // Si es otro tipo de error, loguear y retornar null inmediatamente
+      console.error('Error adding exchange:', result.error);
+      return null;
+    }
+    
+    // Éxito
+    console.log(`✅ Exchange created successfully: ${exchange_number}`);
+    data = result.data;
+    break;
+  }
+  
+  if (!data) {
+    console.error('Failed to create exchange after all retries');
     return null;
   }
   

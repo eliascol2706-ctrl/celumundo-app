@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { X, ChevronLeft, ChevronRight, Loader2, CheckCircle } from 'lucide-react';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
@@ -100,19 +100,35 @@ export function MonthlyClosureDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" aria-describedby={isLoading || isSuccess ? "status-description" : undefined}>
         {isLoading ? (
-          <div className="py-16 text-center">
-            <Loader2 className="h-16 w-16 mx-auto text-green-600 dark:text-green-400 animate-spin mb-4" />
-            <h3 className="text-xl font-bold mb-2">Procesando Cierre Mensual...</h3>
-            <p className="text-muted-foreground">Por favor espera un momento</p>
-          </div>
+          <>
+            <DialogHeader className="sr-only">
+              <DialogTitle>Procesando Cierre Mensual</DialogTitle>
+              <DialogDescription id="status-description">
+                El cierre mensual está siendo procesado
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-16 text-center">
+              <Loader2 className="h-16 w-16 mx-auto text-green-600 dark:text-green-400 animate-spin mb-4" />
+              <h3 className="text-xl font-bold mb-2">Procesando Cierre Mensual...</h3>
+              <p className="text-muted-foreground">Por favor espera un momento</p>
+            </div>
+          </>
         ) : isSuccess ? (
-          <div className="py-16 text-center">
-            <CheckCircle className="h-16 w-16 mx-auto text-green-600 dark:text-green-400 mb-4" />
-            <h3 className="text-xl font-bold mb-2">¡Cierre Mensual Realizado Exitosamente!</h3>
-            <p className="text-muted-foreground">El cierre mensual ha sido registrado correctamente</p>
-          </div>
+          <>
+            <DialogHeader className="sr-only">
+              <DialogTitle>Cierre Mensual Exitoso</DialogTitle>
+              <DialogDescription id="status-description">
+                El cierre mensual ha sido completado con éxito
+              </DialogDescription>
+            </DialogHeader>
+            <div className="py-16 text-center">
+              <CheckCircle className="h-16 w-16 mx-auto text-green-600 dark:text-green-400 mb-4" />
+              <h3 className="text-xl font-bold mb-2">¡Cierre Mensual Realizado Exitosamente!</h3>
+              <p className="text-muted-foreground">El cierre mensual ha sido registrado correctamente</p>
+            </div>
+          </>
         ) : (
           <>
             <DialogHeader>
@@ -122,6 +138,9 @@ export function MonthlyClosureDialog({
                   <X className="h-5 w-5" />
                 </Button>
               </DialogTitle>
+              <DialogDescription>
+                Revisa los detalles del cierre mensual antes de finalizar.
+              </DialogDescription>
             </DialogHeader>
 
             {/* Phase 1: Charts and Comparisons */}

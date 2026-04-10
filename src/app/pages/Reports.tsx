@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BarChart3, TrendingUp, X, Search, RotateCcw } from 'lucide-react';
-import { getInvoices, getProducts, getDailyClosures, getMonthlyClosures, getExpenses, getReturns, calculateNetRevenue, type Invoice, type Return } from '../lib/supabase';
+import { getInvoices, getProducts, getDailyClosures, getMonthlyClosures, getExpenses, getReturns, calculateNetRevenue, getColombiaDate, getColombiaDateTime, extractColombiaDate, type Invoice, type Return } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -91,18 +91,22 @@ export function Reports() {
       ventas: amount,
     }));
 
-    // Tendencias mensuales (últimos 6 meses)
+    // Tendencias mensuales (últimos 6 meses) - usando zona horaria de Colombia
     const monthlyTrends = [];
+    const colombiaTime = getColombiaDateTime();
+    
     for (let i = 5; i >= 0; i--) {
-      const date = new Date();
+      const date = new Date(colombiaTime);
       date.setMonth(date.getMonth() - i);
       const month = date.getMonth();
       const year = date.getFullYear();
       
       const monthInvoices = invoices.filter(inv => {
-        const invDate = new Date(inv.date);
-        return invDate.getMonth() === month && 
-               invDate.getFullYear() === year && 
+        const invDate = extractColombiaDate(inv.date);
+        if (!invDate) return false;
+        const invDateObj = new Date(invDate);
+        return invDateObj.getMonth() === month && 
+               invDateObj.getFullYear() === year && 
                inv.status === 'paid';
       });
 
@@ -132,23 +136,30 @@ export function Reports() {
 
   // Calcular datos del reporte mensual
   const calculateMonthlyReport = () => {
-    const currentMonth = new Date().getMonth();
-    const currentYear = new Date().getFullYear();
-    const previousMonth = new Date();
+    // Usar la fecha de Colombia para obtener mes y año actual
+    const colombiaTime = getColombiaDateTime();
+    const currentMonth = colombiaTime.getMonth();
+    const currentYear = colombiaTime.getFullYear();
+    
+    const previousMonth = new Date(colombiaTime);
     previousMonth.setMonth(previousMonth.getMonth() - 1);
 
-    // Facturas del mes actual
+    // Facturas del mes actual - usando extractColombiaDate para comparar
     const currentMonthInvoices = invoices.filter(inv => {
-      const invDate = new Date(inv.date);
-      return invDate.getMonth() === currentMonth && 
-             invDate.getFullYear() === currentYear;
+      const invDate = extractColombiaDate(inv.date);
+      if (!invDate) return false;
+      const dateObj = new Date(invDate);
+      return dateObj.getMonth() === currentMonth && 
+             dateObj.getFullYear() === currentYear;
     });
 
     // Facturas del mes anterior
     const previousMonthInvoices = invoices.filter(inv => {
-      const invDate = new Date(inv.date);
-      return invDate.getMonth() === previousMonth.getMonth() && 
-             invDate.getFullYear() === previousMonth.getFullYear();
+      const invDate = extractColombiaDate(inv.date);
+      if (!invDate) return false;
+      const dateObj = new Date(invDate);
+      return dateObj.getMonth() === previousMonth.getMonth() && 
+             dateObj.getFullYear() === previousMonth.getFullYear();
     });
 
     // Ingresos totales del mes
@@ -160,11 +171,13 @@ export function Reports() {
       .filter(inv => inv.status === 'paid')
       .reduce((sum, inv) => sum + inv.total, 0);
 
-    // Gastos del mes actual
+    // Gastos del mes actual - usando extractColombiaDate
     const currentMonthExpenses = expenses.filter(exp => {
-      const expDate = new Date(exp.date);
-      return expDate.getMonth() === currentMonth && 
-             expDate.getFullYear() === currentYear;
+      const expDate = extractColombiaDate(exp.date);
+      if (!expDate) return false;
+      const dateObj = new Date(expDate);
+      return dateObj.getMonth() === currentMonth && 
+             dateObj.getFullYear() === currentYear;
     });
 
     const currentMonthExpensesTotal = currentMonthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
@@ -174,9 +187,11 @@ export function Reports() {
 
     // Gastos del mes anterior
     const previousMonthExpenses = expenses.filter(exp => {
-      const expDate = new Date(exp.date);
-      return expDate.getMonth() === previousMonth.getMonth() && 
-             expDate.getFullYear() === previousMonth.getFullYear();
+      const expDate = extractColombiaDate(exp.date);
+      if (!expDate) return false;
+      const dateObj = new Date(expDate);
+      return dateObj.getMonth() === previousMonth.getMonth() && 
+             dateObj.getFullYear() === previousMonth.getFullYear();
     });
 
     const previousMonthExpensesTotal = previousMonthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
@@ -258,9 +273,15 @@ export function Reports() {
 
   // Calcular datos del reporte diario
   const calculateDailyReport = () => {
-    const today = new Date().toISOString().split('T')[0];
+    // Usar la fecha de Colombia en lugar de la fecha local del navegador
+    const today = getColombiaDate(); // YYYY-MM-DD en zona Colombia
     
-    const todayInvoices = invoices.filter(inv => inv.date === today);
+    // Comparar usando extractColombiaDate para manejar correctamente las fechas con timestamp
+    const todayInvoices = invoices.filter(inv => {
+      const invoiceDate = extractColombiaDate(inv.date);
+      return invoiceDate === today;
+    });
+    
     const todayRevenue = todayInvoices
       .filter(inv => inv.status === 'paid')
       .reduce((sum, inv) => sum + inv.total, 0);
@@ -883,15 +904,15 @@ export function Reports() {
                                 <td className="py-2 px-3 text-sm">
                                   {new Date(closure.date).toLocaleDateString('es-ES')}
                                 </td>
-                                <td className="py-2 px-3 text-center text-sm">{closure.totalInvoices}</td>
-                                <td className="py-2 px-3 text-center text-sm">{closure.pendingInvoices}</td>
-                                <td className="py-2 px-3 text-center text-sm">{closure.paidInvoices}</td>
-                                <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.totalCash)}</td>
-                                <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.totalTransfer)}</td>
+                                <td className="py-2 px-3 text-center text-sm">{closure.total_invoices}</td>
+                                <td className="py-2 px-3 text-center text-sm">{closure.pending_invoices}</td>
+                                <td className="py-2 px-3 text-center text-sm">{closure.paid_invoices}</td>
+                                <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_cash)}</td>
+                                <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_transfer)}</td>
                                 <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
                                   COP {formatCOP(closure.total)}
                                 </td>
-                                <td className="py-2 px-3 text-sm">{closure.closedBy}</td>
+                                <td className="py-2 px-3 text-sm">{closure.closed_by}</td>
                               </tr>
                             ))}
                             {getDailyClosures().length === 0 && (
@@ -931,12 +952,12 @@ export function Reports() {
                                   {new Date(closure.month + '-01').toLocaleDateString('es-ES', { month: 'long' })}
                                 </td>
                                 <td className="py-2 px-3 text-center text-sm">{closure.year}</td>
-                                <td className="py-2 px-3 text-center text-sm">{closure.totalInvoices}</td>
-                                <td className="py-2 px-3 text-center text-sm">{closure.dailyClosures.length}</td>
+                                <td className="py-2 px-3 text-center text-sm">{closure.total_invoices}</td>
+                                <td className="py-2 px-3 text-center text-sm">{closure.daily_closures_count}</td>
                                 <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
-                                  COP {formatCOP(closure.totalRevenue)}
+                                  COP {formatCOP(closure.total_revenue)}
                                 </td>
-                                <td className="py-2 px-3 text-sm">{closure.closedBy}</td>
+                                <td className="py-2 px-3 text-sm">{closure.closed_by}</td>
                               </tr>
                             ))}
                             {getMonthlyClosures().length === 0 && (
