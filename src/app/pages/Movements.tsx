@@ -650,18 +650,28 @@ export function Movements() {
 
       for (let i = 0; i < qty; i++) {
         let displayCode = item.productCode;
-        
+
         // Si el producto usa IDs y tenemos IDs asignadas, usar código completo
         if (item.useUnitIds && item.unitIds && item.unitIds[i]) {
           displayCode = `${item.productCode}-${item.unitIds[i]}A`;
         }
-        
+
         // Remover las letras "A" del código para impresión
         // Ejemplo: "A10001A-0001A" -> "10001-0001"
         const cleanDisplayCode = displayCode.replace(/A/g, '');
-        
+
         const numericCode = displayCode.replace(/[^0-9]/g, "");
         const barcodeId = `barcode-${itemIndex}-${i}`;
+
+        // Obtener últimos 4 dígitos de la nota si existe
+        let noteDisplay = '';
+        if (item.useUnitIds && item.unitIds && item.unitIds[i] && item.unitIdNotes && item.unitIdNotes[item.unitIds[i]]) {
+          const note = item.unitIdNotes[item.unitIds[i]];
+          const last4Digits = note.slice(-4);
+          if (last4Digits) {
+            noteDisplay = last4Digits;
+          }
+        }
 
         const labelHTML = `
           <div class="label">
@@ -670,6 +680,7 @@ export function Movements() {
               <svg id="${barcodeId}"></svg>
             </div>
             <div class="label-numeric-code">${cleanDisplayCode}</div>
+            ${noteDisplay ? `<div class="label-note">${noteDisplay}</div>` : ''}
             <div class="label-reference">${completedMovement.reference.substring(0, 2).toUpperCase()}</div>
           </div>
         `;
@@ -774,18 +785,22 @@ export function Movements() {
               visibility: hidden !important; 
             }
             
-            .label-product-name { 
-              font-size: 6.1pt !important; 
-              font-weight: bold !important; 
-              text-align: center !important; 
-              max-height: 3.5mm !important; 
-              overflow: hidden !important; 
-              line-height: 1.1 !important; 
-              word-wrap: break-word !important; 
-              width: 100% !important; 
-              margin-bottom: 0.3mm !important; 
+            .label-product-name {
+              font-size: 6.1pt !important;
+              font-weight: bold !important;
+              text-align: center !important;
+              max-height: 7mm !important;
+              overflow: hidden !important;
+              line-height: 1.2 !important;
+              word-wrap: break-word !important;
+              width: 100% !important;
+              margin-bottom: 0.3mm !important;
               padding-top: 0mm;
               margin-top: 0mm;
+              font-family: Arial, Helvetica, sans-serif !important;
+              display: -webkit-box !important;
+              -webkit-line-clamp: 2 !important;
+              -webkit-box-orient: vertical !important;
             }
             
             .label-barcode-container { 
@@ -806,16 +821,27 @@ export function Movements() {
               height: auto !important; 
             }
             
-            .label-numeric-code { 
-              font-size: 7pt !important; 
-              font-weight: bold !important; 
-              text-align: center !important; 
-              letter-spacing: 0.2px !important; 
-              line-height: 1 !important; 
-              margin: 0.3mm 0 !important; 
+            .label-numeric-code {
+              font-size: 7pt !important;
+              font-weight: bold !important;
+              text-align: center !important;
+              letter-spacing: 0.2px !important;
+              line-height: 1 !important;
+              margin: 0.3mm 0 !important;
               font-family: 'Courier New', monospace !important;
             }
-            
+
+            .label-note {
+              font-size: 5.5pt !important;
+              font-weight: 300 !important;
+              text-align: center !important;
+              letter-spacing: 0.1px !important;
+              line-height: 1 !important;
+              margin: 0.2mm 0 0.3mm 0 !important;
+              font-family: Arial, Helvetica, sans-serif !important;
+              color: #333333 !important;
+            }
+
             .label-reference { 
               font-size: 6pt !important; 
               font-weight: 700 !important; 
@@ -829,24 +855,24 @@ export function Movements() {
             }
             
             @media print {
-              @page { 
-                size: 100mm 25mm !important; 
-                margin: 0 !important; 
+              @page {
+                size: 100mm 25mm !important;
+                margin: 0 !important;
               }
-              
-              html, body { 
-                margin: 0 !important; 
-                padding: 0 !important; 
-                width: 100mm !important; 
+
+              html, body {
+                margin: 0 !important;
+                padding: 0 !important;
+                width: 100mm !important;
                 height: auto !important;
                 overflow: visible !important;
               }
-              
-              .label-page { 
-                margin: 0 !important; 
-                padding: 0 1mm !important; 
-                width: 100mm !important; 
-                height: 25mm !important; 
+
+              .label-page {
+                margin: 0 !important;
+                padding: 0 1mm !important;
+                width: 100mm !important;
+                height: 25mm !important;
                 display: flex !important;
                 flex-direction: row !important;
                 justify-content: center !important;
@@ -855,12 +881,28 @@ export function Movements() {
                 page-break-inside: avoid !important;
                 gap: 4mm;
               }
-              
-              .label { 
-                width: 30mm !important; 
-                height: 25mm !important; 
+
+              .label {
+                width: 30mm !important;
+                height: 25mm !important;
                 display: flex !important;
                 padding: 1.5mm 2mm !important;
+              }
+
+              .label-product-name {
+                font-size: 6.1pt !important;
+                font-weight: bold !important;
+                text-align: center !important;
+                max-height: 7mm !important;
+                overflow: hidden !important;
+                line-height: 1.2 !important;
+                word-wrap: break-word !important;
+                width: 100% !important;
+                margin-bottom: 0.3mm !important;
+                font-family: Arial, Helvetica, sans-serif !important;
+                display: -webkit-box !important;
+                -webkit-line-clamp: 2 !important;
+                -webkit-box-orient: vertical !important;
               }
               
               .label-barcode-container svg,
@@ -873,6 +915,17 @@ export function Movements() {
               .label-barcode-container svg rect[fill="#000000"],
               .label-barcode-container svg rect[fill="black"] {
                 fill: #000000 !important;
+              }
+
+              .label-note {
+                font-size: 5.5pt !important;
+                font-weight: 300 !important;
+                text-align: center !important;
+                letter-spacing: 0.1px !important;
+                line-height: 1 !important;
+                margin: 0.2mm 0 0.3mm 0 !important;
+                font-family: Arial, Helvetica, sans-serif !important;
+                color: #333333 !important;
               }
             }
           </style>
