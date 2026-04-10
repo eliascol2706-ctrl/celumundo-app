@@ -1,16 +1,18 @@
 import { useNavigate } from 'react-router';
-import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone } from 'lucide-react';
+import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
-import { useEffect, useState } from 'react';
-import { getInvoices, getColombiaDate, extractColombiaDate, canCreateInvoice, type Invoice, getProducts, deleteInvoice, supabase } from '../lib/supabase';
+import { useEffect, useState, useRef } from 'react';
+import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, type CreditPayment } from '../lib/supabase';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
 import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { jsPDF } from 'jspdf';
+import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
 
 export function InvoicesMenu() {
   const navigate = useNavigate();
@@ -37,6 +39,10 @@ export function InvoicesMenu() {
     transfer: 0,
     other: 0
   });
+  const [creditPayments, setCreditPayments] = useState<CreditPayment[]>([]);
+  const [printRef, setPrintRef] = useState<React.RefObject<HTMLDivElement>>(useRef(null));
+  const [showPrintSelectionModal, setShowPrintSelectionModal] = useState(false);
+  const [printMethod, setPrintMethod] = useState<'pdf' | 'thermal'>('pdf');
 
   useEffect(() => {
     loadStats();
@@ -265,6 +271,28 @@ export function InvoicesMenu() {
   const handlePreviewInvoice = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     setShowPreviewModal(true);
+  };
+
+  const handlePrintInvoice = (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    setPrintRef(useRef(null));
+    const pdf = new jsPDF();
+    pdf.text(`Factura #${invoice.number}`, 10, 10);
+    pdf.text(`Fecha: ${extractColombiaDateTime(invoice.date)}`, 10, 20);
+    pdf.text(`Cliente: ${invoice.customer_name || 'Sin cliente'}`, 10, 30);
+    pdf.text(`Total: ${formatCOP(invoice.total)}`, 10, 40);
+    pdf.save(`Factura_${invoice.number}.pdf`);
+  };
+
+  const handlePrintThermalInvoice = (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    setPrintRef(useRef(null));
+    const pdf = new jsPDF();
+    pdf.text(`Factura #${invoice.number}`, 10, 10);
+    pdf.text(`Fecha: ${extractColombiaDateTime(invoice.date)}`, 10, 20);
+    pdf.text(`Cliente: ${invoice.customer_name || 'Sin cliente'}`, 10, 30);
+    pdf.text(`Total: ${formatCOP(invoice.total)}`, 10, 40);
+    pdf.save(`Factura_${invoice.number}.pdf`);
   };
 
   return (
@@ -573,14 +601,31 @@ export function InvoicesMenu() {
                             </span>
                           </td>
                           <td className="px-4 py-3 text-center">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => navigate('/facturacion/historial')}
-                              className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
-                            >
-                              <Eye className="w-4 h-4" />
-                            </Button>
+                            <div className="flex gap-1 justify-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handlePreviewInvoice(invoice)}
+                                className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                              >
+                                <Eye className="w-4 h-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={async () => {
+                                  if (invoice.is_credit) {
+                                    const payments = await getCreditPaymentsByInvoice(invoice.id);
+                                    setCreditPayments(payments);
+                                  }
+                                  setSelectedInvoice(invoice);
+                                  setShowPrintSelectionModal(true);
+                                }}
+                                className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300"
+                              >
+                                <Printer className="w-4 h-4" />
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -879,20 +924,38 @@ export function InvoicesMenu() {
                           <th className="text-left px-3 py-2 text-zinc-600 dark:text-zinc-400">Producto</th>
                           <th className="text-center px-3 py-2 text-zinc-600 dark:text-zinc-400">Cant.</th>
                           <th className="text-right px-3 py-2 text-zinc-600 dark:text-zinc-400">Precio</th>
-                          <th className="text-right px-3 py-2 text-zinc-600 dark:text-zinc-400">Subtotal</th>
+                          <th className="text-right px-3 py-2 text-zinc-600 dark:text-zinc-400">Total</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
                         {selectedInvoice.items.map((item: any, idx: number) => (
                           <tr key={idx}>
-                            <td className="px-3 py-2 text-zinc-900 dark:text-zinc-100">{item.product_name}</td>
+                            <td className="px-3 py-2">
+                              <div className="font-medium text-zinc-900 dark:text-zinc-100">{item.productName || item.product_name || 'Sin nombre'}</div>
+                              {item.productCode && (
+                                <div className="text-xs text-zinc-500 dark:text-zinc-400">{item.productCode}</div>
+                              )}
+                            </td>
                             <td className="px-3 py-2 text-center text-zinc-700 dark:text-zinc-300">{item.quantity}</td>
                             <td className="px-3 py-2 text-right text-zinc-700 dark:text-zinc-300">{formatCOP(item.price)}</td>
-                            <td className="px-3 py-2 text-right font-medium text-zinc-900 dark:text-zinc-100">{formatCOP(item.subtotal)}</td>
+                            <td className="px-3 py-2 text-right font-medium text-zinc-900 dark:text-zinc-100">{formatCOP(item.total || item.subtotal || (item.price * item.quantity))}</td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                  </div>
+
+                  <div className="mt-4 border-t border-zinc-200 dark:border-zinc-800 pt-4">
+                    <div className="flex justify-between text-lg font-bold">
+                      <span className="text-zinc-700 dark:text-zinc-300">Total:</span>
+                      <span className="text-emerald-600 dark:text-emerald-400">{formatCOP(selectedInvoice.total)}</span>
+                    </div>
+                    {selectedInvoice.is_credit && selectedInvoice.credit_balance && selectedInvoice.credit_balance > 0 && (
+                      <div className="flex justify-between text-sm mt-2">
+                        <span className="text-zinc-600 dark:text-zinc-400">Saldo pendiente:</span>
+                        <span className="text-amber-600 dark:text-amber-400 font-medium">{formatCOP(selectedInvoice.credit_balance)}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
@@ -906,6 +969,67 @@ export function InvoicesMenu() {
               className="border-zinc-300 dark:border-zinc-700"
             >
               Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Selección de Método de Impresión */}
+      <Dialog open={showPrintSelectionModal} onOpenChange={setShowPrintSelectionModal}>
+        <DialogContent className="bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Seleccionar Método de Impresión</DialogTitle>
+            <DialogDescription className="text-zinc-600 dark:text-zinc-400">
+              Elija el método de impresión para la factura
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div>
+              <Label className="text-zinc-700 dark:text-zinc-300">Factura #{selectedInvoice?.number}</Label>
+              <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                {selectedInvoice && formatCOP(selectedInvoice.total)}
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-zinc-700 dark:text-zinc-300">Método de Impresión</Label>
+              <Select value={printMethod} onValueChange={setPrintMethod}>
+                <SelectTrigger className="bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700">
+                  <SelectValue placeholder="Seleccione un método" />
+                </SelectTrigger>
+                <SelectContent className="bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700">
+                  <SelectItem value="pdf">PDF</SelectItem>
+                  <SelectItem value="thermal">Termal</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowPrintSelectionModal(false);
+                setPrintMethod('pdf');
+              }}
+              className="border-zinc-300 dark:border-zinc-700"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (printMethod === 'pdf') {
+                  handlePrintInvoice(selectedInvoice!);
+                } else if (printMethod === 'thermal') {
+                  handlePrintThermalInvoice(selectedInvoice!);
+                }
+                setShowPrintSelectionModal(false);
+              }}
+              className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white"
+            >
+              <CheckCircle className="w-4 h-4 mr-2" />
+              Imprimir
             </Button>
           </DialogFooter>
         </DialogContent>

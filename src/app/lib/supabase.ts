@@ -37,6 +37,7 @@ export interface Product {
   category: string;
   use_unit_ids: boolean; // NUEVO: Si el producto usa IDs únicas por unidad
   registered_ids: string[]; // NUEVO: Array de IDs registradas (ej: ['0001', '0002', '0003'])
+  registered_ids_with_notes?: Array<{ id: string; note: string }>; // NUEVO: Array de IDs con notas adicionales
   created_at?: string;
   updated_at?: string;
 }
@@ -48,6 +49,7 @@ export interface InvoiceItem {
   price: number;
   total: number;
   unitIds?: string[]; // NUEVO: IDs de las unidades específicas vendidas (ej: ['0001', '0002'])
+  unitIdNotes?: { [id: string]: string }; // NUEVO: Notas adicionales por ID única
 }
 
 export interface Invoice {

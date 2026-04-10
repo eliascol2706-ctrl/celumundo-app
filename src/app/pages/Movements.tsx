@@ -11,6 +11,7 @@ import {
   DollarSign,
   Tag,
   Hash,
+  Edit,
 } from "lucide-react";
 import {
   getMovements,
@@ -61,6 +62,7 @@ interface MovementItem {
   newCost?: number;
   useUnitIds: boolean;
   unitIds: string[];
+  unitIdNotes: { [id: string]: string }; // Notas adicionales para cada ID
   availableIds?: string[]; // Para salidas: IDs disponibles del producto
 }
 
@@ -88,6 +90,7 @@ export function Movements() {
   const [unitIdDialogOpen, setUnitIdDialogOpen] = useState(false);
   const [currentItemIndex, setCurrentItemIndex] = useState<number | null>(null);
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
+  const [unitIdNotes, setUnitIdNotes] = useState<{ [id: string]: string }>({});
 
   // Prevenir doble clic
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -264,6 +267,7 @@ export function Movements() {
       newCost: formData.newCost ? parseFloat(formData.newCost) : undefined,
       useUnitIds: product.use_unit_ids,
       unitIds: [],
+      unitIdNotes: {},
       availableIds: product.use_unit_ids ? (product.registered_ids || []) : undefined,
     };
 
@@ -279,6 +283,7 @@ export function Movements() {
       setMovementItems([...movementItems, newItem]);
       setCurrentItemIndex(movementItems.length);
       setSelectedUnitIds([]);
+      setUnitIdNotes({});
       setUnitIdDialogOpen(true);
       setFormData({
         ...formData,
@@ -347,6 +352,7 @@ export function Movements() {
   const handleOpenUnitIdSelector = (index: number) => {
     setCurrentItemIndex(index);
     setSelectedUnitIds([...movementItems[index].unitIds]);
+    setUnitIdNotes({...movementItems[index].unitIdNotes});
     setUnitIdDialogOpen(true);
   };
 
@@ -355,17 +361,28 @@ export function Movements() {
     
     const item = movementItems[currentItemIndex];
     
-    if (selectedUnitIds.length !== item.quantity) {
+    // Para salidas, verificar que se seleccionaron las IDs correctas
+    if (formData.type === "exit" && selectedUnitIds.length !== item.quantity) {
       toast.error(`Debes seleccionar exactamente ${item.quantity} IDs`);
       return;
     }
     
     const updated = [...movementItems];
-    updated[currentItemIndex].unitIds = selectedUnitIds;
+    // Para salidas, actualizar las IDs seleccionadas
+    if (formData.type === "exit") {
+      updated[currentItemIndex].unitIds = selectedUnitIds;
+    }
+    // Para ambos casos, actualizar las notas
+    updated[currentItemIndex].unitIdNotes = unitIdNotes;
     setMovementItems(updated);
     setUnitIdDialogOpen(false);
     setCurrentItemIndex(null);
-    toast.success("IDs seleccionadas correctamente");
+    
+    if (formData.type === "entry") {
+      toast.success("Notas guardadas correctamente");
+    } else {
+      toast.success("IDs seleccionadas correctamente");
+    }
   };
 
   const toggleUnitId = (unitId: string) => {
@@ -1491,42 +1508,62 @@ export function Movements() {
                         {item.useUnitIds && (
                           <div className="mt-2">
                             {formData.type === "entry" && item.unitIds.length > 0 && (
-                              <div className="text-xs">
-                                <p className="font-medium text-green-600 mb-1">
-                                  IDs generadas automáticamente:
-                                </p>
+                              <div className="text-xs space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <p className="font-medium text-emerald-600 dark:text-emerald-400">
+                                    IDs generadas automáticamente:
+                                  </p>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={() => handleOpenUnitIdSelector(index)}
+                                    className="h-6 text-xs"
+                                  >
+                                    <Edit className="h-3 w-3 mr-1" />
+                                    Agregar Notas
+                                  </Button>
+                                </div>
                                 <div className="flex flex-wrap gap-1">
                                   {item.unitIds.map((id) => (
-                                    <span
-                                      key={id}
-                                      className="px-2 py-0.5 bg-green-100 text-green-700 font-mono rounded"
-                                    >
-                                      {id}
-                                    </span>
+                                    <div key={id} className="flex flex-col gap-0.5">
+                                      <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 font-mono rounded border border-emerald-300 dark:border-emerald-700">
+                                        {id}
+                                      </span>
+                                      {item.unitIdNotes[id] && (
+                                        <span className="px-2 py-0.5 text-[10px] text-muted-foreground bg-muted rounded truncate max-w-[80px]" title={item.unitIdNotes[id]}>
+                                          {item.unitIdNotes[id]}
+                                        </span>
+                                      )}
+                                    </div>
                                   ))}
                                 </div>
                               </div>
                             )}
                             {formData.type === "exit" && (
-                              <div className="text-xs">
+                              <div className="text-xs space-y-2">
                                 {item.unitIds.length > 0 ? (
                                   <>
-                                    <p className="font-medium text-blue-600 mb-1">
+                                    <p className="font-medium text-blue-600 dark:text-blue-400 mb-1">
                                       IDs seleccionadas:
                                     </p>
                                     <div className="flex flex-wrap gap-1 mb-2">
                                       {item.unitIds.map((id) => (
-                                        <span
-                                          key={id}
-                                          className="px-2 py-0.5 bg-blue-100 text-blue-700 font-mono rounded"
-                                        >
-                                          {id}
-                                        </span>
+                                        <div key={id} className="flex flex-col gap-0.5">
+                                          <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 font-mono rounded border border-blue-300 dark:border-blue-700">
+                                            {id}
+                                          </span>
+                                          {item.unitIdNotes[id] && (
+                                            <span className="px-2 py-0.5 text-[10px] text-muted-foreground bg-muted rounded truncate max-w-[80px]" title={item.unitIdNotes[id]}>
+                                              {item.unitIdNotes[id]}
+                                            </span>
+                                          )}
+                                        </div>
                                       ))}
                                     </div>
                                   </>
                                 ) : (
-                                  <p className="text-red-600 font-medium mb-2">
+                                  <p className="text-red-600 dark:text-red-400 font-medium mb-2">
                                     ⚠️ Debes seleccionar las IDs
                                   </p>
                                 )}
@@ -1538,7 +1575,7 @@ export function Movements() {
                                   className="w-full"
                                 >
                                   <Hash className="h-3 w-3 mr-1" />
-                                  Seleccionar IDs
+                                  {item.unitIds.length > 0 ? "Editar IDs / Notas" : "Seleccionar IDs"}
                                 </Button>
                               </div>
                             )}
@@ -1617,13 +1654,19 @@ export function Movements() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog de selector de IDs únicas (para salidas) */}
+      {/* Dialog de selector de IDs únicas */}
       <Dialog open={unitIdDialogOpen} onOpenChange={setUnitIdDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Seleccionar IDs de Unidades</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <Hash className="h-5 w-5 text-emerald-600 dark:text-emerald-400" />
+              {formData.type === "entry" ? "Agregar Notas a IDs" : "Seleccionar IDs de Unidades"}
+            </DialogTitle>
             <DialogDescription>
-              Selecciona exactamente {currentItemIndex !== null && movementItems[currentItemIndex]?.quantity} IDs para esta salida.
+              {formData.type === "entry" 
+                ? "Agrega información adicional opcional a cada ID generada automáticamente."
+                : `Selecciona exactamente ${currentItemIndex !== null && movementItems[currentItemIndex]?.quantity} IDs para esta salida y opcionalmente agrega información adicional.`
+              }
             </DialogDescription>
           </DialogHeader>
 
@@ -1631,25 +1674,76 @@ export function Movements() {
             <div className="space-y-4 max-h-[60vh] overflow-y-auto">
               <div className="bg-muted p-3 rounded">
                 <p className="font-medium">{movementItems[currentItemIndex].productName}</p>
-                <p className="text-sm text-muted-foreground">
-                  Seleccionadas: {selectedUnitIds.length} / {movementItems[currentItemIndex].quantity}
-                </p>
+                {formData.type === "exit" && (
+                  <p className="text-sm text-muted-foreground">
+                    Seleccionadas: {selectedUnitIds.length} / {movementItems[currentItemIndex].quantity}
+                  </p>
+                )}
               </div>
 
-              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                {movementItems[currentItemIndex].availableIds?.map((id) => (
-                  <button
+              <div className="space-y-3">
+                {/* Para ENTRADAS: Mostrar IDs generadas para agregar notas */}
+                {formData.type === "entry" && movementItems[currentItemIndex].unitIds.map((id) => (
+                  <div 
                     key={id}
-                    type="button"
-                    onClick={() => toggleUnitId(id)}
-                    className={`p-3 rounded border-2 font-mono text-sm transition-all ${
+                    className="flex items-center gap-2 p-3 rounded border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
+                  >
+                    {/* ID */}
+                    <div className="flex items-center justify-center w-20 py-2 rounded font-mono text-sm font-bold bg-emerald-500 text-white">
+                      {id}
+                    </div>
+                    
+                    {/* Campo de nota adicional */}
+                    <div className="flex-1 flex items-center gap-2">
+                      <Edit className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <Input
+                        type="text"
+                        placeholder="Información adicional (opcional)"
+                        value={unitIdNotes[id] || ""}
+                        onChange={(e) => setUnitIdNotes({...unitIdNotes, [id]: e.target.value})}
+                        className="text-sm h-8 bg-background"
+                      />
+                    </div>
+                  </div>
+                ))}
+
+                {/* Para SALIDAS: Selector de IDs con notas opcionales */}
+                {formData.type === "exit" && movementItems[currentItemIndex].availableIds?.map((id) => (
+                  <div 
+                    key={id}
+                    className={`flex items-center gap-2 p-3 rounded border-2 transition-all ${
                       selectedUnitIds.includes(id)
-                        ? "border-green-500 bg-green-50 text-green-700"
-                        : "border-gray-200 bg-white hover:border-gray-400"
+                        ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
+                        : "border-border bg-card hover:border-muted-foreground/30"
                     }`}
                   >
-                    {id}
-                  </button>
+                    {/* Checkbox y ID */}
+                    <button
+                      type="button"
+                      onClick={() => toggleUnitId(id)}
+                      className={`flex items-center justify-center w-20 py-2 rounded font-mono text-sm font-bold transition-all ${
+                        selectedUnitIds.includes(id)
+                          ? "bg-emerald-500 text-white"
+                          : "bg-muted text-foreground hover:bg-muted-foreground/10"
+                      }`}
+                    >
+                      {id}
+                    </button>
+                    
+                    {/* Campo de nota adicional */}
+                    {selectedUnitIds.includes(id) && (
+                      <div className="flex-1 flex items-center gap-2">
+                        <Edit className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                        <Input
+                          type="text"
+                          placeholder="Información adicional (opcional)"
+                          value={unitIdNotes[id] || ""}
+                          onChange={(e) => setUnitIdNotes({...unitIdNotes, [id]: e.target.value})}
+                          className="text-sm h-8 bg-background"
+                        />
+                      </div>
+                    )}
+                  </div>
                 ))}
               </div>
             </div>
@@ -1667,7 +1761,7 @@ export function Movements() {
               Cancelar
             </Button>
             <Button type="button" onClick={handleSaveUnitIds}>
-              Confirmar Selección
+              {formData.type === "entry" ? "Guardar Notas" : "Confirmar Selección"}
             </Button>
           </DialogFooter>
         </DialogContent>

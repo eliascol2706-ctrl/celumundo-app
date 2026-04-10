@@ -18,7 +18,9 @@ import {
   TrendingUp,
   Edit2,
   Minus,
-  Loader2
+  Loader2,
+  Hash,
+  Edit
 } from 'lucide-react';
 import {
   getCustomers,
@@ -41,7 +43,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
 import { includesIgnoreAccents } from '../lib/string-utils';
@@ -58,6 +60,8 @@ interface InvoiceItem {
   useUnitIds?: boolean;
   unitIds?: string[];
   availableIds?: string[];
+  availableIdsWithNotes?: Array<{ id: string; note: string }>;
+  unitIdNotes?: { [id: string]: string };
 }
 
 interface Product {
@@ -68,6 +72,7 @@ interface Product {
   stock: number;
   use_unit_ids: boolean;
   registered_ids: string[];
+  registered_ids_with_notes?: Array<{ id: string; note: string }>;
 }
 
 export function CreditInvoice() {
@@ -90,6 +95,12 @@ export function CreditInvoice() {
   const [productSearch, setProductSearch] = useState('');
   const [selectedProductIndex, setSelectedProductIndex] = useState<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // Estados para selector de IDs únicas
+  const [unitIdDialogOpen, setUnitIdDialogOpen] = useState(false);
+  const [currentItemIndex, setCurrentItemIndex] = useState<number | null>(null);
+  const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
+  const [unitIdNotes, setUnitIdNotes] = useState<{ [id: string]: string }>({});
 
   // Estados para análisis de crédito
   const [creditAnalysis, setCreditAnalysis] = useState({
@@ -204,6 +215,15 @@ export function CreditInvoice() {
   };
 
   const addProductToList = (product: any) => {
+    // Verificar si el producto usa IDs y tiene IDs disponibles
+    if (product.use_unit_ids) {
+      const availableIds = product.registered_ids || [];
+      if (availableIds.length === 0) {
+        toast.error(`${product.name} no tiene IDs registradas disponibles`);
+        return;
+      }
+    }
+
     // Agregar nuevo item con el producto seleccionado
     const newItem: InvoiceItem = {
       productId: product.id,
@@ -214,11 +234,20 @@ export function CreditInvoice() {
       total: product.price2,
       useUnitIds: product.use_unit_ids,
       unitIds: [],
-      availableIds: product.registered_ids || []
+      availableIds: product.registered_ids || [],
+      availableIdsWithNotes: product.registered_ids_with_notes || [],
+      unitIdNotes: {}
     };
     
     setItems([...items, newItem]);
     setShowProductSearch(false);
+
+    // Si usa IDs, abrir selector
+    if (product.use_unit_ids) {
+      setCurrentItemIndex(items.length);
+      setSelectedUnitIds([]);
+      setUnitIdDialogOpen(true);
+    }
   };
 
   const removeItem = (index: number) => {
@@ -244,6 +273,7 @@ export function CreditInvoice() {
     updateItem(index, 'total', product.price2 * items[index].quantity);
     updateItem(index, 'useUnitIds', product.use_unit_ids);
     updateItem(index, 'availableIds', product.registered_ids);
+    updateItem(index, 'availableIdsWithNotes', product.registered_ids_with_notes || []);
     setShowProductSearch(false);
     setProductSearch('');
   };
@@ -253,6 +283,63 @@ export function CreditInvoice() {
       includesIgnoreAccents(p.name, productSearch) ||
       p.code.toLowerCase().includes(productSearch.toLowerCase())
   );
+
+  // Funciones para manejo de IDs únicas
+  const handleOpenUnitIdSelector = (index: number) => {
+    setCurrentItemIndex(index);
+    setSelectedUnitIds([...(items[index].unitIds || [])]);
+    
+    // Cargar notas existentes o crear objeto vacío con notas del producto
+    const existingNotes = items[index].unitIdNotes || {};
+    const productNotesMap: { [id: string]: string } = {};
+    
+    // Pre-cargar las notas del producto si existen
+    if (items[index].availableIdsWithNotes) {
+      items[index].availableIdsWithNotes!.forEach((item) => {
+        productNotesMap[item.id] = item.note || '';
+      });
+    }
+    
+    // Combinar notas existentes con las del producto
+    setUnitIdNotes({ ...productNotesMap, ...existingNotes });
+    setUnitIdDialogOpen(true);
+  };
+
+  const toggleUnitId = (unitId: string) => {
+    if (currentItemIndex === null) return;
+    const item = items[currentItemIndex];
+    
+    if (selectedUnitIds.includes(unitId)) {
+      setSelectedUnitIds(selectedUnitIds.filter(id => id !== unitId));
+    } else {
+      if (selectedUnitIds.length >= item.quantity) {
+        toast.error(`Solo puedes seleccionar ${item.quantity} IDs`);
+        return;
+      }
+      setSelectedUnitIds([...selectedUnitIds, unitId]);
+    }
+  };
+
+  const handleSaveUnitIds = () => {
+    if (currentItemIndex === null) return;
+    
+    const item = items[currentItemIndex];
+    
+    if (selectedUnitIds.length !== item.quantity) {
+      toast.error(`Debes seleccionar exactamente ${item.quantity} IDs`);
+      return;
+    }
+    
+    const updated = [...items];
+    updated[currentItemIndex].unitIds = selectedUnitIds;
+    updated[currentItemIndex].unitIdNotes = unitIdNotes;
+    setItems(updated);
+    setUnitIdDialogOpen(false);
+    setCurrentItemIndex(null);
+    setSelectedUnitIds([]);
+    setUnitIdNotes({});
+    toast.success('IDs seleccionadas correctamente');
+  };
 
   const handleSubmit = async () => {
     // Validaciones
@@ -269,6 +356,18 @@ export function CreditInvoice() {
     if (items.some((item) => !item.productId || item.quantity <= 0)) {
       toast.error('Complete todos los productos');
       return;
+    }
+
+    // Validar que productos con IDs tengan IDs seleccionadas
+    for (const item of items) {
+      if (item.useUnitIds && (!item.unitIds || item.unitIds.length === 0)) {
+        toast.error(`Debes seleccionar las IDs para ${item.productName}. Haz clic en "Seleccionar IDs" en la lista de productos.`);
+        return;
+      }
+      if (item.useUnitIds && item.unitIds && item.unitIds.length !== item.quantity) {
+        toast.error(`${item.productName}: Debes seleccionar ${item.quantity} IDs pero solo has seleccionado ${item.unitIds.length}`);
+        return;
+      }
     }
 
     // Verificar si el cliente está bloqueado
@@ -658,6 +757,43 @@ export function CreditInvoice() {
                                 <Input value={formatCOP(item.total)} readOnly className="font-bold" />
                               </div>
                             </div>
+
+                            {/* Mostrar/Seleccionar IDs */}
+                            {item.useUnitIds && (
+                              <div className="mt-3">
+                                {item.unitIds && item.unitIds.length > 0 ? (
+                                  <>
+                                    <p className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-1">
+                                      IDs seleccionadas:
+                                    </p>
+                                    <div className="flex flex-wrap gap-1 mb-2">
+                                      {item.unitIds.map((id) => (
+                                        <span
+                                          key={id}
+                                          className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400 rounded text-xs font-mono"
+                                        >
+                                          {id}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <p className="text-xs text-amber-600 dark:text-amber-400 mb-1">
+                                    ⚠️ Debes seleccionar las IDs para este producto
+                                  </p>
+                                )}
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => handleOpenUnitIdSelector(index)}
+                                  className="w-full border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950 text-blue-700 dark:text-blue-400"
+                                >
+                                  <Hash className="h-3 w-3 mr-1" />
+                                  Seleccionar IDs
+                                </Button>
+                              </div>
+                            )}
                           </div>
 
                           <Button
@@ -866,6 +1002,104 @@ export function CreditInvoice() {
           }
         }}
       />
+
+      {/* Dialog selector de IDs únicas */}
+      <Dialog open={unitIdDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          // Si se cierra el modal y el producto no tiene IDs, eliminarlo
+          if (currentItemIndex !== null && items[currentItemIndex]) {
+            const item = items[currentItemIndex];
+            if (!item.unitIds || item.unitIds.length === 0) {
+              const updated = items.filter((_, idx) => idx !== currentItemIndex);
+              setItems(updated);
+              toast.info('Producto eliminado (sin IDs seleccionadas)');
+            }
+          }
+          setCurrentItemIndex(null);
+          setSelectedUnitIds([]);
+        }
+        setUnitIdDialogOpen(open);
+      }}>
+        <DialogContent className="max-w-2xl bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Seleccionar IDs de Unidades</DialogTitle>
+            <DialogDescription className="text-zinc-600 dark:text-zinc-400">
+              Selecciona exactamente{' '}
+              {currentItemIndex !== null && items[currentItemIndex]?.quantity}{' '}
+              IDs para esta venta.
+            </DialogDescription>
+          </DialogHeader>
+
+          {currentItemIndex !== null && items[currentItemIndex] && (
+            <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+              <div className="bg-zinc-50 dark:bg-zinc-900 p-3 rounded border border-zinc-200 dark:border-zinc-800">
+                <p className="font-medium text-zinc-900 dark:text-zinc-100">
+                  {items[currentItemIndex].productName}
+                </p>
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  Seleccionadas: {selectedUnitIds.length} /{' '}
+                  {items[currentItemIndex].quantity}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                {items[currentItemIndex].availableIds && items[currentItemIndex].availableIds!.length > 0 ? (
+                  items[currentItemIndex].availableIds!.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => toggleUnitId(id)}
+                      className={`p-3 rounded border-2 font-mono text-sm transition-all ${
+                        selectedUnitIds.includes(id)
+                          ? 'border-green-500 bg-green-50 text-green-700 dark:border-green-600 dark:bg-green-950 dark:text-green-400'
+                          : 'border-gray-200 bg-white hover:border-gray-400 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-zinc-500'
+                      }`}
+                    >
+                      {id}
+                    </button>
+                  ))
+                ) : (
+                  <div className="col-span-full text-center py-8 text-zinc-500 dark:text-zinc-400">
+                    <p className="text-sm">No hay IDs disponibles para este producto.</p>
+                    <p className="text-xs mt-1">Debes registrar IDs en el módulo de Movimientos antes de vender este producto.</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                // Si el producto no tiene IDs seleccionadas, eliminarlo de la lista
+                if (currentItemIndex !== null && items[currentItemIndex]) {
+                  const item = items[currentItemIndex];
+                  if (!item.unitIds || item.unitIds.length === 0) {
+                    const updated = items.filter((_, idx) => idx !== currentItemIndex);
+                    setItems(updated);
+                    toast.info('Producto eliminado (sin IDs seleccionadas)');
+                  }
+                }
+                setUnitIdDialogOpen(false);
+                setCurrentItemIndex(null);
+                setSelectedUnitIds([]);
+              }}
+              className="border-zinc-300 dark:border-zinc-700"
+            >
+              Cancelar
+            </Button>
+            <Button 
+              type="button" 
+              onClick={handleSaveUnitIds}
+              className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white"
+            >
+              Confirmar Selección
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Warning Modal */}
       {selectedCustomer && (
