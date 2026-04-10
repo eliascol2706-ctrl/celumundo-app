@@ -22,6 +22,13 @@ import {
   type Movement,
   type Product,
 } from "../lib/supabase";
+import { 
+  extractIds, 
+  generateMultipleUnitIds, 
+  createNotesMap,
+  convertToIdsWithNotes,
+  type UnitIdWithNote 
+} from "../lib/unit-ids-utils";
 import {
   Card,
   CardContent,
@@ -202,38 +209,6 @@ export function Movements() {
     setCurrentPage(1);
   }, [searchTerm, filterType]);
 
-  // Generar siguiente ID única para un producto
-  const generateNextUnitId = (registeredIds: string[]): string => {
-    if (registeredIds.length === 0) {
-      return "0001";
-    }
-    
-    // Ordenar y encontrar el último número
-    const numbers = registeredIds
-      .map(id => parseInt(id))
-      .filter(n => !isNaN(n))
-      .sort((a, b) => a - b);
-    
-    const lastNumber = numbers[numbers.length - 1] || 0;
-    const nextNumber = lastNumber + 1;
-    
-    return nextNumber.toString().padStart(4, "0");
-  };
-
-  // Generar múltiples IDs únicas
-  const generateMultipleUnitIds = (registeredIds: string[], count: number): string[] => {
-    const newIds: string[] = [];
-    let currentIds = [...registeredIds];
-    
-    for (let i = 0; i < count; i++) {
-      const nextId = generateNextUnitId(currentIds);
-      newIds.push(nextId);
-      currentIds.push(nextId);
-    }
-    
-    return newIds;
-  };
-
   const handleAddItem = () => {
     if (!formData.productId || !selectedProduct) {
       toast.error("Selecciona un producto usando el botón de búsqueda");
@@ -268,7 +243,7 @@ export function Movements() {
       useUnitIds: product.use_unit_ids,
       unitIds: [],
       unitIdNotes: {},
-      availableIds: product.use_unit_ids ? (product.registered_ids || []) : undefined,
+      availableIds: product.use_unit_ids ? extractIds(product.registered_ids || []) : undefined,
     };
 
     // Si es entrada y usa IDs, generar IDs automáticamente
@@ -352,7 +327,14 @@ export function Movements() {
   const handleOpenUnitIdSelector = (index: number) => {
     setCurrentItemIndex(index);
     setSelectedUnitIds([...movementItems[index].unitIds]);
-    setUnitIdNotes({...movementItems[index].unitIdNotes});
+    
+    // Cargar notas existentes del item o crear mapa con notas del producto
+    const existingNotes = movementItems[index].unitIdNotes || {};
+    const product = products.find(p => p.id === movementItems[index].productId);
+    const productNotesMap = product ? createNotesMap(product.registered_ids || []) : {};
+    
+    // Combinar notas del producto con notas existentes del item
+    setUnitIdNotes({ ...productNotesMap, ...existingNotes });
     setUnitIdDialogOpen(true);
   };
 
@@ -446,11 +428,15 @@ export function Movements() {
           let updatedIds = [...(product.registered_ids || [])];
           
           if (formData.type === "entry") {
-            // Agregar nuevas IDs
-            updatedIds = [...updatedIds, ...item.unitIds];
+            // Agregar nuevas IDs con sus notas
+            const newIdsWithNotes = item.unitIds.map(id => ({
+              id,
+              note: item.unitIdNotes?.[id] || ''
+            }));
+            updatedIds = [...updatedIds, ...newIdsWithNotes];
           } else {
             // Remover IDs vendidas/salidas
-            updatedIds = updatedIds.filter(id => !item.unitIds.includes(id));
+            updatedIds = updatedIds.filter(idObj => !item.unitIds.includes(idObj.id));
           }
           
           updates.registered_ids = updatedIds;

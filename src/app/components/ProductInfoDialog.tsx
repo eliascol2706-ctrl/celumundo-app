@@ -20,7 +20,7 @@ interface Product {
   min_stock: number;
   category: string;
   use_unit_ids: boolean;
-  registered_ids?: string[];
+  registered_ids?: Array<{ id: string; note: string }>;
 }
 
 interface ProductInfoDialogProps {
@@ -194,12 +194,14 @@ export function ProductInfoDialog({ open, onOpenChange, product }: ProductInfoDi
                 </p>
                 {product.registered_ids && product.registered_ids.length > 0 && (
                   <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto">
-                    {product.registered_ids.map((id) => (
+                    {product.registered_ids.map((item) => (
                       <span
-                        key={id}
-                        className="px-3 py-1 bg-indigo-100 text-indigo-700 font-mono text-xs rounded-full"
+                        key={item.id}
+                        className="px-3 py-1 bg-indigo-100 text-indigo-700 font-mono text-xs rounded-full flex flex-col items-center gap-0.5"
+                        title={item.note || 'Sin nota'}
                       >
-                        {product.code}-{id}
+                        <span>{product.code}-{item.id}</span>
+                        {item.note && <span className="text-[9px] opacity-70">{item.note.substring(0, 15)}{item.note.length > 15 ? '...' : ''}</span>}
                       </span>
                     ))}
                   </div>

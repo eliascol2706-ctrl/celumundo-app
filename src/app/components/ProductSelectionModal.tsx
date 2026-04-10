@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, X, ChevronLeft, ChevronRight, Package, DollarSign, Layers } from 'lucide-react';
+import { Search, X, ChevronLeft, ChevronRight, Package, DollarSign, Layers, Hash } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
@@ -20,7 +20,7 @@ interface Product {
   final_price: number;
   stock: number;
   use_unit_ids: boolean;
-  registered_ids: string[];
+  registered_ids: Array<{ id: string; note: string }>;
 }
 
 interface ProductSelectionModalProps {
@@ -166,9 +166,23 @@ export function ProductSelectionModal({
                   {/* Header */}
                   <div className="flex items-start justify-between mb-3">
                     <div className="flex-1 min-w-0">
-                      <h4 className="font-semibold text-foreground truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
-                        {product.name}
-                      </h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="font-semibold text-foreground truncate group-hover:text-emerald-600 dark:group-hover:text-emerald-400 transition-colors">
+                          {product.name}
+                        </h4>
+                        {product.use_unit_ids && (
+                          <div className="flex-shrink-0">
+                            <Badge 
+                              variant="outline" 
+                              className="text-[10px] px-1.5 py-0 h-5 bg-blue-50 dark:bg-blue-950/50 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400"
+                              title="Este producto usa IDs únicas por unidad"
+                            >
+                              <Hash className="h-3 w-3 mr-0.5" />
+                              IDs
+                            </Badge>
+                          </div>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground mt-0.5">
                         Código: {product.code}
                       </p>
@@ -207,6 +221,11 @@ export function ProductSelectionModal({
                         {product.stock}
                       </span>
                     </span>
+                    {product.use_unit_ids && (
+                      <span className="text-xs text-muted-foreground">
+                        ({product.registered_ids?.length || 0} IDs disponibles)
+                      </span>
+                    )}
                   </div>
 
                   {/* Prices Grid */}

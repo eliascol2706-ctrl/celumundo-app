@@ -46,8 +46,7 @@ interface InvoiceItem {
   total: number;
   useUnitIds?: boolean;
   unitIds?: string[];
-  availableIds?: string[];
-  availableIdsWithNotes?: Array<{ id: string; note: string }>;
+  availableIds?: Array<{ id: string; note: string }>; // Array de IDs con notas
   unitIdNotes?: { [id: string]: string };
 }
 
@@ -161,7 +160,6 @@ export function RegularInvoice() {
       useUnitIds: product.use_unit_ids,
       unitIds: [],
       availableIds: product.registered_ids || [],
-      availableIdsWithNotes: product.registered_ids_with_notes || [],
       unitIdNotes: {}
     };
 
@@ -198,8 +196,7 @@ export function RegularInvoice() {
     updateItem(index, 'price', product.final_price);
     updateItem(index, 'total', product.final_price * items[index].quantity);
     updateItem(index, 'useUnitIds', product.use_unit_ids);
-    updateItem(index, 'availableIds', product.registered_ids);
-    updateItem(index, 'availableIdsWithNotes', product.registered_ids_with_notes || []);
+    updateItem(index, 'availableIds', product.registered_ids || []);
     setShowProductSearch(false);
   };
 
@@ -224,8 +221,8 @@ export function RegularInvoice() {
     const productNotesMap: { [id: string]: string } = {};
     
     // Pre-cargar las notas del producto si existen
-    if (items[index].availableIdsWithNotes) {
-      items[index].availableIdsWithNotes!.forEach((item) => {
+    if (items[index].availableIds) {
+      items[index].availableIds!.forEach((item) => {
         productNotesMap[item.id] = item.note || '';
       });
     }
@@ -1132,15 +1129,14 @@ export function RegularInvoice() {
 
               <div className="space-y-2">
                 {items[currentItemIndex].availableIds && items[currentItemIndex].availableIds!.length > 0 ? (
-                  items[currentItemIndex].availableIds!.map((id) => {
-                    const noteFromProduct = items[currentItemIndex].availableIdsWithNotes?.find(item => item.id === id)?.note || '';
-                    const currentNote = unitIdNotes[id] || noteFromProduct || '';
+                  items[currentItemIndex].availableIds!.map((item) => {
+                    const currentNote = unitIdNotes[item.id] || item.note || '';
                     
                     return (
                       <div
-                        key={id}
+                        key={item.id}
                         className={`p-3 rounded-lg border-2 transition-all ${
-                          selectedUnitIds.includes(id)
+                          selectedUnitIds.includes(item.id)
                             ? 'border-green-500 bg-green-50 dark:border-green-600 dark:bg-green-950'
                             : 'border-gray-200 bg-white dark:border-zinc-700 dark:bg-zinc-900'
                         }`}
@@ -1148,16 +1144,16 @@ export function RegularInvoice() {
                         <div className="flex items-center gap-2 mb-2">
                           <button
                             type="button"
-                            onClick={() => toggleUnitId(id)}
+                            onClick={() => toggleUnitId(item.id)}
                             className={`px-3 py-1.5 rounded font-mono text-sm font-medium transition-all ${
-                              selectedUnitIds.includes(id)
+                              selectedUnitIds.includes(item.id)
                                 ? 'bg-green-600 text-white dark:bg-green-700'
                                 : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
                             }`}
                           >
-                            {id}
+                            {item.id}
                           </button>
-                          {selectedUnitIds.includes(id) && (
+                          {selectedUnitIds.includes(item.id) && (
                             <span className="text-xs text-green-600 dark:text-green-400 font-medium">
                               ✓ Seleccionada
                             </span>

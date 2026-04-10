@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Textarea } from '../components/ui/textarea';
 import { formatCOP } from '../lib/currency';
 import { getExchanges, getProducts, getInvoices, addExchange, deleteExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, type Exchange, type Product, type Invoice } from '../lib/supabase';
+import { extractIds } from '../lib/unit-ids-utils';
 import { toast } from 'sonner';
 
 export default function Exchanges() {
@@ -151,7 +152,8 @@ export default function Exchanges() {
       
       // Si el producto usa IDs únicas, seleccionar automáticamente las primeras disponibles
       if (product.use_unit_ids && product.registered_ids) {
-        setNewUnitIds(product.registered_ids.slice(0, newQuantity));
+        const ids = extractIds(product.registered_ids);
+        setNewUnitIds(ids.slice(0, newQuantity));
       } else {
         setNewUnitIds([]);
       }
@@ -179,7 +181,8 @@ export default function Exchanges() {
     
     // Ajustar IDs únicas si aplica
     if (newProduct.use_unit_ids && newProduct.registered_ids) {
-      setNewUnitIds(newProduct.registered_ids.slice(0, qty));
+      const ids = extractIds(newProduct.registered_ids);
+      setNewUnitIds(ids.slice(0, qty));
     }
   };
 
@@ -795,9 +798,10 @@ export default function Exchanges() {
                         <Select
                           value={newUnitIds[0] || ''}
                           onValueChange={(value) => {
-                            const selectedIds = newProduct.registered_ids?.slice(0, newQuantity) || [];
+                            const ids = extractIds(newProduct.registered_ids || []);
+                            const selectedIds = ids.slice(0, newQuantity);
                             if (selectedIds.includes(value)) {
-                              setNewUnitIds(selectedIds.filter(id => newProduct.registered_ids?.indexOf(id) === newProduct.registered_ids?.indexOf(value) ? true : false).slice(0, newQuantity));
+                              setNewUnitIds(selectedIds.filter(id => ids.indexOf(id) === ids.indexOf(value) ? true : false).slice(0, newQuantity));
                             }
                           }}
                         >
@@ -805,7 +809,7 @@ export default function Exchanges() {
                             <SelectValue placeholder="IDs seleccionadas automáticamente" />
                           </SelectTrigger>
                           <SelectContent>
-                            {newProduct.registered_ids?.slice(0, 10).map(id => (
+                            {extractIds(newProduct.registered_ids || []).slice(0, 10).map(id => (
                               <SelectItem key={id} value={id}>{id}</SelectItem>
                             ))}
                           </SelectContent>

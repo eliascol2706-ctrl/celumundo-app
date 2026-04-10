@@ -87,7 +87,7 @@ interface Product {
   min_stock: number;
   category: string;
   use_unit_ids: boolean;
-  registered_ids: string[];
+  registered_ids: Array<{ id: string; note: string }>;
   created_at?: string;
   updated_at?: string;
 }
@@ -254,6 +254,7 @@ export function Invoices() {
           
           // Agregar automáticamente el producto
           const defaultPrice = invoiceType === 'regular' ? product.final_price : product.price2;
+          
           const newItem: InvoiceItem = {
             productId: product.id,
             productName: product.name,
@@ -745,6 +746,7 @@ export function Invoices() {
     setInvoiceItems(updated);
     setUnitIdDialogOpen(false);
     setCurrentItemIndex(null);
+    setSelectedUnitIds([]);
     toast.success('IDs seleccionadas correctamente');
   };
 
@@ -763,8 +765,12 @@ export function Invoices() {
 
     // Validar que productos con IDs tengan IDs seleccionadas
     for (const item of invoiceItems) {
-      if (item.useUnitIds && item.unitIds!.length === 0) {
-        toast.error(`Debes seleccionar las IDs para ${item.productName}`);
+      if (item.useUnitIds && (!item.unitIds || item.unitIds.length === 0)) {
+        toast.error(`Debes seleccionar las IDs para ${item.productName}. Haz clic en "Seleccionar IDs" en la lista de productos.`);
+        return;
+      }
+      if (item.useUnitIds && item.unitIds && item.unitIds.length !== item.quantity) {
+        toast.error(`${item.productName}: Debes seleccionar ${item.quantity} IDs pero solo has seleccionado ${item.unitIds.length}`);
         return;
       }
     }
@@ -979,7 +985,7 @@ export function Invoices() {
           // Si usa IDs, remover las IDs vendidas
           if (item.useUnitIds && item.unitIds) {
             const updatedIds = (product.registered_ids || []).filter(
-              id => !item.unitIds!.includes(id)
+              idObj => !item.unitIds!.includes(idObj.id)
             );
             updates.registered_ids = updatedIds;
           }
@@ -1085,7 +1091,7 @@ export function Invoices() {
           // Si usa IDs, remover las IDs vendidas
           if (item.unitIds && item.unitIds.length > 0) {
             const updatedIds = (product.registered_ids || []).filter(
-              id => !item.unitIds!.includes(id)
+              idObj => !item.unitIds!.includes(idObj.id)
             );
             updates.registered_ids = updatedIds;
           }
@@ -1226,7 +1232,11 @@ export function Invoices() {
 
       // Si usa IDs, reintegrar las IDs
       if (item.unitIds && item.unitIds.length > 0) {
-        const updatedIds = [...(product.registered_ids || []), ...item.unitIds].sort((a, b) => parseInt(a) - parseInt(b));
+        const newIdsWithNotes = item.unitIds.map(id => ({
+          id,
+          note: item.unitIdNotes?.[id] || ''
+        }));
+        const updatedIds = [...(product.registered_ids || []), ...newIdsWithNotes].sort((a, b) => parseInt(a.id) - parseInt(b.id));
         updates.registered_ids = updatedIds;
       }
 
@@ -1280,7 +1290,11 @@ export function Invoices() {
 
         // Si usa IDs, reintegrar las IDs
         if (item.unitIds && item.unitIds.length > 0) {
-          const updatedIds = [...(product.registered_ids || []), ...item.unitIds].sort((a, b) => parseInt(a) - parseInt(b));
+          const newIdsWithNotes = item.unitIds.map(id => ({
+            id,
+            note: item.unitIdNotes?.[id] || ''
+          }));
+          const updatedIds = [...(product.registered_ids || []), ...newIdsWithNotes].sort((a, b) => parseInt(a.id) - parseInt(b.id));
           updates.registered_ids = updatedIds;
         }
 
@@ -2795,7 +2809,22 @@ export function Invoices() {
       </Dialog>
 
       {/* Dialog selector de IDs únicas */}
-      <Dialog open={unitIdDialogOpen} onOpenChange={setUnitIdDialogOpen}>
+      <Dialog open={unitIdDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          // Si se cierra el modal y el producto no tiene IDs, eliminarlo
+          if (currentItemIndex !== null && invoiceItems[currentItemIndex]) {
+            const item = invoiceItems[currentItemIndex];
+            if (!item.unitIds || item.unitIds.length === 0) {
+              const updated = invoiceItems.filter((_, idx) => idx !== currentItemIndex);
+              setInvoiceItems(updated);
+              toast.info('Producto eliminado (sin IDs seleccionadas)');
+            }
+          }
+          setCurrentItemIndex(null);
+          setSelectedUnitIds([]);
+        }
+        setUnitIdDialogOpen(open);
+      }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Seleccionar IDs de Unidades</DialogTitle>
@@ -2819,20 +2848,27 @@ export function Invoices() {
               </div>
 
               <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
-                {invoiceItems[currentItemIndex].availableIds?.map((id) => (
-                  <button
-                    key={id}
-                    type="button"
-                    onClick={() => toggleUnitId(id)}
-                    className={`p-3 rounded border-2 font-mono text-sm transition-all ${
-                      selectedUnitIds.includes(id)
-                        ? 'border-green-500 bg-green-50 text-green-700'
-                        : 'border-gray-200 bg-white hover:border-gray-400'
-                    }`}
-                  >
-                    {id}
-                  </button>
-                ))}
+                {invoiceItems[currentItemIndex].availableIds && invoiceItems[currentItemIndex].availableIds!.length > 0 ? (
+                  invoiceItems[currentItemIndex].availableIds!.map((id) => (
+                    <button
+                      key={id}
+                      type="button"
+                      onClick={() => toggleUnitId(id)}
+                      className={`p-3 rounded border-2 font-mono text-sm transition-all ${
+                        selectedUnitIds.includes(id)
+                          ? 'border-green-500 bg-green-50 text-green-700 dark:border-green-600 dark:bg-green-950 dark:text-green-400'
+                          : 'border-gray-200 bg-white hover:border-gray-400 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-zinc-500'
+                      }`}
+                    >
+                      {id}
+                    </button>
+                  ))
+                ) : (
+                  <div className="col-span-full text-center py-8 text-muted-foreground">
+                    <p className="text-sm">No hay IDs disponibles para este producto.</p>
+                    <p className="text-xs mt-1">Debes registrar IDs en el módulo de Movimientos antes de vender este producto.</p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -2842,8 +2878,18 @@ export function Invoices() {
               type="button"
               variant="outline"
               onClick={() => {
+                // Si el producto no tiene IDs seleccionadas, eliminarlo de la lista
+                if (currentItemIndex !== null && invoiceItems[currentItemIndex]) {
+                  const item = invoiceItems[currentItemIndex];
+                  if (!item.unitIds || item.unitIds.length === 0) {
+                    const updated = invoiceItems.filter((_, idx) => idx !== currentItemIndex);
+                    setInvoiceItems(updated);
+                    toast.info('Producto eliminado (sin IDs seleccionadas)');
+                  }
+                }
                 setUnitIdDialogOpen(false);
                 setCurrentItemIndex(null);
+                setSelectedUnitIds([]);
               }}
             >
               Cancelar

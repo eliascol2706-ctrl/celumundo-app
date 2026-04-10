@@ -59,8 +59,7 @@ interface InvoiceItem {
   total: number;
   useUnitIds?: boolean;
   unitIds?: string[];
-  availableIds?: string[];
-  availableIdsWithNotes?: Array<{ id: string; note: string }>;
+  availableIds?: Array<{ id: string; note: string }>; // Array de IDs con notas
   unitIdNotes?: { [id: string]: string };
 }
 
@@ -235,7 +234,6 @@ export function CreditInvoice() {
       useUnitIds: product.use_unit_ids,
       unitIds: [],
       availableIds: product.registered_ids || [],
-      availableIdsWithNotes: product.registered_ids_with_notes || [],
       unitIdNotes: {}
     };
     
@@ -272,8 +270,7 @@ export function CreditInvoice() {
     updateItem(index, 'price', product.price2);
     updateItem(index, 'total', product.price2 * items[index].quantity);
     updateItem(index, 'useUnitIds', product.use_unit_ids);
-    updateItem(index, 'availableIds', product.registered_ids);
-    updateItem(index, 'availableIdsWithNotes', product.registered_ids_with_notes || []);
+    updateItem(index, 'availableIds', product.registered_ids || []);
     setShowProductSearch(false);
     setProductSearch('');
   };
@@ -294,8 +291,8 @@ export function CreditInvoice() {
     const productNotesMap: { [id: string]: string } = {};
     
     // Pre-cargar las notas del producto si existen
-    if (items[index].availableIdsWithNotes) {
-      items[index].availableIdsWithNotes!.forEach((item) => {
+    if (items[index].availableIds) {
+      items[index].availableIds!.forEach((item) => {
         productNotesMap[item.id] = item.note || '';
       });
     }
@@ -1042,22 +1039,47 @@ export function CreditInvoice() {
                 </p>
               </div>
 
-              <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+              <div className="space-y-2">
                 {items[currentItemIndex].availableIds && items[currentItemIndex].availableIds!.length > 0 ? (
-                  items[currentItemIndex].availableIds!.map((id) => (
-                    <button
-                      key={id}
-                      type="button"
-                      onClick={() => toggleUnitId(id)}
-                      className={`p-3 rounded border-2 font-mono text-sm transition-all ${
-                        selectedUnitIds.includes(id)
-                          ? 'border-green-500 bg-green-50 text-green-700 dark:border-green-600 dark:bg-green-950 dark:text-green-400'
-                          : 'border-gray-200 bg-white hover:border-gray-400 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:border-zinc-500'
-                      }`}
-                    >
-                      {id}
-                    </button>
-                  ))
+                  items[currentItemIndex].availableIds!.map((item) => {
+                    const currentNote = unitIdNotes[item.id] || item.note || '';
+                    
+                    return (
+                      <div
+                        key={item.id}
+                        className={`p-3 rounded-lg border-2 transition-all ${
+                          selectedUnitIds.includes(item.id)
+                            ? 'border-green-500 bg-green-50 dark:border-green-600 dark:bg-green-950'
+                            : 'border-gray-200 bg-white dark:border-zinc-700 dark:bg-zinc-900'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          <button
+                            type="button"
+                            onClick={() => toggleUnitId(item.id)}
+                            className={`px-3 py-1.5 rounded font-mono text-sm font-medium transition-all ${
+                              selectedUnitIds.includes(item.id)
+                                ? 'bg-green-600 text-white dark:bg-green-700'
+                                : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
+                            }`}
+                          >
+                            {item.id}
+                          </button>
+                          {selectedUnitIds.includes(item.id) && (
+                            <span className="text-xs text-green-600 dark:text-green-400 font-medium">
+                              ✓ Seleccionada
+                            </span>
+                          )}
+                        </div>
+                        {currentNote && (
+                          <div className="flex items-start gap-2 px-2 py-1.5 bg-blue-50 dark:bg-blue-950 rounded text-xs">
+                            <Info className="h-3 w-3 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+                            <span className="text-blue-700 dark:text-blue-300">{currentNote}</span>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })
                 ) : (
                   <div className="col-span-full text-center py-8 text-zinc-500 dark:text-zinc-400">
                     <p className="text-sm">No hay IDs disponibles para este producto.</p>

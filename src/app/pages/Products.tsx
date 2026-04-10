@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List, X, Printer, Eye, Loader2, FileText } from 'lucide-react';
 import { getProducts, addProduct, updateProduct, deleteProduct, getDepartments, type Product, type Department, supabase } from '../lib/supabase';
+import { extractIds } from '../lib/unit-ids-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -509,7 +510,7 @@ export function Products() {
       if (!product || !product.registered_ids) return;
 
       // Remover la ID del array
-      const updatedIds = product.registered_ids.filter(id => id !== idToDelete);
+      const updatedIds = product.registered_ids.filter(item => item.id !== idToDelete);
       
       // Actualizar el producto en Supabase
       await updateProduct(productId, {
@@ -1019,17 +1020,19 @@ export function Products() {
                   <Label>IDs Registradas ({editingProduct.registered_ids.length}) - Click en X para eliminar</Label>
                   <div className="p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg max-h-40 overflow-y-auto">
                     <div className="flex flex-wrap gap-2">
-                      {editingProduct.registered_ids.map((id) => (
+                      {editingProduct.registered_ids.map((item) => (
                         <div
-                          key={id}
+                          key={item.id}
                           className="inline-flex items-center gap-1 px-3 py-1 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 text-xs font-mono rounded-full group hover:bg-red-100 dark:hover:bg-red-900 hover:text-red-700 dark:hover:text-red-300 transition-colors"
+                          title={item.note || 'Sin nota'}
                         >
-                          <span>{id}</span>
+                          <span>{item.id}</span>
+                          {item.note && <span className="text-[10px] opacity-70">({item.note.substring(0, 15)}{item.note.length > 15 ? '...' : ''})</span>}
                           <button
                             type="button"
-                            onClick={() => handleDeleteUnitId(editingProduct.id, id)}
+                            onClick={() => handleDeleteUnitId(editingProduct.id, item.id)}
                             className="ml-1 hover:bg-red-200 dark:hover:bg-red-800 rounded-full p-0.5 transition-colors"
-                            title={`Eliminar ID ${id}`}
+                            title={`Eliminar ID ${item.id}`}
                           >
                             <X className="h-3 w-3" />
                           </button>
@@ -1101,13 +1104,14 @@ export function Products() {
                     </Label>
                     <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg max-h-80 overflow-y-auto">
                       {selectedProductForIds.registered_ids
-                        .sort((a, b) => parseInt(a) - parseInt(b))
-                        .map((id) => {
-                          const fullCode = `${selectedProductForIds.code.slice(0, -1)}-${id}A`;
+                        .sort((a, b) => parseInt(a.id) - parseInt(b.id))
+                        .map((item) => {
+                          const fullCode = `${selectedProductForIds.code.slice(0, -1)}-${item.id}A`;
                           return (
                             <div
-                              key={id}
+                              key={item.id}
                               className="relative group"
+                              title={item.note || 'Sin nota'}
                             >
                               <button
                                 type="button"
@@ -1119,16 +1123,17 @@ export function Products() {
                                     toast.error('No se pudo copiar al portapapeles');
                                   }
                                 }}
-                                className="w-full px-3 py-2 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900 dark:to-green-800 hover:from-green-200 hover:to-green-300 dark:hover:from-green-800 dark:hover:to-green-700 text-green-800 dark:text-green-200 text-sm font-mono rounded-lg border-2 border-green-300 dark:border-green-700 transition-all hover:scale-105 cursor-pointer shadow-sm hover:shadow-md"
-                                title={`Click para copiar: ${fullCode}`}
+                                className="w-full px-3 py-2 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900 dark:to-green-800 hover:from-green-200 hover:to-green-300 dark:hover:from-green-800 dark:hover:to-green-700 text-green-800 dark:text-green-200 text-sm font-mono rounded-lg border-2 border-green-300 dark:border-green-700 transition-all hover:scale-105 cursor-pointer shadow-sm hover:shadow-md flex flex-col items-center gap-0.5"
+                                title={`Click para copiar: ${fullCode}${item.note ? ` - ${item.note}` : ''}`}
                               >
-                                {id}
+                                <span>{item.id}</span>
+                                {item.note && <span className="text-[9px] opacity-60 text-center line-clamp-1">{item.note}</span>}
                               </button>
                               <button
                                 type="button"
-                                onClick={() => handleDeleteUnitId(selectedProductForIds.id, id)}
+                                onClick={() => handleDeleteUnitId(selectedProductForIds.id, item.id)}
                                 className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
-                                title={`Eliminar ID ${id}`}
+                                title={`Eliminar ID ${item.id}`}
                               >
                                 <X className="h-3 w-3" />
                               </button>

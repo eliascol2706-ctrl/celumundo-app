@@ -36,8 +36,7 @@ export interface Product {
   min_stock: number;
   category: string;
   use_unit_ids: boolean; // NUEVO: Si el producto usa IDs únicas por unidad
-  registered_ids: string[]; // NUEVO: Array de IDs registradas (ej: ['0001', '0002', '0003'])
-  registered_ids_with_notes?: Array<{ id: string; note: string }>; // NUEVO: Array de IDs con notas adicionales
+  registered_ids: Array<{ id: string; note: string }>; // Array de IDs con notas opcionales
   created_at?: string;
   updated_at?: string;
 }
