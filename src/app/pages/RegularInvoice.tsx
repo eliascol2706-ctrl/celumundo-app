@@ -140,15 +140,22 @@ export function RegularInvoice() {
     setShowProductSearch(true);
   };
 
-  const addProductToList = (product: any) => {
+  const addProductToList = async (product: any) => {
     // Verificar si el producto usa IDs y tiene IDs disponibles
     if (product.use_unit_ids) {
-      const availableIds = product.registered_ids || [];
+      const { getAvailableIds } = await import('../lib/unit-ids-utils');
+      const availableIds = getAvailableIds(product.registered_ids || []);
       if (availableIds.length === 0) {
         toast.error(`${product.name} no tiene IDs registradas disponibles`);
         return;
       }
     }
+
+    // Filtrar solo IDs disponibles (no inhabilitadas)
+    const { getAvailableIds } = await import('../lib/unit-ids-utils');
+    const availableIds = product.use_unit_ids
+      ? getAvailableIds(product.registered_ids || [])
+      : product.registered_ids || [];
 
     const newItem: InvoiceItem = {
       productId: product.id,
@@ -159,7 +166,7 @@ export function RegularInvoice() {
       total: product.final_price,
       useUnitIds: product.use_unit_ids,
       unitIds: [],
-      availableIds: product.registered_ids || [],
+      availableIds: availableIds,
       unitIdNotes: {}
     };
 
@@ -189,14 +196,20 @@ export function RegularInvoice() {
     setItems(newItems);
   };
 
-  const selectProduct = (index: number, product: Product) => {
+  const selectProduct = async (index: number, product: Product) => {
+    // Filtrar solo IDs disponibles (no inhabilitadas)
+    const { getAvailableIds } = await import('../lib/unit-ids-utils');
+    const availableIds = product.use_unit_ids
+      ? getAvailableIds(product.registered_ids || [])
+      : product.registered_ids || [];
+
     updateItem(index, 'productId', product.id);
     updateItem(index, 'productName', product.name);
     updateItem(index, 'productCode', product.code);
     updateItem(index, 'price', product.final_price);
     updateItem(index, 'total', product.final_price * items[index].quantity);
     updateItem(index, 'useUnitIds', product.use_unit_ids);
-    updateItem(index, 'availableIds', product.registered_ids || []);
+    updateItem(index, 'availableIds', availableIds);
     setShowProductSearch(false);
   };
 
@@ -397,27 +410,32 @@ export function RegularInvoice() {
         return;
       }
 
-      // Actualizar inventario solo si la factura está paga
-      if (invoiceStatus === 'paid') {
-        for (const item of items) {
-          const product = products.find((p) => p.id === item.productId);
-          if (product) {
-            const newStock = product.stock - item.quantity;
+      // Actualizar inventario
+      for (const item of items) {
+        const product = products.find((p) => p.id === item.productId);
+        if (product) {
+          const newStock = product.stock - item.quantity;
+          let newRegisteredIds = product.registered_ids;
 
-            // Si usa IDs unitarios, remover los IDs vendidos
-            let newRegisteredIds = product.registered_ids;
-            if (item.useUnitIds && item.unitIds && item.unitIds.length > 0) {
-              newRegisteredIds = product.registered_ids.filter(
-                (id) => !item.unitIds!.includes(id)
-              );
+          if (item.useUnitIds && item.unitIds && item.unitIds.length > 0) {
+            if (invoiceStatus === 'paid') {
+              // Si está paga: ELIMINAR las IDs definitivamente
+              const { removeIds } = await import('../lib/unit-ids-utils');
+              newRegisteredIds = removeIds(product.registered_ids, item.unitIds);
+            } else {
+              // Si está en confirmación: INHABILITAR las IDs
+              const { disableIds } = await import('../lib/unit-ids-utils');
+              newRegisteredIds = disableIds(product.registered_ids, item.unitIds, invoice.id);
             }
+          }
 
-            await updateProduct(item.productId, {
-              stock: newStock,
-              registered_ids: newRegisteredIds
-            });
+          await updateProduct(item.productId, {
+            stock: newStock,
+            registered_ids: newRegisteredIds
+          });
 
-            // Registrar movimiento
+          // Registrar movimiento solo si está paga
+          if (invoiceStatus === 'paid') {
             await addMovement({
               type: 'exit',
               product_id: item.productId,

@@ -2,7 +2,12 @@
  * Utilidades para manejar IDs únicas con notas
  */
 
-export type UnitIdWithNote = { id: string; note: string };
+export type UnitIdWithNote = {
+  id: string;
+  note: string;
+  disabled?: boolean; // Para facturas en confirmación
+  reservedBy?: string; // ID de la factura que la reservó
+};
 
 /**
  * Extrae solo los IDs de un array de objetos {id, note}
@@ -71,4 +76,43 @@ export function createNotesMap(registeredIds: UnitIdWithNote[]): { [id: string]:
     map[item.id] = item.note;
   });
   return map;
+}
+
+/**
+ * Filtra solo las IDs disponibles (no inhabilitadas)
+ */
+export function getAvailableIds(registeredIds: UnitIdWithNote[]): UnitIdWithNote[] {
+  return registeredIds.filter(item => !item.disabled);
+}
+
+/**
+ * Inhabilita IDs específicas (para facturas en confirmación)
+ */
+export function disableIds(registeredIds: UnitIdWithNote[], idsToDisable: string[], invoiceId: string): UnitIdWithNote[] {
+  return registeredIds.map(item => {
+    if (idsToDisable.includes(item.id)) {
+      return { ...item, disabled: true, reservedBy: invoiceId };
+    }
+    return item;
+  });
+}
+
+/**
+ * Habilita IDs inhabilitadas por una factura específica
+ */
+export function enableIds(registeredIds: UnitIdWithNote[], invoiceId: string): UnitIdWithNote[] {
+  return registeredIds.map(item => {
+    if (item.reservedBy === invoiceId) {
+      const { disabled, reservedBy, ...rest } = item;
+      return rest;
+    }
+    return item;
+  });
+}
+
+/**
+ * Elimina IDs definitivamente
+ */
+export function removeIds(registeredIds: UnitIdWithNote[], idsToRemove: string[]): UnitIdWithNote[] {
+  return registeredIds.filter(item => !idsToRemove.includes(item.id));
 }
