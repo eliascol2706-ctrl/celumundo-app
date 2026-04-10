@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useEffect, useState, useRef } from 'react';
-import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, type CreditPayment } from '../lib/supabase';
+import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, type CreditPayment, getCurrentUser, getCurrentCompany } from '../lib/supabase';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
@@ -200,8 +200,13 @@ export function InvoicesMenu() {
     }
 
     try {
-      const {data: {user}} = await supabase.auth.getUser();
-      if (!user) throw new Error('Usuario no autenticado');
+      const user = getCurrentUser();
+      const company = getCurrentCompany();
+
+      if (!user) {
+        toast.error('Sesión expirada. Por favor inicia sesión nuevamente.');
+        return;
+      }
 
       let paymentData: any = {
         status: 'paid',
@@ -236,7 +241,7 @@ export function InvoicesMenu() {
         .from('invoices')
         .update(paymentData)
         .eq('id', selectedInvoice.id)
-        .eq('company', user.user_metadata?.company);
+        .eq('company', company);
 
       if (error) throw error;
 
