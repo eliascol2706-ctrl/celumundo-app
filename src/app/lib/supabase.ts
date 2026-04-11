@@ -136,7 +136,6 @@ export interface Movement {
   user_name: string;
   created_at?: string;
   unit_ids: string[]; // IDs de las unidades específicas movidas (ej: ['0001', '0002'])
-  unit_id_notes?: { [id: string]: string }; // Notas asociadas a cada ID única
 }
 
 export interface Expense {
@@ -819,24 +818,44 @@ export const addInvoice = async (invoice: Omit<Invoice, 'id' | 'number' | 'compa
   let data = null;
   let nextNumber = '';
   const maxRetries = 5;
-  
+
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    // Obtener el siguiente número de factura
-    const { data: invoiceNumber } = await supabase.rpc('get_next_invoice_number', { company_name: company });
-    nextNumber = invoiceNumber;
+    // Si es el primer intento, usar el RPC
+    if (attempt === 0) {
+      const { data: invoiceNumber } = await supabase.rpc('get_next_invoice_number', { company_name: company });
+      nextNumber = invoiceNumber;
+    } else {
+      // En reintentos, calcular manualmente desde el MAX actual
+      const { data: maxInvoice } = await supabase
+        .from('invoices')
+        .select('number')
+        .eq('company', company)
+        .order('number', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (maxInvoice) {
+        const currentMax = parseInt(maxInvoice.number);
+        nextNumber = String(currentMax + 1).padStart(5, '0');
+        console.log(`📊 Calculated next number from MAX: ${maxInvoice.number} -> ${nextNumber}`);
+      } else {
+        nextNumber = '00001';
+      }
+    }
+
     console.log(`🔄 Attempting to create invoice ${nextNumber} (attempt ${attempt + 1}/${maxRetries})`);
-    
+
     const result = await supabase
       .from('invoices')
-      .insert([{ 
-        ...invoice, 
-        company, 
+      .insert([{
+        ...invoice,
+        company,
         number: nextNumber,
         date: colombiaDateTime
       }])
       .select()
       .single();
-    
+
     if (result.error) {
       // Si es error de duplicate key, reintentar
       if (result.error.code === '23505') {
@@ -849,12 +868,12 @@ export const addInvoice = async (invoice: Omit<Invoice, 'id' | 'number' | 'compa
           return null;
         }
       }
-      
+
       // Si es otro tipo de error, loguear y retornar null inmediatamente
       console.error('Error adding invoice:', result.error);
       return null;
     }
-    
+
     // Éxito
     console.log(`✅ Invoice created successfully: ${nextNumber}`);
     data = result.data;
@@ -1105,7 +1124,6 @@ export const addMovement = async (movement: Omit<Movement, 'id' | 'company' | 'c
       reference: movement.reference,
       user_name: movement.user_name,
       unit_ids: movement.unit_ids || [], // Siempre incluir unit_ids, aunque sea array vacío
-      unit_id_notes: movement.unit_id_notes || {}, // Incluir notas de IDs
       company
     }])
     .select()

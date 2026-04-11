@@ -383,8 +383,7 @@ export function InvoicesMenu() {
           reason: 'Venta',
           reference: `Factura ${selectedInvoice.number}`,
           user_name: user.username,
-          unit_ids: item.unitIds || [],
-          unit_id_notes: {}
+          unit_ids: item.unitIds || []
         });
       }
 

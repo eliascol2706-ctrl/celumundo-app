@@ -465,8 +465,7 @@ export function Movements() {
           reason: formData.reason,
           reference: reference,
           user_name: user?.username || "Usuario",
-          unit_ids: item.unitIds,
-          unit_id_notes: item.unitIdNotes,
+          unit_ids: item.unitIds
         });
 
         processedItems.push({
@@ -1041,21 +1040,16 @@ export function Movements() {
       return;
     }
 
-    // Obtener las notas desde el producto si no están en el movimiento
+    // Obtener las notas desde el producto
     let notesMap: { [id: string]: string } = {};
 
-    // Primero intentar obtener del movimiento
-    if (selectedMovement.unit_id_notes) {
-      notesMap = selectedMovement.unit_id_notes;
-    } else {
-      // Si no están en el movimiento, obtener del producto actual
-      if (product.registered_ids && Array.isArray(product.registered_ids)) {
-        product.registered_ids.forEach((idObj: any) => {
-          if (typeof idObj === 'object' && idObj.id && idObj.note) {
-            notesMap[idObj.id] = idObj.note;
-          }
-        });
-      }
+    // Obtener del producto actual
+    if (product.registered_ids && Array.isArray(product.registered_ids)) {
+      product.registered_ids.forEach((idObj: any) => {
+        if (typeof idObj === 'object' && idObj.id && idObj.note) {
+          notesMap[idObj.id] = idObj.note;
+        }
+      });
     }
 
     let labelsHTML = "";
@@ -1514,9 +1508,9 @@ export function Movements() {
                     <td className="py-3 px-4">
                       {movement.unit_ids && movement.unit_ids.length > 0 ? (
                         <div className="flex flex-wrap gap-1">
-                          {movement.unit_ids.slice(0, 3).map((id) => (
+                          {movement.unit_ids.slice(0, 3).map((id, idx) => (
                             <span
-                              key={id}
+                              key={`${movement.id}-${id}-${idx}`}
                               className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-mono rounded"
                             >
                               {id}
@@ -1909,8 +1903,8 @@ export function Movements() {
                                   </Button>
                                 </div>
                                 <div className="flex flex-wrap gap-1">
-                                  {item.unitIds.map((id) => (
-                                    <div key={id} className="flex flex-col gap-0.5">
+                                  {item.unitIds.map((id, idx) => (
+                                    <div key={`entry-${index}-${id}-${idx}`} className="flex flex-col gap-0.5">
                                       <span className="px-2 py-0.5 bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400 font-mono rounded border border-emerald-300 dark:border-emerald-700">
                                         {id}
                                       </span>
@@ -1932,8 +1926,8 @@ export function Movements() {
                                       IDs seleccionadas:
                                     </p>
                                     <div className="flex flex-wrap gap-1 mb-2">
-                                      {item.unitIds.map((id) => (
-                                        <div key={id} className="flex flex-col gap-0.5">
+                                      {item.unitIds.map((id, idx) => (
+                                        <div key={`exit-${index}-${id}-${idx}`} className="flex flex-col gap-0.5">
                                           <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950/50 text-blue-700 dark:text-blue-400 font-mono rounded border border-blue-300 dark:border-blue-700">
                                             {id}
                                           </span>
@@ -2067,16 +2061,16 @@ export function Movements() {
 
               <div className="space-y-3">
                 {/* Para ENTRADAS: Mostrar IDs generadas para agregar notas */}
-                {formData.type === "entry" && movementItems[currentItemIndex].unitIds.map((id) => (
-                  <div 
-                    key={id}
+                {formData.type === "entry" && movementItems[currentItemIndex].unitIds.map((id, idx) => (
+                  <div
+                    key={`entry-dialog-${id}-${idx}`}
                     className="flex items-center gap-2 p-3 rounded border-2 border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
                   >
                     {/* ID */}
                     <div className="flex items-center justify-center w-20 py-2 rounded font-mono text-sm font-bold bg-emerald-500 text-white">
                       {id}
                     </div>
-                    
+
                     {/* Campo de nota adicional */}
                     <div className="flex-1 flex items-center gap-2">
                       <Edit className="h-4 w-4 text-muted-foreground flex-shrink-0" />
@@ -2092,9 +2086,9 @@ export function Movements() {
                 ))}
 
                 {/* Para SALIDAS: Selector de IDs con notas opcionales */}
-                {formData.type === "exit" && movementItems[currentItemIndex].availableIds?.map((id) => (
-                  <div 
-                    key={id}
+                {formData.type === "exit" && movementItems[currentItemIndex].availableIds?.map((id, idx) => (
+                  <div
+                    key={`exit-dialog-${id}-${idx}`}
                     className={`flex items-center gap-2 p-3 rounded border-2 transition-all ${
                       selectedUnitIds.includes(id)
                         ? "border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30"
@@ -2211,9 +2205,9 @@ export function Movements() {
                                   IDs de las Unidades:
                                 </p>
                                 <div className="flex flex-wrap gap-1">
-                                  {item.unitIds.map((id: string) => (
+                                  {item.unitIds.map((id: string, idIdx: number) => (
                                     <span
-                                      key={id}
+                                      key={`receipt-${index}-${id}-${idIdx}`}
                                       className="px-2 py-0.5 bg-blue-100 text-blue-700 text-xs font-mono rounded"
                                     >
                                       {id}
@@ -2560,31 +2554,43 @@ export function Movements() {
                 <div className="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-3">
                   <Label className="text-sm font-semibold">Seleccione las IDs a reimprimir:</Label>
                   <div className="grid grid-cols-2 gap-2">
-                    {selectedMovement.unit_ids?.map((unitId) => (
-                      <div key={unitId} className="flex items-center space-x-2">
-                        <input
-                          type="checkbox"
-                          id={`id-${unitId}`}
-                          checked={selectedIdsForReprint.includes(unitId)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedIdsForReprint([...selectedIdsForReprint, unitId]);
-                            } else {
-                              setSelectedIdsForReprint(selectedIdsForReprint.filter(id => id !== unitId));
-                            }
-                          }}
-                          className="w-4 h-4 text-blue-600"
-                        />
-                        <Label htmlFor={`id-${unitId}`} className="cursor-pointer font-mono text-sm">
-                          {unitId}
-                          {selectedMovement.unit_id_notes && selectedMovement.unit_id_notes[unitId] && (
-                            <span className="ml-2 text-xs text-gray-500">
-                              ({selectedMovement.unit_id_notes[unitId].slice(-4)})
-                            </span>
-                          )}
-                        </Label>
-                      </div>
-                    ))}
+                    {selectedMovement.unit_ids?.map((unitId, idx) => {
+                      // Obtener nota del producto actual
+                      const product = products.find(p => p.id === selectedMovement.product_id);
+                      let noteDisplay = '';
+                      if (product?.registered_ids && Array.isArray(product.registered_ids)) {
+                        const idObj = product.registered_ids.find((obj: any) => obj.id === unitId);
+                        if (idObj && idObj.note) {
+                          noteDisplay = idObj.note.slice(-4);
+                        }
+                      }
+
+                      return (
+                        <div key={`reprint-${selectedMovement.id}-${unitId}-${idx}`} className="flex items-center space-x-2">
+                          <input
+                            type="checkbox"
+                            id={`id-${unitId}`}
+                            checked={selectedIdsForReprint.includes(unitId)}
+                            onChange={(e) => {
+                              if (e.target.checked) {
+                                setSelectedIdsForReprint([...selectedIdsForReprint, unitId]);
+                              } else {
+                                setSelectedIdsForReprint(selectedIdsForReprint.filter(id => id !== unitId));
+                              }
+                            }}
+                            className="w-4 h-4 text-blue-600"
+                          />
+                          <Label htmlFor={`id-${unitId}`} className="cursor-pointer font-mono text-sm">
+                            {unitId}
+                            {noteDisplay && (
+                              <span className="ml-2 text-xs text-gray-500">
+                                ({noteDisplay})
+                              </span>
+                            )}
+                          </Label>
+                        </div>
+                      );
+                    })}
                   </div>
                   {selectedIdsForReprint.length > 0 && (
                     <p className="text-sm text-gray-600 mt-2">
