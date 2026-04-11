@@ -84,6 +84,7 @@ export function DailyClosureDialog({
     let totalTransfer = 0;
     let totalOthers = 0;
 
+    console.log('[DEBUG Cierre] ========================================');
     console.log('[DEBUG Cierre] Iniciando cálculo de totales de pago');
     console.log(`[DEBUG Cierre] Total facturas: ${dailyStats.invoices.length}`);
 
@@ -93,80 +94,100 @@ export function DailyClosureDialog({
       if (invoice.status === 'paid' && !invoice.is_credit) {
         const paymentStr = invoice.payment_method || '';
         const invoiceTotal = invoice.total || 0;
-        console.log(`[DEBUG Cierre] Factura ${invoice.number} - Payment: ${paymentStr}, Total: ${invoiceTotal}`);
+        console.log(`[DEBUG Cierre] Factura ${invoice.number}:`);
+        console.log(`  - Payment method: "${paymentStr}"`);
+        console.log(`  - Total: ${invoiceTotal}`);
+        console.log(`  - payment_cash: ${invoice.payment_cash || 0}`);
+        console.log(`  - payment_transfer: ${invoice.payment_transfer || 0}`);
+        console.log(`  - payment_other: ${invoice.payment_other || 0}`);
 
-        // Verificar si el payment_method tiene formato detallado (con montos) o simple (solo nombre)
-        const hasDetailedFormat = paymentStr.includes(':');
+        // Verificar si tenemos los campos detallados de pago en la factura
+        if (invoice.payment_cash !== undefined || invoice.payment_transfer !== undefined || invoice.payment_other !== undefined) {
+          console.log(`  [usando campos detallados de BD]`);
+          const cash = invoice.payment_cash || 0;
+          const transfer = invoice.payment_transfer || 0;
+          const other = invoice.payment_other || 0;
 
-        if (hasDetailedFormat) {
-          // FORMATO DETALLADO: "Efectivo: $200.000, Nequi: $100.000"
-          console.log(`[DEBUG Cierre] Usando formato detallado para factura ${invoice.number}`);
+          totalCash += cash;
+          totalTransfer += transfer;
+          totalOthers += other;
 
-          // Extraer efectivo
-          const cashMatch = paymentStr.match(/Efectivo:\s*\$?([\d,.]+)/i);
-          if (cashMatch) {
-            const cashValue = parseFloat(cashMatch[1].replace(/\./g, '').replace(/,/g, '.'));
-            if (!isNaN(cashValue)) {
-              totalCash += cashValue;
-              console.log(`[DEBUG Cierre] Efectivo encontrado: ${cashValue}`);
-            }
-          }
-
-          // Extraer transferencia
-          const transferMatch = paymentStr.match(/Transferencia:\s*\$?([\d,.]+)/i);
-          if (transferMatch) {
-            const transferValue = parseFloat(transferMatch[1].replace(/\./g, '').replace(/,/g, '.'));
-            if (!isNaN(transferValue)) {
-              totalTransfer += transferValue;
-              console.log(`[DEBUG Cierre] Transferencia encontrada: ${transferValue}`);
-            }
-          }
-
-          // Extraer Nequi
-          const nequiMatch = paymentStr.match(/Nequi:\s*\$?([\d,.]+)/i);
-          if (nequiMatch) {
-            const nequiValue = parseFloat(nequiMatch[1].replace(/\./g, '').replace(/,/g, '.'));
-            if (!isNaN(nequiValue)) {
-              totalTransfer += nequiValue;
-              console.log(`[DEBUG Cierre] Nequi encontrado: ${nequiValue} (sumado a transferencias)`);
-            }
-          }
-
-          // Extraer Daviplata
-          const daviplataMatch = paymentStr.match(/Daviplata:\s*\$?([\d,.]+)/i);
-          if (daviplataMatch) {
-            const daviplataValue = parseFloat(daviplataMatch[1].replace(/\./g, '').replace(/,/g, '.'));
-            if (!isNaN(daviplataValue)) {
-              totalTransfer += daviplataValue;
-              console.log(`[DEBUG Cierre] Daviplata encontrado: ${daviplataValue} (sumado a transferencias)`);
-            }
-          }
-
-          // Extraer "Otros"
-          const otherMatch = paymentStr.match(/Otros:\s*\$?([\d,.]+)/i);
-          if (otherMatch) {
-            const otherValue = parseFloat(otherMatch[1].replace(/\./g, '').replace(/,/g, '.'));
-            if (!isNaN(otherValue)) {
-              totalOthers += otherValue;
-              console.log(`[DEBUG Cierre] Otros encontrado: ${otherValue} (NO se cuenta en ingresos)`);
-            }
-          }
+          console.log(`  ✅ Sumado - Efectivo: ${cash}, Transferencia: ${transfer}, Otros: ${other}`);
         } else {
-          // FORMATO SIMPLE: solo el nombre del método (ej: "Nequi", "Efectivo", "Transferencia")
-          console.log(`[DEBUG Cierre] Usando formato simple para factura ${invoice.number}`);
-          const paymentLower = paymentStr.toLowerCase().trim();
+          // Fallback: parsear desde el payment_method string
+          console.log(`  [parseando desde payment_method string]`);
+          const hasDetailedFormat = paymentStr.includes(':');
 
-          if (paymentLower === 'efectivo') {
-            totalCash += invoiceTotal;
-            console.log(`[DEBUG Cierre] Efectivo (formato simple): ${invoiceTotal}`);
-          } else if (paymentLower === 'transferencia' || paymentLower === 'nequi' || paymentLower === 'daviplata') {
-            totalTransfer += invoiceTotal;
-            console.log(`[DEBUG Cierre] Transferencia/Nequi/Daviplata (formato simple): ${invoiceTotal}`);
-          } else if (paymentLower === 'otros') {
-            totalOthers += invoiceTotal;
-            console.log(`[DEBUG Cierre] Otros (formato simple - NO se cuenta): ${invoiceTotal}`);
+          if (hasDetailedFormat) {
+            // FORMATO DETALLADO: "Efectivo: 70.000, Transferencia: 29.000"
+            console.log(`  [formato detallado detectado]`);
+
+            // Extraer efectivo
+            const cashMatch = paymentStr.match(/Efectivo:\s*([\d,.]+)/i);
+            if (cashMatch) {
+              const cashValue = parseFloat(cashMatch[1].replace(/\./g, '').replace(/,/g, ''));
+              if (!isNaN(cashValue)) {
+                totalCash += cashValue;
+                console.log(`  ✅ Efectivo: ${cashValue}`);
+              }
+            }
+
+            // Extraer transferencia
+            const transferMatch = paymentStr.match(/Transferencia:\s*([\d,.]+)/i);
+            if (transferMatch) {
+              const transferValue = parseFloat(transferMatch[1].replace(/\./g, '').replace(/,/g, ''));
+              if (!isNaN(transferValue)) {
+                totalTransfer += transferValue;
+                console.log(`  ✅ Transferencia: ${transferValue}`);
+              }
+            }
+
+            // Extraer Nequi
+            const nequiMatch = paymentStr.match(/Nequi:\s*([\d,.]+)/i);
+            if (nequiMatch) {
+              const nequiValue = parseFloat(nequiMatch[1].replace(/\./g, '').replace(/,/g, ''));
+              if (!isNaN(nequiValue)) {
+                totalTransfer += nequiValue;
+                console.log(`  ✅ Nequi: ${nequiValue} (sumado a transferencias)`);
+              }
+            }
+
+            // Extraer Daviplata
+            const daviplataMatch = paymentStr.match(/Daviplata:\s*([\d,.]+)/i);
+            if (daviplataMatch) {
+              const daviplataValue = parseFloat(daviplataMatch[1].replace(/\./g, '').replace(/,/g, ''));
+              if (!isNaN(daviplataValue)) {
+                totalTransfer += daviplataValue;
+                console.log(`  ✅ Daviplata: ${daviplataValue} (sumado a transferencias)`);
+              }
+            }
+
+            // Extraer "Otros" (en pagos mixtos, esto es Nequi/Daviplata)
+            const otherMatch = paymentStr.match(/Otros:\s*([\d,.]+)/i);
+            if (otherMatch) {
+              const otherValue = parseFloat(otherMatch[1].replace(/\./g, '').replace(/,/g, ''));
+              if (!isNaN(otherValue)) {
+                totalTransfer += otherValue;
+                console.log(`  ✅ Otros: ${otherValue} (sumado a transferencias)`);
+              }
+            }
           } else {
-            console.log(`[DEBUG Cierre] ⚠️ Método de pago desconocido: ${paymentStr}`);
+            // FORMATO SIMPLE: solo el nombre del método (ej: "Nequi", "Efectivo", "Transferencia")
+            console.log(`  [formato simple detectado]`);
+            const paymentLower = paymentStr.toLowerCase().trim();
+
+            if (paymentLower === 'efectivo') {
+              totalCash += invoiceTotal;
+              console.log(`  ✅ Efectivo (simple): ${invoiceTotal}`);
+            } else if (paymentLower === 'transferencia' || paymentLower === 'nequi' || paymentLower === 'daviplata') {
+              totalTransfer += invoiceTotal;
+              console.log(`  ✅ Transferencia/Nequi/Daviplata (simple): ${invoiceTotal}`);
+            } else if (paymentLower === 'otros') {
+              totalTransfer += invoiceTotal;
+              console.log(`  ✅ Otros (simple): ${invoiceTotal} (sumado a transferencias)`);
+            } else {
+              console.log(`  ⚠️ Método de pago desconocido: "${paymentStr}"`);
+            }
           }
         }
       }
