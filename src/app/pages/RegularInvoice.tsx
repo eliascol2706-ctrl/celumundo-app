@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
   ArrowLeft,
@@ -17,7 +17,8 @@ import {
   Info,
   X,
   Hash,
-  Edit
+  Edit,
+  Scan
 } from 'lucide-react';
 import {
   getProducts,
@@ -110,9 +111,132 @@ export function RegularInvoice() {
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
   const [unitIdNotes, setUnitIdNotes] = useState<{ [id: string]: string }>({});
 
+  // Estados para el lector de código de barras
+  const [barcodeBuffer, setBarcodeBuffer] = useState('');
+  const barcodeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
   useEffect(() => {
     loadData();
   }, []);
+
+  // Manejar entrada de código de barras
+  useEffect(() => {
+    const handleKeyPress = (e: KeyboardEvent) => {
+      // No capturar si hay focus en inputs
+      if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
+
+      // Limpiar timeout anterior
+      if (barcodeTimeoutRef.current) {
+        clearTimeout(barcodeTimeoutRef.current);
+      }
+
+      // Si es Enter, procesar el código
+      if (e.key === 'Enter' && barcodeBuffer.length > 0) {
+        const code = barcodeBuffer.trim();
+        setBarcodeBuffer('');
+
+        console.log('🔵 [RegularInvoice] Código RAW recibido del lector:', code, 'Longitud:', code.length);
+
+        // Detectar si el código incluye un ID de unidad
+        let scannedUnitId: string | null = null;
+        let productCodeToSearch = code;
+
+        // Limpiar código de posibles letras A
+        const cleanCode = code.replace(/A/g, '');
+
+        // Si el código tiene 9 dígitos exactos, separar código de producto y ID de unidad
+        if (/^\d{9}$/.test(cleanCode)) {
+          productCodeToSearch = cleanCode.substring(0, 5); // Primeros 5 dígitos
+          scannedUnitId = cleanCode.substring(5, 9); // Últimos 4 dígitos
+          console.log('📊 Código escaneado (9 dígitos):', {
+            codigoCompleto: cleanCode,
+            codigoProducto: productCodeToSearch,
+            idUnidad: scannedUnitId
+          });
+        }
+        // Si tiene 5 dígitos, es solo código de producto
+        else if (/^\d{5}$/.test(cleanCode)) {
+          productCodeToSearch = cleanCode;
+          console.log('📊 Código escaneado (5 dígitos - solo producto):', productCodeToSearch);
+        }
+        // Soportar formato con guión: "10001-0001"
+        else if (cleanCode.includes('-')) {
+          const parts = cleanCode.split('-');
+          if (parts.length === 2) {
+            productCodeToSearch = parts[0];
+            scannedUnitId = parts[1];
+          }
+        }
+
+        console.log('🔍 Buscando producto con código:', productCodeToSearch);
+
+        // Buscar producto por código
+        const product = products.find(p => {
+          const numericCode = p.code.replace(/[^0-9]/g, '');
+          return numericCode === productCodeToSearch || numericCode === cleanCode || p.code === code;
+        });
+
+        console.log('✅ Producto encontrado:', product ? product.name : '❌ NO ENCONTRADO');
+
+        if (product) {
+          // Verificar stock SOLO para productos con IDs únicas
+          if (product.use_unit_ids && product.stock <= 0) {
+            toast.error(`${product.name} requiere IDs únicas y no tiene stock disponible`);
+            return;
+          }
+
+          // Verificar si ya está agregado
+          if (items.some(item => item.productId === product.id)) {
+            toast.error('Este producto ya está agregado');
+            return;
+          }
+
+          // Agregar automáticamente el producto usando la función existente
+          addProductToList(product);
+
+          // Si se escaneó un ID de unidad específico, pre-seleccionarlo
+          if (scannedUnitId && product.use_unit_ids) {
+            const { getAvailableIds } = import('../lib/unit-ids-utils').then(module => {
+              const availableIds = module.getAvailableIds(product.registered_ids || []);
+              const availableIdStrings = availableIds.map(idObj => typeof idObj === 'object' ? idObj.id : idObj);
+
+              if (availableIdStrings.includes(scannedUnitId!)) {
+                toast.success(`Producto agregado: ${product.name} (ID: ${scannedUnitId})`);
+                setTimeout(() => {
+                  setSelectedUnitIds([scannedUnitId!]);
+                }, 100);
+              } else {
+                toast.warning(`ID ${scannedUnitId} no disponible. Seleccione una ID manualmente.`);
+              }
+            });
+          } else if (!product.use_unit_ids) {
+            toast.success(`Producto agregado: ${product.name}`);
+          }
+        } else {
+          toast.error('Producto no encontrado');
+        }
+        return;
+      }
+
+      // Agregar carácter al buffer si es alfanumérico
+      if (e.key.length === 1) {
+        setBarcodeBuffer(prev => prev + e.key);
+
+        // Resetear buffer después de 100ms de inactividad
+        barcodeTimeoutRef.current = setTimeout(() => {
+          setBarcodeBuffer('');
+        }, 100);
+      }
+    };
+
+    window.addEventListener('keypress', handleKeyPress);
+    return () => {
+      window.removeEventListener('keypress', handleKeyPress);
+      if (barcodeTimeoutRef.current) {
+        clearTimeout(barcodeTimeoutRef.current);
+      }
+    };
+  }, [barcodeBuffer, products, items]);
 
   const loadData = async () => {
     const [productsData, departmentsData] = await Promise.all([
@@ -476,7 +600,13 @@ export function RegularInvoice() {
 
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-semibold text-zinc-900">Nueva Factura Regular</h1>
+              <div className="flex items-center gap-3">
+                <h1 className="text-3xl font-semibold text-zinc-900">Nueva Factura Regular</h1>
+                <span className="flex items-center gap-1 text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
+                  <Scan className="h-4 w-4" />
+                  Lector de código activo
+                </span>
+              </div>
               <p className="text-sm text-zinc-500 mt-1">
                 {invoiceStatus === 'paid' ? 'Venta con pago inmediato' : 'Venta pendiente de confirmación'}
               </p>
