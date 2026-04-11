@@ -14,7 +14,7 @@ import {
   FileText,
   Receipt
 } from 'lucide-react';
-import { getProducts, getInvoices, getMovements, getExpenses, getReturns, getReturnsStats, getCustomers, calculateNetRevenue, getCurrentCompany, getCurrentUser } from '../lib/supabase';
+import { getProducts, getInvoices, getMovements, getExpenses, getReturns, getReturnsStats, getExchanges, getCustomers, calculateNetRevenue, getCurrentCompany, getCurrentUser } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { formatCOP } from '../lib/currency';
 import { MissingTableAlert } from '../components/MissingTableAlert';
@@ -57,7 +57,7 @@ export function Dashboard() {
         const invoices = await getInvoices();
         const movements = await getMovements();
         const expenses = await getExpenses();
-        
+
         // Intentar cargar devoluciones
         let returns: any[] = [];
         let returnsStats = { totalReturns: 0, totalReturnAmount: 0, returnRate: 0, fullReturns: 0, partialReturns: 0 };
@@ -71,13 +71,16 @@ export function Dashboard() {
             console.warn('⚠️ Tabla "returns" no encontrada - Mostrando alerta al usuario');
           }
         }
-        
+
+        // Cargar cambios (exchanges)
+        const exchanges = await getExchanges();
+
         const customers = await getCustomers();
 
         const lowStock = products.filter(p => p.stock <= p.min_stock);
-        
-        // Calcular ingresos netos (considerando devoluciones)
-        const netRevenue = calculateNetRevenue(invoices, returns);
+
+        // Calcular ingresos netos (considerando devoluciones y cambios)
+        const netRevenue = calculateNetRevenue(invoices, returns, exchanges);
         
         const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
         
@@ -111,7 +114,12 @@ export function Dashboard() {
         });
 
         setLowStockItems(lowStock.slice(0, 5));
-        setRecentInvoices(invoices.slice(-5).reverse());
+
+        // Ordenar facturas por fecha (más recientes primero) y tomar las 5 primeras
+        const sortedInvoices = [...invoices].sort((a, b) =>
+          new Date(b.date).getTime() - new Date(a.date).getTime()
+        );
+        setRecentInvoices(sortedInvoices.slice(0, 5));
       } catch (error) {
         console.error('Error loading dashboard data:', error);
       }
@@ -313,13 +321,13 @@ export function Dashboard() {
                         {formatCOP(invoice.total)}
                       </p>
                       <span className={`text-xs px-2 py-1 rounded-full ${
-                        invoice.status === 'paid' 
-                          ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300' 
-                          : invoice.status === 'pending'
+                        invoice.status === 'paid'
+                          ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
+                          : (invoice.status === 'pending' || invoice.status === 'pending_confirmation')
                           ? 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300'
                           : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
                       }`}>
-                        {invoice.status === 'paid' ? 'Pagada' : invoice.status === 'pending' ? 'Pendiente' : 'Cancelada'}
+                        {invoice.status === 'paid' ? 'Pagada' : (invoice.status === 'pending' || invoice.status === 'pending_confirmation') ? 'Pendiente' : 'Cancelada'}
                       </span>
                     </div>
                   </div>

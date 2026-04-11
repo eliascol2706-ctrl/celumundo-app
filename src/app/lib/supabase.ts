@@ -135,7 +135,8 @@ export interface Movement {
   reference: string;
   user_name: string;
   created_at?: string;
-  unit_ids: string[]; // NUEVO: IDs de las unidades específicas movidas (ej: ['0001', '0002'])
+  unit_ids: string[]; // IDs de las unidades específicas movidas (ej: ['0001', '0002'])
+  unit_id_notes?: { [id: string]: string }; // Notas asociadas a cada ID única
 }
 
 export interface Expense {
@@ -1092,7 +1093,7 @@ export const getMovements = async (): Promise<Movement[]> => {
 
 export const addMovement = async (movement: Omit<Movement, 'id' | 'company' | 'created_at'>): Promise<Movement | null> => {
   const company = getCurrentCompany();
-  
+
   const { data, error } = await supabase
     .from('movements')
     .insert([{
@@ -1104,6 +1105,7 @@ export const addMovement = async (movement: Omit<Movement, 'id' | 'company' | 'c
       reference: movement.reference,
       user_name: movement.user_name,
       unit_ids: movement.unit_ids || [], // Siempre incluir unit_ids, aunque sea array vacío
+      unit_id_notes: movement.unit_id_notes || {}, // Incluir notas de IDs
       company
     }])
     .select()
@@ -1553,16 +1555,93 @@ export const getReturnsStats = async () => {
 };
 
 /**
- * Calcula los ingresos netos considerando devoluciones
+ * Calcula los ingresos netos considerando devoluciones y cambios
+ * Suma Efectivo + Transferencias (incluye Nequi y Daviplata) + Otros
+ * Resta devoluciones y ajusta por el impacto financiero de los cambios
  */
-export const calculateNetRevenue = (invoices: Invoice[], returns: Return[]): number => {
-  const totalRevenue = invoices
-    .filter(inv => inv.status === 'paid' || inv.status === 'partial_return' || inv.status === 'returned')
-    .reduce((sum, inv) => sum + inv.total, 0);
-  
+export const calculateNetRevenue = (invoices: Invoice[], returns: Return[], exchanges: Exchange[] = []): number => {
+  let totalCash = 0;
+  let totalTransfer = 0;
+  let totalOthers = 0;
+
+  // Sumar pagos de facturas pagadas (no créditos pendientes)
+  invoices
+    .filter(inv => inv.status === 'paid' && !inv.is_credit)
+    .forEach(invoice => {
+      const paymentStr = invoice.payment_method || '';
+
+      // Verificar si tiene formato detallado (con montos) o simple (solo nombre)
+      const hasDetailedFormat = paymentStr.includes(':');
+
+      if (hasDetailedFormat) {
+        // FORMATO DETALLADO: "Efectivo: $200.000, Nequi: $100.000"
+
+        // Extraer efectivo
+        const cashMatch = paymentStr.match(/Efectivo:\s*\$?([\d,.]+)/i);
+        if (cashMatch) {
+          const cashValue = parseFloat(cashMatch[1].replace(/\./g, '').replace(/,/g, '.'));
+          if (!isNaN(cashValue)) totalCash += cashValue;
+        }
+
+        // Extraer transferencia
+        const transferMatch = paymentStr.match(/Transferencia:\s*\$?([\d,.]+)/i);
+        if (transferMatch) {
+          const transferValue = parseFloat(transferMatch[1].replace(/\./g, '').replace(/,/g, '.'));
+          if (!isNaN(transferValue)) totalTransfer += transferValue;
+        }
+
+        // Extraer Nequi
+        const nequiMatch = paymentStr.match(/Nequi:\s*\$?([\d,.]+)/i);
+        if (nequiMatch) {
+          const nequiValue = parseFloat(nequiMatch[1].replace(/\./g, '').replace(/,/g, '.'));
+          if (!isNaN(nequiValue)) totalTransfer += nequiValue;
+        }
+
+        // Extraer Daviplata
+        const daviplataMatch = paymentStr.match(/Daviplata:\s*\$?([\d,.]+)/i);
+        if (daviplataMatch) {
+          const daviplataValue = parseFloat(daviplataMatch[1].replace(/\./g, '').replace(/,/g, '.'));
+          if (!isNaN(daviplataValue)) totalTransfer += daviplataValue;
+        }
+
+        // Extraer Otros
+        const otherMatch = paymentStr.match(/Otros:\s*\$?([\d,.]+)/i);
+        if (otherMatch) {
+          const otherValue = parseFloat(otherMatch[1].replace(/\./g, '').replace(/,/g, '.'));
+          if (!isNaN(otherValue)) totalOthers += otherValue;
+        }
+      } else {
+        // FORMATO SIMPLE: solo el nombre del método
+        const paymentLower = paymentStr.toLowerCase().trim();
+        const invoiceTotal = invoice.total || 0;
+
+        if (paymentLower === 'efectivo') {
+          totalCash += invoiceTotal;
+        } else if (paymentLower === 'transferencia' || paymentLower === 'nequi' || paymentLower === 'daviplata') {
+          totalTransfer += invoiceTotal;
+        } else if (paymentLower === 'otros') {
+          totalOthers += invoiceTotal;
+        }
+      }
+    });
+
+  const totalRevenue = totalCash + totalTransfer + totalOthers;
   const totalReturns = returns.reduce((sum, ret) => sum + ret.total, 0);
-  
-  return totalRevenue - totalReturns;
+
+  // Calcular impacto de CAMBIOS
+  // - Si price_difference > 0: El cliente pagó más (SUMA)
+  // - Si price_difference < 0: Se le devolvió dinero (RESTA)
+  // - Si price_difference === 0: No afecta ingresos
+  const exchangesImpact = exchanges.reduce((sum, exchange) => {
+    if (exchange.price_difference > 0) {
+      return sum + exchange.price_difference; // Cliente pagó diferencia
+    } else if (exchange.price_difference < 0) {
+      return sum + exchange.price_difference; // Se devolvió dinero (negativo)
+    }
+    return sum; // Sin impacto si es 0
+  }, 0);
+
+  return totalRevenue - totalReturns + exchangesImpact;
 };
 
 // ============================================

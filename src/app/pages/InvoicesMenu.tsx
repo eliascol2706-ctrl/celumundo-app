@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router';
-import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer } from 'lucide-react';
+import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -40,9 +40,17 @@ export function InvoicesMenu() {
     other: 0
   });
   const [creditPayments, setCreditPayments] = useState<CreditPayment[]>([]);
-  const [printRef, setPrintRef] = useState<React.RefObject<HTMLDivElement>>(useRef(null));
+  const thermalPrintRef = useRef<HTMLDivElement>(null);
   const [showPrintSelectionModal, setShowPrintSelectionModal] = useState(false);
+  const [showThermalPrintDialog, setShowThermalPrintDialog] = useState(false);
   const [printMethod, setPrintMethod] = useState<'pdf' | 'thermal'>('pdf');
+
+  // Estados para filtros de facturas
+  const [searchTerm, setSearchTerm] = useState('');
+  const [periodFilter, setPeriodFilter] = useState<'today' | 'yesterday' | 'currentMonth' | 'previousMonth' | 'all'>('today');
+  const [sortBy, setSortBy] = useState<'recent' | 'oldest' | 'highest' | 'lowest'>('recent');
+  const [paymentFilter, setPaymentFilter] = useState<'all' | 'efectivo' | 'transferencia' | 'nequi' | 'daviplata' | 'otros' | 'mixto'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending_confirmation' | 'pending'>('all');
 
   useEffect(() => {
     loadStats();
@@ -120,15 +128,103 @@ export function InvoicesMenu() {
         transferToday
       });
 
-      // Ordenar por fecha descendente (más recientes primero)
-      setTodayInvoices(invoicesToday.sort((a, b) => 
-        new Date(b.date).getTime() - new Date(a.date).getTime()
-      ));
+      // Cargar TODAS las facturas (no solo las de hoy) para los filtros
+      setTodayInvoices(invoices);
     } catch (error) {
       console.error('Error loading stats:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  // Función para filtrar y ordenar facturas
+  const getFilteredInvoices = () => {
+    let filtered = [...todayInvoices];
+
+    // Filtrar por periodo de tiempo
+    if (periodFilter !== 'all') {
+      const todayStr = getColombiaDate(); // YYYY-MM-DD
+      const today = new Date(todayStr + 'T00:00:00-05:00');
+
+      filtered = filtered.filter(inv => {
+        const invDate = extractColombiaDate(inv.date);
+
+        if (periodFilter === 'today') {
+          return invDate === todayStr;
+        } else if (periodFilter === 'yesterday') {
+          const yesterday = new Date(today);
+          yesterday.setDate(yesterday.getDate() - 1);
+          const yesterdayStr = yesterday.toISOString().split('T')[0];
+          return invDate === yesterdayStr;
+        } else if (periodFilter === 'currentMonth') {
+          const currentMonth = todayStr.slice(0, 7); // YYYY-MM
+          return invDate.startsWith(currentMonth);
+        } else if (periodFilter === 'previousMonth') {
+          const currentDate = new Date(today);
+          currentDate.setMonth(currentDate.getMonth() - 1);
+          const previousMonth = currentDate.toISOString().slice(0, 7); // YYYY-MM
+          return invDate.startsWith(previousMonth);
+        }
+        return true;
+      });
+    }
+
+    // Filtrar por búsqueda (número de factura o nombre del cliente)
+    if (searchTerm) {
+      filtered = filtered.filter(inv =>
+        inv.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (inv.customer_name && inv.customer_name.toLowerCase().includes(searchTerm.toLowerCase()))
+      );
+    }
+
+    // Filtrar por método de pago
+    if (paymentFilter !== 'all') {
+      filtered = filtered.filter(inv => {
+        const paymentStr = (inv.payment_method || '').toLowerCase();
+
+        if (paymentFilter === 'mixto') {
+          // Mixto: tiene ":" o "," (pago con múltiples métodos)
+          return paymentStr.includes(':') || paymentStr.includes(',');
+        } else if (paymentFilter === 'efectivo') {
+          return paymentStr.includes('efectivo') && !paymentStr.includes(':') && !paymentStr.includes(',');
+        } else if (paymentFilter === 'transferencia') {
+          return paymentStr.includes('transferencia') && !paymentStr.includes(':') && !paymentStr.includes(',');
+        } else if (paymentFilter === 'nequi') {
+          return paymentStr.includes('nequi') && !paymentStr.includes(':') && !paymentStr.includes(',');
+        } else if (paymentFilter === 'daviplata') {
+          return paymentStr.includes('daviplata') && !paymentStr.includes(':') && !paymentStr.includes(',');
+        } else if (paymentFilter === 'otros') {
+          return paymentStr.includes('otros') && !paymentStr.includes(':') && !paymentStr.includes(',');
+        }
+        return true;
+      });
+    }
+
+    // Filtrar por estado
+    if (statusFilter !== 'all') {
+      filtered = filtered.filter(inv => {
+        if (statusFilter === 'paid') return inv.status === 'paid';
+        if (statusFilter === 'pending_confirmation') return inv.status === 'pending_confirmation';
+        if (statusFilter === 'pending') return inv.is_credit && inv.status === 'pending';
+        return true;
+      });
+    }
+
+    // Ordenar
+    filtered.sort((a, b) => {
+      if (sortBy === 'recent') {
+        return new Date(b.date).getTime() - new Date(a.date).getTime();
+      } else if (sortBy === 'oldest') {
+        return new Date(a.date).getTime() - new Date(b.date).getTime();
+      } else if (sortBy === 'highest') {
+        return b.total - a.total;
+      } else if (sortBy === 'lowest') {
+        return a.total - b.total;
+      }
+      return 0;
+    });
+
+    return filtered;
   };
 
   const handleNavigateToRegular = async () => {
@@ -208,42 +304,89 @@ export function InvoicesMenu() {
         return;
       }
 
-      let paymentData: any = {
-        status: 'paid',
-        payment_method: paymentMethod
-      };
+      let paymentCash = 0;
+      let paymentTransfer = 0;
+      let paymentOther = 0;
+      let paymentMethodStr = '';
 
       // Configurar los montos de pago según el método seleccionado
       if (paymentMethod === 'Efectivo') {
-        paymentData.payment_cash = selectedInvoice.total;
-        paymentData.payment_transfer = 0;
-        paymentData.payment_other = 0;
+        paymentCash = selectedInvoice.total;
+        paymentMethodStr = 'Efectivo';
       } else if (paymentMethod === 'Transferencia') {
-        paymentData.payment_cash = 0;
-        paymentData.payment_transfer = selectedInvoice.total;
-        paymentData.payment_other = 0;
-      } else if (paymentMethod === 'Nequi' || paymentMethod === 'Daviplata') {
-        paymentData.payment_cash = 0;
-        paymentData.payment_transfer = 0;
-        paymentData.payment_other = selectedInvoice.total;
+        paymentTransfer = selectedInvoice.total;
+        paymentMethodStr = 'Transferencia';
+      } else if (paymentMethod === 'Nequi') {
+        paymentOther = selectedInvoice.total;
+        paymentMethodStr = 'Nequi';
+      } else if (paymentMethod === 'Daviplata') {
+        paymentOther = selectedInvoice.total;
+        paymentMethodStr = 'Daviplata';
       } else if (paymentMethod === 'Mixto') {
         const totalMixed = mixedPayments.cash + mixedPayments.transfer + mixedPayments.other;
         if (Math.abs(totalMixed - selectedInvoice.total) > 0.01) {
           toast.error('La suma de los montos debe ser igual al total de la factura');
           return;
         }
-        paymentData.payment_cash = mixedPayments.cash;
-        paymentData.payment_transfer = mixedPayments.transfer;
-        paymentData.payment_other = mixedPayments.other;
+        paymentCash = mixedPayments.cash;
+        paymentTransfer = mixedPayments.transfer;
+        paymentOther = mixedPayments.other;
+
+        // Construir string detallado para mixto
+        const methods = [];
+        if (mixedPayments.cash > 0) methods.push(`Efectivo: ${formatCOP(mixedPayments.cash)}`);
+        if (mixedPayments.transfer > 0) methods.push(`Transferencia: ${formatCOP(mixedPayments.transfer)}`);
+        if (mixedPayments.other > 0) methods.push(`Otros: ${formatCOP(mixedPayments.other)}`);
+        paymentMethodStr = methods.join(', ');
       }
 
-      const { error } = await supabase
-        .from('invoices')
-        .update(paymentData)
-        .eq('id', selectedInvoice.id)
-        .eq('company', company);
+      // Usar confirmInvoicePayment con update_date: true
+      const { confirmInvoicePayment, updateProduct, addMovement } = await import('../lib/supabase');
 
-      if (error) throw error;
+      const result = await confirmInvoicePayment(selectedInvoice.id, {
+        payment_method: paymentMethodStr,
+        payment_cash: paymentCash,
+        payment_transfer: paymentTransfer,
+        payment_other: paymentOther,
+        update_date: true // ✅ Actualizar la fecha al día actual
+      });
+
+      if (!result) {
+        throw new Error('Error al confirmar el pago');
+      }
+
+      // Procesar inventario: reducir stock y eliminar IDs únicas
+      for (const item of selectedInvoice.items) {
+        const product = products.find(p => p.id === item.productId);
+        if (!product) continue;
+
+        const updates: any = {
+          stock: product.stock - item.quantity
+        };
+
+        // Si el producto tiene IDs únicas, eliminar las que se vendieron
+        if (item.unitIds && item.unitIds.length > 0 && product.registered_ids) {
+          const remainingIds = product.registered_ids.filter(
+            (idObj: any) => !item.unitIds.includes(idObj.id)
+          );
+          updates.registered_ids = remainingIds;
+        }
+
+        await updateProduct(product.id, updates);
+
+        // Registrar movimiento de salida
+        await addMovement({
+          type: 'exit',
+          product_id: product.id,
+          product_name: product.name,
+          quantity: item.quantity,
+          reason: 'Venta',
+          reference: `Factura ${selectedInvoice.number}`,
+          user_name: user.username,
+          unit_ids: item.unitIds || [],
+          unit_id_notes: {}
+        });
+      }
 
       toast.success('Factura aprobada exitosamente');
       setShowPaymentMethodModal(false);
@@ -279,25 +422,123 @@ export function InvoicesMenu() {
   };
 
   const handlePrintInvoice = (invoice: Invoice) => {
-    setSelectedInvoice(invoice);
-    setPrintRef(useRef(null));
-    const pdf = new jsPDF();
-    pdf.text(`Factura #${invoice.number}`, 10, 10);
-    pdf.text(`Fecha: ${extractColombiaDateTime(invoice.date)}`, 10, 20);
-    pdf.text(`Cliente: ${invoice.customer_name || 'Sin cliente'}`, 10, 30);
-    pdf.text(`Total: ${formatCOP(invoice.total)}`, 10, 40);
-    pdf.save(`Factura_${invoice.number}.pdf`);
+    const doc = new jsPDF();
+    const companyName = getCurrentCompany() === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    // Header
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text(companyName, pageWidth / 2, 20, { align: 'center' });
+
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Factura ${invoice.number}`, pageWidth / 2, 30, { align: 'center' });
+
+    // Info
+    let y = 45;
+    doc.setFontSize(10);
+    doc.text(`Fecha: ${extractColombiaDateTime(invoice.date)}`, 20, y);
+    y += 6;
+
+    if (invoice.customer_name) {
+      doc.text(`Cliente: ${invoice.customer_name}`, 20, y);
+      y += 6;
+    }
+
+    if (invoice.customer_document) {
+      doc.text(`Documento: ${invoice.customer_document}`, 20, y);
+      y += 6;
+    }
+
+    if (invoice.attended_by) {
+      doc.text(`Atendido por: ${invoice.attended_by}`, 20, y);
+      y += 6;
+    }
+
+    y += 5;
+
+    // Items
+    doc.setFont('helvetica', 'bold');
+    doc.text('Cant.', 20, y);
+    doc.text('Producto', 40, y);
+    doc.text('Precio', 130, y);
+    doc.text('Total', 170, y);
+    y += 2;
+    doc.line(20, y, 190, y);
+    y += 6;
+
+    doc.setFont('helvetica', 'normal');
+    invoice.items.forEach((item) => {
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
+      }
+
+      doc.text(item.quantity.toString(), 20, y);
+      const productName = item.productName.length > 40 ? item.productName.substring(0, 40) + '...' : item.productName;
+      doc.text(productName, 40, y);
+      doc.text(formatCOP(item.price), 130, y);
+      doc.text(formatCOP(item.total), 170, y);
+      y += 6;
+    });
+
+    y += 5;
+    doc.line(20, y, 190, y);
+    y += 8;
+
+    // Total
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(`TOTAL: ${formatCOP(invoice.total)}`, pageWidth - 20, y, { align: 'right' });
+
+    // Abrir para imprimir
+    doc.autoPrint();
+    window.open(doc.output('bloburl'), '_blank');
+    toast.success('Abriendo vista de impresión PDF');
   };
 
   const handlePrintThermalInvoice = (invoice: Invoice) => {
-    setSelectedInvoice(invoice);
-    setPrintRef(useRef(null));
-    const pdf = new jsPDF();
-    pdf.text(`Factura #${invoice.number}`, 10, 10);
-    pdf.text(`Fecha: ${extractColombiaDateTime(invoice.date)}`, 10, 20);
-    pdf.text(`Cliente: ${invoice.customer_name || 'Sin cliente'}`, 10, 30);
-    pdf.text(`Total: ${formatCOP(invoice.total)}`, 10, 40);
-    pdf.save(`Factura_${invoice.number}.pdf`);
+    setShowThermalPrintDialog(true);
+
+    // Esperar a que el modal se renderice
+    setTimeout(() => {
+      if (!thermalPrintRef.current) return;
+
+      const printFrame = document.createElement('iframe');
+      printFrame.style.position = 'absolute';
+      printFrame.style.width = '0';
+      printFrame.style.height = '0';
+      printFrame.style.border = 'none';
+
+      document.body.appendChild(printFrame);
+
+      const printDocument = printFrame.contentWindow?.document;
+      if (!printDocument) return;
+
+      printDocument.open();
+      printDocument.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Impresión Térmica</title>
+          </head>
+          <body>
+            ${thermalPrintRef.current.innerHTML}
+          </body>
+        </html>
+      `);
+      printDocument.close();
+
+      setTimeout(() => {
+        printFrame.contentWindow?.print();
+        setTimeout(() => {
+          document.body.removeChild(printFrame);
+          setShowThermalPrintDialog(false);
+        }, 100);
+      }, 500);
+    }, 300);
   };
 
   return (
@@ -457,14 +698,130 @@ export function InvoicesMenu() {
         {/* Facturas del día de hoy */}
         <div className="max-w-6xl mx-auto">
           <Card className="border-zinc-200 dark:border-zinc-800">
-            <CardHeader className="border-b border-zinc-200 dark:border-zinc-800">
-              <CardTitle className="flex items-center gap-2">
-                <FileText className="w-5 h-5" />
-                Facturas de Hoy
-                <Badge variant="outline" className="ml-2 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
-                  {todayInvoices.length} {todayInvoices.length === 1 ? 'factura' : 'facturas'}
-                </Badge>
-              </CardTitle>
+            <CardHeader className="border-b border-zinc-200 dark:border-zinc-800 space-y-4">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="w-5 h-5" />
+                  Facturas realizadas
+                  <Badge variant="outline" className="ml-2 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
+                    {getFilteredInvoices().length} {getFilteredInvoices().length === 1 ? 'factura' : 'facturas'}
+                  </Badge>
+                </CardTitle>
+              </div>
+
+              {/* Buscador */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                <Input
+                  type="text"
+                  placeholder="Buscar por número de factura o nombre del cliente..."
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
+              {/* Filtros */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                {/* Filtro de Periodo */}
+                <div>
+                  <Label className="text-xs text-zinc-600 dark:text-zinc-400 mb-1.5 flex items-center gap-1">
+                    <Calendar className="w-3 h-3" />
+                    Periodo
+                  </Label>
+                  <Select value={periodFilter} onValueChange={(value: any) => setPeriodFilter(value)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="today">Hoy</SelectItem>
+                      <SelectItem value="yesterday">Ayer</SelectItem>
+                      <SelectItem value="currentMonth">Mes Actual</SelectItem>
+                      <SelectItem value="previousMonth">Mes Anterior</SelectItem>
+                      <SelectItem value="all">Todas las Facturas</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Filtro de Ordenamiento */}
+                <div>
+                  <Label className="text-xs text-zinc-600 dark:text-zinc-400 mb-1.5 flex items-center gap-1">
+                    <Filter className="w-3 h-3" />
+                    Ordenar por
+                  </Label>
+                  <Select value={sortBy} onValueChange={(value: any) => setSortBy(value)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="recent">Más recientes</SelectItem>
+                      <SelectItem value="oldest">Más antiguas</SelectItem>
+                      <SelectItem value="highest">Mayor a menor</SelectItem>
+                      <SelectItem value="lowest">Menor a mayor</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Filtro de Método de Pago */}
+                <div>
+                  <Label className="text-xs text-zinc-600 dark:text-zinc-400 mb-1.5 flex items-center gap-1">
+                    <Banknote className="w-3 h-3" />
+                    Método de pago
+                  </Label>
+                  <Select value={paymentFilter} onValueChange={(value: any) => setPaymentFilter(value)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="efectivo">Efectivo</SelectItem>
+                      <SelectItem value="transferencia">Transferencia</SelectItem>
+                      <SelectItem value="nequi">Nequi</SelectItem>
+                      <SelectItem value="daviplata">Daviplata</SelectItem>
+                      <SelectItem value="otros">Otros</SelectItem>
+                      <SelectItem value="mixto">Mixtos</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* Filtro de Estado */}
+                <div>
+                  <Label className="text-xs text-zinc-600 dark:text-zinc-400 mb-1.5 flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3" />
+                    Estado
+                  </Label>
+                  <Select value={statusFilter} onValueChange={(value: any) => setStatusFilter(value)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="paid">Pagadas</SelectItem>
+                      <SelectItem value="pending_confirmation">En confirmación</SelectItem>
+                      <SelectItem value="pending">Pendiente por crédito</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Botón para limpiar filtros (opcional) */}
+              {(searchTerm || periodFilter !== 'today' || sortBy !== 'recent' || paymentFilter !== 'all' || statusFilter !== 'all') && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setPeriodFilter('today');
+                    setSortBy('recent');
+                    setPaymentFilter('all');
+                    setStatusFilter('all');
+                  }}
+                  className="text-xs"
+                >
+                  <X className="w-3 h-3 mr-1" />
+                  Limpiar filtros
+                </Button>
+              )}
             </CardHeader>
             <CardContent className="p-0">
               {loading ? (
@@ -472,11 +829,11 @@ export function InvoicesMenu() {
                   <Loader2 className="w-8 h-8 mx-auto mb-3 animate-spin" />
                   <p>Cargando facturas...</p>
                 </div>
-              ) : todayInvoices.length === 0 ? (
+              ) : getFilteredInvoices().length === 0 ? (
                 <div className="text-center py-12 text-zinc-500 dark:text-zinc-400">
                   <FileText className="w-16 h-16 mx-auto mb-4 text-zinc-300 dark:text-zinc-700" />
-                  <p className="text-lg font-medium">No hay facturas hoy</p>
-                  <p className="text-sm mt-1">Las facturas del día aparecerán aquí</p>
+                  <p className="text-lg font-medium">No hay facturas</p>
+                  <p className="text-sm mt-1">No se encontraron facturas con los filtros aplicados</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -489,12 +846,12 @@ export function InvoicesMenu() {
                         <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Total</th>
                         <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Método Pago</th>
                         <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Estado</th>
-                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Hora</th>
+                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Fecha</th>
                         <th className="text-center text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Acción</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                      {todayInvoices.map((invoice) => (
+                      {getFilteredInvoices().map((invoice) => (
                         <tr 
                           key={invoice.id}
                           className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors"
@@ -598,11 +955,7 @@ export function InvoicesMenu() {
                           </td>
                           <td className="px-4 py-3">
                             <span className="text-xs text-zinc-500 dark:text-zinc-400">
-                              {new Date(invoice.date).toLocaleTimeString('es-CO', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                timeZone: 'America/Bogota'
-                              })}
+                              {extractColombiaDateTime(invoice.date)}
                             </span>
                           </td>
                           <td className="px-4 py-3 text-center">
@@ -1037,6 +1390,27 @@ export function InvoicesMenu() {
               Imprimir
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Vista Previa Impresión Térmica */}
+      <Dialog open={showThermalPrintDialog} onOpenChange={setShowThermalPrintDialog}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Vista Previa - Impresión Térmica</DialogTitle>
+            <DialogDescription className="text-zinc-600 dark:text-zinc-400">
+              Vista previa para impresora térmica SAT-22TUE de 80mm
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedInvoice && (
+            <div ref={thermalPrintRef}>
+              <ThermalInvoicePrint
+                invoice={selectedInvoice}
+                creditPayments={creditPayments}
+              />
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

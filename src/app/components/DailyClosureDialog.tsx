@@ -96,7 +96,7 @@ export function DailyClosureDialog({
         console.log(`[DEBUG Cierre] Factura ${invoice.number} - Payment: ${paymentStr}, Total: ${invoiceTotal}`);
 
         // Verificar si el payment_method tiene formato detallado (con montos) o simple (solo nombre)
-        const hasDetailedFormat = paymentStr.includes(':') && paymentStr.includes('$');
+        const hasDetailedFormat = paymentStr.includes(':');
 
         if (hasDetailedFormat) {
           // FORMATO DETALLADO: "Efectivo: $200.000, Nequi: $100.000"
@@ -221,11 +221,11 @@ export function DailyClosureDialog({
     console.log('[DEBUG Cierre] ====== RESUMEN FINAL DE TOTALES ======');
     console.log(`[DEBUG Cierre] Total Efectivo: ${totalCash}`);
     console.log(`[DEBUG Cierre] Total Transferencias (incluye Nequi y Daviplata): ${totalTransfer}`);
-    console.log(`[DEBUG Cierre] Total Otros (NO se cuenta): ${totalOthers}`);
-    console.log(`[DEBUG Cierre] TOTAL INGRESOS: ${totalCash + totalTransfer}`);
+    console.log(`[DEBUG Cierre] Total Otros: ${totalOthers}`);
+    console.log(`[DEBUG Cierre] TOTAL INGRESOS: ${totalCash + totalTransfer + totalOthers}`);
     console.log('[DEBUG Cierre] =====================================');
 
-    return { totalCash, totalTransfer, totalOthers, total: totalCash + totalTransfer };
+    return { totalCash, totalTransfer, totalOthers, total: totalCash + totalTransfer + totalOthers };
   };
 
   const paymentTotals = calculatePaymentTotals();
@@ -389,11 +389,11 @@ export function DailyClosureDialog({
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="text-2xl font-bold text-gray-600 dark:text-gray-400">
+                      <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                         {formatCOP(paymentTotals.totalOthers)}
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
-                        No se cuenta en ingresos
+                        Otros métodos de pago
                       </p>
                     </CardContent>
                   </Card>
