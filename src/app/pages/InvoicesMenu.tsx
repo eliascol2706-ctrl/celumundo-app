@@ -28,6 +28,7 @@ export function InvoicesMenu() {
   const [loading, setLoading] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
   const [todayInvoices, setTodayInvoices] = useState<Invoice[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingInvoices, setPendingInvoices] = useState<Invoice[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -130,6 +131,7 @@ export function InvoicesMenu() {
 
       // Cargar TODAS las facturas (no solo las de hoy) para los filtros
       setTodayInvoices(invoices);
+      setProducts(products);
     } catch (error) {
       console.error('Error loading stats:', error);
     } finally {
@@ -1222,6 +1224,9 @@ export function InvoicesMenu() {
         <DialogContent className="max-w-2xl bg-white dark:bg-zinc-950">
           <DialogHeader>
             <DialogTitle className="text-zinc-900 dark:text-zinc-100">Vista Previa de Factura</DialogTitle>
+            <DialogDescription className="text-zinc-600 dark:text-zinc-400">
+              Detalles de la factura seleccionada
+            </DialogDescription>
           </DialogHeader>
 
           {selectedInvoice && (
