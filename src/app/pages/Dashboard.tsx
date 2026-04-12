@@ -136,7 +136,7 @@ export function Dashboard() {
       </div>
 
       {/* Tarjetas de estadísticas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card className="hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -170,21 +170,6 @@ export function Dashboard() {
         <Card className="hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Ingresos Netos
-            </CardTitle>
-            <DollarSign className="h-4 w-4 text-green-600 dark:text-green-400" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-              {formatCOP(stats.netRevenue)}
-            </div>
-            <p className="text-xs text-muted-foreground mt-1">Ventas - Devoluciones</p>
-          </CardContent>
-        </Card>
-
-        <Card className="hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
               Stock Bajo
             </CardTitle>
             <AlertCircle className="h-4 w-4 text-red-600 dark:text-red-400" />
@@ -200,9 +185,7 @@ export function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 hover:shadow-lg transition-all duration-300">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-green-700 dark:text-green-300">
-              Ingresos Brutos
-            </CardTitle>
+            <CardTitle className="text-sm font-medium text-green-700 dark:text-green-300">Ingresos Netos</CardTitle>
             <TrendingUp className="h-4 w-4 text-green-600 dark:text-green-400" />
           </CardHeader>
           <CardContent>
@@ -325,9 +308,11 @@ export function Dashboard() {
                           ? 'bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300'
                           : (invoice.status === 'pending' || invoice.status === 'pending_confirmation')
                           ? 'bg-yellow-100 dark:bg-yellow-900/40 text-yellow-700 dark:text-yellow-300'
+                          : invoice.status === 'partial_return'
+                          ? 'bg-orange-100 dark:bg-orange-900/40 text-orange-700 dark:text-orange-300'
                           : 'bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300'
                       }`}>
-                        {invoice.status === 'paid' ? 'Pagada' : (invoice.status === 'pending' || invoice.status === 'pending_confirmation') ? 'Pendiente' : 'Cancelada'}
+                        {invoice.status === 'paid' ? 'Pagada' : (invoice.status === 'pending' || invoice.status === 'pending_confirmation') ? 'Pendiente' : invoice.status === 'partial_return' ? 'Devolución Parcial' : 'Cancelada'}
                       </span>
                     </div>
                   </div>

@@ -205,7 +205,7 @@ export function InvoicesMenu() {
     // Filtrar por estado
     if (statusFilter !== 'all') {
       filtered = filtered.filter(inv => {
-        if (statusFilter === 'paid') return inv.status === 'paid';
+        if (statusFilter === 'paid') return inv.status === 'paid' || inv.status === 'partial_return';
         if (statusFilter === 'pending_confirmation') return inv.status === 'pending_confirmation';
         if (statusFilter === 'pending') return inv.is_credit && inv.status === 'pending';
         return true;

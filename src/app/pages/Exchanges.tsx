@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Plus, Package, TrendingUp, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight, Trash2, Edit } from 'lucide-react';
+import { Search, Plus, Package, TrendingUp, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight, Trash2, Edit, CheckCircle, XCircle } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Textarea } from '../components/ui/textarea';
 import { formatCOP } from '../lib/currency';
-import { getExchanges, getProducts, getInvoices, addExchange, deleteExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, type Exchange, type Product, type Invoice } from '../lib/supabase';
+import { getExchanges, getProducts, getInvoices, addExchange, deleteExchange, finalizeExchange, cancelExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, type Exchange, type Product, type Invoice } from '../lib/supabase';
 import { extractIds } from '../lib/unit-ids-utils';
 import { toast } from 'sonner';
 
@@ -17,7 +17,7 @@ export default function Exchanges() {
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [exchangeType, setExchangeType] = useState<'invoice' | 'direct'>('direct');
+  const [exchangeType, setExchangeType] = useState<'invoice' | 'direct' | 'pending'>('direct');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -56,7 +56,19 @@ export default function Exchanges() {
   const [paymentMethod, setPaymentMethod] = useState(''); // Mantener por compatibilidad
   const [paymentCash, setPaymentCash] = useState(0);
   const [paymentTransfer, setPaymentTransfer] = useState(0);
+  const [paymentOther, setPaymentOther] = useState(0);
   const [notes, setNotes] = useState('');
+
+  // Modal de finalización de cambio pendiente
+  const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false);
+  const [exchangeToFinalize, setExchangeToFinalize] = useState<Exchange | null>(null);
+  const [finalizeNewProduct, setFinalizeNewProduct] = useState<Product | null>(null);
+  const [finalizeNewQuantity, setFinalizeNewQuantity] = useState(1);
+  const [finalizeNewPrice, setFinalizeNewPrice] = useState(0);
+  const [finalizeNewUnitIds, setFinalizeNewUnitIds] = useState<string[]>([]);
+  const [finalizePaymentCash, setFinalizePaymentCash] = useState(0);
+  const [finalizePaymentTransfer, setFinalizePaymentTransfer] = useState(0);
+  const [finalizePaymentOther, setFinalizePaymentOther] = useState(0);
 
   const itemsPerPage = 10;
   const currentUser = getCurrentUser();
@@ -106,6 +118,7 @@ export default function Exchanges() {
     setPaymentMethod('');
     setPaymentCash(0);
     setPaymentTransfer(0);
+    setPaymentOther(0);
     setNotes('');
   };
 
@@ -147,15 +160,28 @@ export default function Exchanges() {
   const handleSelectNewProduct = (productId: string) => {
     const product = products.find(p => p.id === productId);
     if (product) {
-      setNewProduct(product);
-      setNewPrice(product.final_price);
-      
-      // Si el producto usa IDs únicas, seleccionar automáticamente las primeras disponibles
-      if (product.use_unit_ids && product.registered_ids) {
-        const ids = extractIds(product.registered_ids);
-        setNewUnitIds(ids.slice(0, newQuantity));
+      // Si estamos en el modal de finalización
+      if (finalizeDialogOpen) {
+        setFinalizeNewProduct(product);
+        setFinalizeNewPrice(product.final_price);
+
+        if (product.use_unit_ids && product.registered_ids) {
+          const ids = extractIds(product.registered_ids);
+          setFinalizeNewUnitIds(ids.slice(0, finalizeNewQuantity));
+        } else {
+          setFinalizeNewUnitIds([]);
+        }
       } else {
-        setNewUnitIds([]);
+        // Modal de crear cambio nuevo
+        setNewProduct(product);
+        setNewPrice(product.final_price);
+
+        if (product.use_unit_ids && product.registered_ids) {
+          const ids = extractIds(product.registered_ids);
+          setNewUnitIds(ids.slice(0, newQuantity));
+        } else {
+          setNewUnitIds([]);
+        }
       }
     }
   };
@@ -194,42 +220,49 @@ export default function Exchanges() {
 
   const validateForm = (): string | null => {
     if (!originalProduct) return 'Selecciona el producto original';
-    if (!newProduct) return 'Selecciona el producto nuevo';
-    if (originalProduct.id === newProduct.id) return 'Los productos deben ser diferentes';
+
+    // Para cambios pendientes, no se requiere producto nuevo
+    if (exchangeType !== 'pending') {
+      if (!newProduct) return 'Selecciona el producto nuevo';
+      if (originalProduct.id === newProduct.id) return 'Los productos deben ser diferentes';
+      if (newQuantity <= 0) return 'La cantidad nueva debe ser mayor a 0';
+
+      // Validar stock del producto nuevo
+      if (newProduct.stock < newQuantity) {
+        return `Stock insuficiente de ${newProduct.name}. Disponible: ${newProduct.stock}`;
+      }
+
+      // Validar IDs únicas del producto nuevo
+      if (newProduct.use_unit_ids) {
+        if (!newProduct.registered_ids || newProduct.registered_ids.length < newQuantity) {
+          return `No hay suficientes IDs únicas disponibles de ${newProduct.name}`;
+        }
+        if (newUnitIds.length !== newQuantity) {
+          return `Debes seleccionar ${newQuantity} ID(s) única(s) del producto nuevo`;
+        }
+      }
+    }
+
     if (originalQuantity <= 0) return 'La cantidad original debe ser mayor a 0';
-    if (newQuantity <= 0) return 'La cantidad nueva debe ser mayor a 0';
-    
-    // Validar stock del producto nuevo
-    if (newProduct.stock < newQuantity) {
-      return `Stock insuficiente de ${newProduct.name}. Disponible: ${newProduct.stock}`;
-    }
-    
-    // Validar IDs únicas del producto nuevo
-    if (newProduct.use_unit_ids) {
-      if (!newProduct.registered_ids || newProduct.registered_ids.length < newQuantity) {
-        return `No hay suficientes IDs únicas disponibles de ${newProduct.name}`;
-      }
-      if (newUnitIds.length !== newQuantity) {
-        return `Debes seleccionar ${newQuantity} ID(s) única(s) del producto nuevo`;
-      }
-    }
-    
+
     // Validar IDs únicas del producto original si es cambio directo
     if (exchangeType === 'direct' && originalProduct.use_unit_ids) {
       if (originalUnitIds.length !== originalQuantity) {
         return `Debes especificar ${originalQuantity} ID(s) única(s) del producto original`;
       }
     }
-    
-    // Validar método de pago si hay diferencia
-    const difference = calculatePriceDifference();
-    if (difference !== 0) {
-      const totalPayment = paymentCash + paymentTransfer;
-      if (Math.abs(totalPayment - Math.abs(difference)) > 0.01) {
-        return `El total (Efectivo + Transferencia) debe ser igual a la diferencia: ${formatCOP(Math.abs(difference))}`;
+
+    // Validar método de pago si hay diferencia (solo para cambios no pendientes)
+    if (exchangeType !== 'pending') {
+      const difference = calculatePriceDifference();
+      if (difference !== 0) {
+        const totalPayment = paymentCash + paymentTransfer + paymentOther;
+        if (Math.abs(totalPayment - Math.abs(difference)) > 0.01) {
+          return `El total de pagos debe ser igual a la diferencia: ${formatCOP(Math.abs(difference))}`;
+        }
       }
     }
-    
+
     return null;
   };
 
@@ -262,49 +295,88 @@ export default function Exchanges() {
       return;
     }
 
-    if (!originalProduct || !newProduct || !currentUser) return;
+    if (!originalProduct || !currentUser) return;
+    if (exchangeType !== 'pending' && !newProduct) return;
 
     setIsLoading(true);
     try {
-      const priceDifference = calculatePriceDifference();
       const originalTotal = originalPrice * originalQuantity;
-      const newTotal = newPrice * newQuantity;
 
-      const exchangeData = {
-        date: getColombiaDateTime().toISOString(), // Usar fecha y hora de Colombia (GMT-5)
-        type: exchangeType,
-        invoice_id: exchangeType === 'invoice' ? selectedInvoice?.id : undefined,
-        invoice_number: exchangeType === 'invoice' ? selectedInvoice?.number : undefined,
-        customer_name: exchangeType === 'invoice' ? selectedInvoice?.customer_name : undefined,
-        original_product_id: originalProduct.id,
-        original_product_name: originalProduct.name,
-        original_quantity: originalQuantity,
-        original_price: originalPrice,
-        original_total: originalTotal,
-        original_unit_ids: originalProduct.use_unit_ids ? originalUnitIds : undefined,
-        new_product_id: newProduct.id,
-        new_product_name: newProduct.name,
-        new_quantity: newQuantity,
-        new_price: newPrice,
-        new_total: newTotal,
-        new_unit_ids: newProduct.use_unit_ids ? newUnitIds : undefined,
-        price_difference: priceDifference,
-        payment_method: priceDifference !== 0 ? (paymentCash > 0 && paymentTransfer > 0 ? 'Mixto' : paymentCash > 0 ? 'Efectivo' : 'Transferencia') : undefined,
-        payment_amount: Math.abs(priceDifference),
-        payment_cash: paymentCash,
-        payment_transfer: paymentTransfer,
-        notes: notes || undefined,
-        registered_by: currentUser.username,
-      };
+      if (exchangeType === 'pending') {
+        // Para cambios pendientes, solo registrar el producto original
+        const exchangeData = {
+          date: getColombiaDateTime().toISOString(),
+          type: exchangeType,
+          status: 'pending' as const,
+          invoice_id: undefined,
+          invoice_number: undefined,
+          customer_name: undefined,
+          original_product_id: originalProduct.id,
+          original_product_name: originalProduct.name,
+          original_quantity: originalQuantity,
+          original_price: originalPrice,
+          original_total: originalTotal,
+          original_unit_ids: originalProduct.use_unit_ids ? originalUnitIds : undefined,
+          notes: notes || undefined,
+          registered_by: currentUser.username,
+        };
 
-      const result = await addExchange(exchangeData);
+        const result = await addExchange(exchangeData);
 
-      if (result) {
-        toast.success('Cambio registrado exitosamente');
-        setIsDialogOpen(false);
-        loadData();
+        if (result) {
+          toast.success('Cambio pendiente registrado exitosamente');
+          setIsDialogOpen(false);
+          loadData();
+        } else {
+          toast.error('Error al registrar el cambio pendiente');
+        }
       } else {
-        toast.error('Error al registrar el cambio');
+        // Para cambios directos o por factura
+        const priceDifference = calculatePriceDifference();
+        const newTotal = newPrice * newQuantity;
+
+        const exchangeData = {
+          date: getColombiaDateTime().toISOString(),
+          type: exchangeType,
+          status: 'completed' as const,
+          invoice_id: exchangeType === 'invoice' ? selectedInvoice?.id : undefined,
+          invoice_number: exchangeType === 'invoice' ? selectedInvoice?.number : undefined,
+          customer_name: exchangeType === 'invoice' ? selectedInvoice?.customer_name : undefined,
+          original_product_id: originalProduct.id,
+          original_product_name: originalProduct.name,
+          original_quantity: originalQuantity,
+          original_price: originalPrice,
+          original_total: originalTotal,
+          original_unit_ids: originalProduct.use_unit_ids ? originalUnitIds : undefined,
+          new_product_id: newProduct!.id,
+          new_product_name: newProduct!.name,
+          new_quantity: newQuantity,
+          new_price: newPrice,
+          new_total: newTotal,
+          new_unit_ids: newProduct!.use_unit_ids ? newUnitIds : undefined,
+          price_difference: priceDifference,
+          payment_method: priceDifference !== 0 ? (
+            (paymentCash > 0 ? 1 : 0) + (paymentTransfer > 0 ? 1 : 0) + (paymentOther > 0 ? 1 : 0) > 1
+              ? 'Mixto'
+              : paymentCash > 0 ? 'Efectivo' : paymentTransfer > 0 ? 'Transferencia' : 'Otro'
+          ) : undefined,
+          payment_amount: Math.abs(priceDifference),
+          payment_cash: paymentCash,
+          payment_transfer: paymentTransfer,
+          payment_other: paymentOther,
+          notes: notes || undefined,
+          registered_by: currentUser.username,
+        };
+
+        const result = await addExchange(exchangeData);
+
+        if (result) {
+          toast.success('Cambio registrado exitosamente');
+          setIsDialogOpen(false);
+          loadData();
+        } else {
+          toast.error('Error al registrar el cambio');
+        }
       }
     } catch (error) {
       console.error('Error submitting exchange:', error);
@@ -441,6 +513,7 @@ export default function Exchanges() {
                     <tr className="border-b border-border">
                       <th className="text-left py-3 px-3 text-sm font-medium">Número</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Fecha</th>
+                      <th className="text-left py-3 px-3 text-sm font-medium">Estado</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Tipo</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Producto Original</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Producto Nuevo</th>
@@ -458,11 +531,24 @@ export default function Exchanges() {
                         </td>
                         <td className="py-3 px-3">
                           <span className={`px-2 py-1 text-xs rounded-full ${
+                            exchange.status === 'completed'
+                              ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                              : exchange.status === 'pending'
+                              ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300'
+                              : 'bg-gray-100 dark:bg-gray-900 text-gray-700 dark:text-gray-300'
+                          }`}>
+                            {exchange.status === 'completed' ? 'Completado' : exchange.status === 'pending' ? 'Pendiente' : 'Cancelado'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3">
+                          <span className={`px-2 py-1 text-xs rounded-full ${
                             exchange.type === 'invoice'
                               ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                              : exchange.type === 'pending'
+                              ? 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300'
                               : 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
                           }`}>
-                            {exchange.type === 'invoice' ? 'Por Factura' : 'Directo'}
+                            {exchange.type === 'invoice' ? 'Por Factura' : exchange.type === 'pending' ? 'En Espera' : 'Directo'}
                           </span>
                         </td>
                         <td className="py-3 px-3 text-sm">
@@ -472,35 +558,101 @@ export default function Exchanges() {
                           </div>
                         </td>
                         <td className="py-3 px-3 text-sm">
-                          <div>{exchange.new_product_name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            Cant: {exchange.new_quantity} × COP {formatCOP(exchange.new_price)}
-                          </div>
+                          {exchange.new_product_name ? (
+                            <>
+                              <div>{exchange.new_product_name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                Cant: {exchange.new_quantity} × COP {formatCOP(exchange.new_price)}
+                              </div>
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted-foreground italic">Por definir</span>
+                          )}
                         </td>
                         <td className="py-3 px-3 text-right">
-                          <span className={`text-sm font-medium ${
-                            exchange.price_difference > 0
-                              ? 'text-green-600 dark:text-green-400'
-                              : exchange.price_difference < 0
-                              ? 'text-orange-600 dark:text-orange-400'
-                              : 'text-muted-foreground'
-                          }`}>
-                            {exchange.price_difference > 0 ? '+' : ''}
-                            COP {formatCOP(Math.abs(exchange.price_difference))}
-                          </span>
+                          {exchange.price_difference !== undefined && exchange.price_difference !== null ? (
+                            <span className={`text-sm font-medium ${
+                              exchange.price_difference > 0
+                                ? 'text-green-600 dark:text-green-400'
+                                : exchange.price_difference < 0
+                                ? 'text-orange-600 dark:text-orange-400'
+                                : 'text-muted-foreground'
+                            }`}>
+                              {exchange.price_difference > 0 ? '+' : ''}
+                              COP {formatCOP(Math.abs(exchange.price_difference))}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground italic">-</span>
+                          )}
                         </td>
                         <td className="py-3 px-3 text-sm">{exchange.registered_by}</td>
                         <td className="py-3 px-3">
                           <div className="flex items-center justify-center gap-2">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => handleDelete(exchange.id, exchange.exchange_number)}
-                              disabled={isLoading}
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
+                            {exchange.status === 'pending' ? (
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => {
+                                    setExchangeToFinalize(exchange);
+                                    setFinalizeNewProduct(null);
+                                    setFinalizeNewQuantity(1);
+                                    setFinalizeNewPrice(0);
+                                    setFinalizeNewUnitIds([]);
+                                    setFinalizePaymentCash(0);
+                                    setFinalizePaymentTransfer(0);
+                                    setFinalizePaymentOther(0);
+                                    setFinalizeDialogOpen(true);
+                                  }}
+                                  disabled={isLoading}
+                                  className="text-green-600 hover:text-green-700 hover:bg-green-50 dark:hover:bg-green-950/30"
+                                  title="Finalizar cambio"
+                                >
+                                  <CheckCircle className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={async () => {
+                                    if (confirm(`¿Cancelar el cambio ${exchange.exchange_number}?\n\nSe restaurará el stock del producto original.`)) {
+                                      setIsLoading(true);
+                                      try {
+                                        const success = await cancelExchange(exchange.id);
+                                        if (success) {
+                                          toast.success('Cambio cancelado exitosamente');
+                                          await loadData();
+                                        } else {
+                                          toast.error('Error al cancelar el cambio');
+                                        }
+                                      } catch (error) {
+                                        console.error('Error canceling exchange:', error);
+                                        toast.error('Error al cancelar el cambio');
+                                      } finally {
+                                        setIsLoading(false);
+                                      }
+                                    }
+                                  }}
+                                  disabled={isLoading}
+                                  className="text-orange-600 hover:text-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950/30"
+                                  title="Cancelar cambio"
+                                >
+                                  <XCircle className="h-4 w-4" />
+                                </Button>
+                              </>
+                            ) : exchange.status === 'completed' ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleDelete(exchange.id, exchange.exchange_number)}
+                                disabled={isLoading}
+                                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                title="Eliminar cambio"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">-</span>
+                            )}
                           </div>
                         </td>
                       </tr>
@@ -557,7 +709,7 @@ export default function Exchanges() {
             {/* Tipo de Cambio */}
             <div className="space-y-2">
               <Label>Tipo de Cambio</Label>
-              <Select value={exchangeType} onValueChange={(value: 'invoice' | 'direct') => {
+              <Select value={exchangeType} onValueChange={(value: 'invoice' | 'direct' | 'pending') => {
                 setExchangeType(value);
                 resetForm();
                 setExchangeType(value);
@@ -568,6 +720,7 @@ export default function Exchanges() {
                 <SelectContent>
                   <SelectItem value="direct">Cambio Directo</SelectItem>
                   <SelectItem value="invoice">Cambio por Factura</SelectItem>
+                  <SelectItem value="pending">En espera de cambio</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -599,7 +752,7 @@ export default function Exchanges() {
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className={`grid gap-6 ${exchangeType === 'pending' ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
               {/* Producto Original */}
               <div className="space-y-4 p-4 border border-border rounded-lg">
                 <h3 className="font-semibold text-lg">Producto que Devuelve</h3>
@@ -716,9 +869,10 @@ export default function Exchanges() {
                 )}
               </div>
 
-              {/* Producto Nuevo */}
-              <div className="space-y-4 p-4 border border-border rounded-lg">
-                <h3 className="font-semibold text-lg">Producto que Lleva</h3>
+              {/* Producto Nuevo - Ocultar cuando es pending */}
+              {exchangeType !== 'pending' && (
+                <div className="space-y-4 p-4 border border-border rounded-lg">
+                  <h3 className="font-semibold text-lg">Producto que Lleva</h3>
                 
                 <div className="space-y-2">
                   <Label>Producto Nuevo</Label>
@@ -828,11 +982,12 @@ export default function Exchanges() {
                     </div>
                   </>
                 )}
-              </div>
+                </div>
+              )}
             </div>
 
-            {/* Diferencia de Precio */}
-            {originalProduct && newProduct && (
+            {/* Diferencia de Precio - Solo para cambios no pendientes */}
+            {exchangeType !== 'pending' && originalProduct && newProduct && (
               <div className="p-4 border-2 border-dashed rounded-lg">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-semibold text-lg">Diferencia de Precio</h3>
@@ -852,7 +1007,7 @@ export default function Exchanges() {
                     <p className="text-sm font-medium text-green-700 dark:text-green-300">
                       Cliente paga diferencia
                     </p>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <div className="space-y-2">
                         <Label>Efectivo</Label>
                         <Input
@@ -875,12 +1030,34 @@ export default function Exchanges() {
                           className="text-lg font-semibold"
                         />
                       </div>
+                      <div className="space-y-2">
+                        <Label>Nequi</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={paymentOther || ''}
+                          onChange={(e) => setPaymentOther(parseFloat(e.target.value) || 0)}
+                          className="text-lg font-semibold"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Daviplata</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          disabled
+                          title="Usar el campo Nequi para Daviplata y otros"
+                          className="text-lg font-semibold opacity-50"
+                        />
+                      </div>
                     </div>
                     <div className="p-2 bg-green-50 dark:bg-green-950/30 rounded">
                       <p className="text-xs text-green-700 dark:text-green-300">
-                        Total ingresado: <span className="font-bold">COP {formatCOP(paymentCash + paymentTransfer)}</span>
+                        Total ingresado: <span className="font-bold">COP {formatCOP(paymentCash + paymentTransfer + paymentOther)}</span>
                       </p>
-                      {Math.abs((paymentCash + paymentTransfer) - priceDifference) > 0.01 && (
+                      {Math.abs((paymentCash + paymentTransfer + paymentOther) - priceDifference) > 0.01 && (
                         <p className="text-xs text-red-600 dark:text-red-400 mt-1">
                           ⚠️ Debe sumar exactamente COP {formatCOP(priceDifference)}
                         </p>
@@ -894,7 +1071,7 @@ export default function Exchanges() {
                     <p className="text-sm font-medium text-orange-700 dark:text-orange-300">
                       Se devuelve al cliente
                     </p>
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                       <div className="space-y-2">
                         <Label>Efectivo</Label>
                         <Input
@@ -917,12 +1094,34 @@ export default function Exchanges() {
                           className="text-lg font-semibold"
                         />
                       </div>
+                      <div className="space-y-2">
+                        <Label>Nequi</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          value={paymentOther || ''}
+                          onChange={(e) => setPaymentOther(parseFloat(e.target.value) || 0)}
+                          className="text-lg font-semibold"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Daviplata</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          placeholder="0"
+                          disabled
+                          title="Usar el campo Nequi para Daviplata y otros"
+                          className="text-lg font-semibold opacity-50"
+                        />
+                      </div>
                     </div>
                     <div className="p-2 bg-orange-50 dark:bg-orange-950/30 rounded">
                       <p className="text-xs text-orange-700 dark:text-orange-300">
-                        Total a devolver: <span className="font-bold">COP {formatCOP(paymentCash + paymentTransfer)}</span>
+                        Total a devolver: <span className="font-bold">COP {formatCOP(paymentCash + paymentTransfer + paymentOther)}</span>
                       </p>
-                      {Math.abs((paymentCash + paymentTransfer) - Math.abs(priceDifference)) > 0.01 && (
+                      {Math.abs((paymentCash + paymentTransfer + paymentOther) - Math.abs(priceDifference)) > 0.01 && (
                         <p className="text-xs text-red-600 dark:text-red-400 mt-1">
                           ⚠️ Debe sumar exactamente COP {formatCOP(Math.abs(priceDifference))}
                         </p>
@@ -939,16 +1138,18 @@ export default function Exchanges() {
               </div>
             )}
 
-            {/* Notas */}
-            <div className="space-y-2">
-              <Label>Notas (Opcional)</Label>
-              <Textarea
-                placeholder="Información adicional sobre el cambio..."
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-              />
-            </div>
+            {/* Notas - Mostrar solo para cambios pendientes */}
+            {exchangeType === 'pending' && (
+              <div className="space-y-2">
+                <Label>Notas {exchangeType === 'pending' && '(Requerido para cambios pendientes)'}</Label>
+                <Textarea
+                  placeholder="Información adicional sobre el cambio pendiente..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                />
+              </div>
+            )}
 
             {/* Botones */}
             <div className="flex justify-end gap-3">
@@ -1122,6 +1323,341 @@ export default function Exchanges() {
               Cancelar
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Finalización de Cambio Pendiente */}
+      <Dialog open={finalizeDialogOpen} onOpenChange={setFinalizeDialogOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Finalizar Cambio Pendiente</DialogTitle>
+            <DialogDescription>
+              Complete la información del producto nuevo y el método de pago
+            </DialogDescription>
+          </DialogHeader>
+
+          {exchangeToFinalize && (
+            <div className="space-y-6">
+              {/* Información del Producto Devuelto */}
+              <div className="p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
+                <h3 className="font-semibold text-lg mb-3 text-green-900 dark:text-green-100">
+                  Producto Devuelto
+                </h3>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div>
+                    <span className="text-muted-foreground">Producto:</span>
+                    <p className="font-semibold">{exchangeToFinalize.original_product_name}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Cantidad:</span>
+                    <p className="font-semibold">{exchangeToFinalize.original_quantity}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Precio Unitario:</span>
+                    <p className="font-semibold">COP {formatCOP(exchangeToFinalize.original_price)}</p>
+                  </div>
+                  <div>
+                    <span className="text-muted-foreground">Total:</span>
+                    <p className="font-semibold text-green-600 dark:text-green-400">
+                      COP {formatCOP(exchangeToFinalize.original_total)}
+                    </p>
+                  </div>
+                </div>
+                {exchangeToFinalize.notes && (
+                  <div className="mt-3 pt-3 border-t border-green-200 dark:border-green-800">
+                    <span className="text-muted-foreground text-sm">Notas:</span>
+                    <p className="text-sm mt-1">{exchangeToFinalize.notes}</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Selector de Producto Nuevo */}
+              <div className="space-y-4 p-4 border border-border rounded-lg">
+                <h3 className="font-semibold text-lg">Producto que Lleva el Cliente</h3>
+
+                <div className="space-y-2">
+                  <Label>Producto Nuevo</Label>
+                  {finalizeNewProduct ? (
+                    <div className="p-3 border border-blue-500 dark:border-blue-600 rounded-lg bg-blue-50 dark:bg-blue-950/30">
+                      <div className="flex items-start justify-between mb-2">
+                        <div className="flex-1">
+                          <p className="font-semibold text-blue-900 dark:text-blue-100">{finalizeNewProduct.name}</p>
+                          <p className="text-xs text-blue-700 dark:text-blue-300">{finalizeNewProduct.code}</p>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setFinalizeNewProduct(null)}
+                          className="text-red-500 hover:text-red-700"
+                        >
+                          ✕
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <span className="text-muted-foreground">Stock:</span>
+                          <span className="ml-1 font-medium">{finalizeNewProduct.stock}</span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Precio:</span>
+                          <span className="ml-1 font-medium">COP {formatCOP(finalizeNewProduct.final_price)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full h-20 border-dashed border-2 hover:bg-blue-50 dark:hover:bg-blue-950/20 hover:border-blue-500"
+                      onClick={() => {
+                        setSelectingFor('new');
+                        setProductSearchTerm('');
+                        setProductSelectorOpen(true);
+                      }}
+                    >
+                      <div className="flex flex-col items-center gap-2">
+                        <Package className="h-6 w-6 text-muted-foreground" />
+                        <span className="text-sm font-medium">SELECCIONAR PRODUCTO</span>
+                      </div>
+                    </Button>
+                  )}
+                </div>
+
+                {finalizeNewProduct && (
+                  <>
+                    <div className="space-y-2">
+                      <Label>Cantidad</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max={finalizeNewProduct.stock}
+                        value={finalizeNewQuantity}
+                        onChange={(e) => {
+                          const qty = parseInt(e.target.value) || 1;
+                          setFinalizeNewQuantity(qty);
+                          if (finalizeNewProduct.use_unit_ids && finalizeNewProduct.registered_ids) {
+                            const ids = extractIds(finalizeNewProduct.registered_ids);
+                            setFinalizeNewUnitIds(ids.slice(0, qty));
+                          }
+                        }}
+                      />
+                      <p className="text-xs text-muted-foreground">Stock disponible: {finalizeNewProduct.stock}</p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Precio Unitario</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={finalizeNewPrice}
+                        onChange={(e) => setFinalizeNewPrice(parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+
+                    <div className="p-3 bg-muted rounded-lg">
+                      <p className="text-sm font-medium">Total Nuevo Producto:</p>
+                      <p className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                        COP {formatCOP(finalizeNewPrice * finalizeNewQuantity)}
+                      </p>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {/* Diferencia de Precio y Métodos de Pago */}
+              {finalizeNewProduct && (() => {
+                const newTotal = finalizeNewPrice * finalizeNewQuantity;
+                const originalTotal = exchangeToFinalize.original_total;
+                const difference = newTotal - originalTotal;
+
+                return (
+                  <div className="p-4 border-2 border-dashed rounded-lg">
+                    <div className="flex items-center justify-between mb-4">
+                      <h3 className="font-semibold text-lg">Diferencia de Precio</h3>
+                      <div className={`text-2xl font-bold ${
+                        difference > 0
+                          ? 'text-green-600 dark:text-green-400'
+                          : difference < 0
+                          ? 'text-orange-600 dark:text-orange-400'
+                          : 'text-muted-foreground'
+                      }`}>
+                        {difference > 0 ? '+' : ''}COP {formatCOP(Math.abs(difference))}
+                      </div>
+                    </div>
+
+                    {difference !== 0 && (
+                      <div className="space-y-4">
+                        <p className={`text-sm font-medium ${
+                          difference > 0
+                            ? 'text-green-700 dark:text-green-300'
+                            : 'text-orange-700 dark:text-orange-300'
+                        }`}>
+                          {difference > 0 ? 'Cliente paga diferencia' : 'Se devuelve al cliente'}
+                        </p>
+
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                          <div className="space-y-2">
+                            <Label>Efectivo</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              placeholder="0"
+                              value={finalizePaymentCash || ''}
+                              onChange={(e) => setFinalizePaymentCash(parseFloat(e.target.value) || 0)}
+                              className="text-lg font-semibold"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Transferencia</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              placeholder="0"
+                              value={finalizePaymentTransfer || ''}
+                              onChange={(e) => setFinalizePaymentTransfer(parseFloat(e.target.value) || 0)}
+                              className="text-lg font-semibold"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label>Nequi / Daviplata</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              placeholder="0"
+                              value={finalizePaymentOther || ''}
+                              onChange={(e) => setFinalizePaymentOther(parseFloat(e.target.value) || 0)}
+                              className="text-lg font-semibold"
+                            />
+                          </div>
+                          <div className="space-y-2">
+                            <Label className="opacity-50">Otro</Label>
+                            <Input
+                              type="number"
+                              min="0"
+                              placeholder="0"
+                              disabled
+                              title="Usar el campo Nequi/Daviplata"
+                              className="text-lg font-semibold opacity-50"
+                            />
+                          </div>
+                        </div>
+
+                        <div className={`p-2 rounded ${
+                          difference > 0
+                            ? 'bg-green-50 dark:bg-green-950/30'
+                            : 'bg-orange-50 dark:bg-orange-950/30'
+                        }`}>
+                          <p className={`text-xs ${
+                            difference > 0
+                              ? 'text-green-700 dark:text-green-300'
+                              : 'text-orange-700 dark:text-orange-300'
+                          }`}>
+                            Total ingresado: <span className="font-bold">
+                              COP {formatCOP(finalizePaymentCash + finalizePaymentTransfer + finalizePaymentOther)}
+                            </span>
+                          </p>
+                          {Math.abs((finalizePaymentCash + finalizePaymentTransfer + finalizePaymentOther) - Math.abs(difference)) > 0.01 && (
+                            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                              ⚠️ Debe sumar exactamente COP {formatCOP(Math.abs(difference))}
+                            </p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {difference === 0 && (
+                      <p className="text-sm text-muted-foreground">
+                        No hay diferencia de precio
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
+              {/* Botones */}
+              <div className="flex justify-end gap-3">
+                <Button variant="outline" onClick={() => setFinalizeDialogOpen(false)} disabled={isLoading}>
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={async () => {
+                    if (!finalizeNewProduct) {
+                      toast.error('Selecciona el producto nuevo');
+                      return;
+                    }
+
+                    const newTotal = finalizeNewPrice * finalizeNewQuantity;
+                    const difference = newTotal - exchangeToFinalize.original_total;
+
+                    if (difference !== 0) {
+                      const totalPayment = finalizePaymentCash + finalizePaymentTransfer + finalizePaymentOther;
+                      if (Math.abs(totalPayment - Math.abs(difference)) > 0.01) {
+                        toast.error(`El total de pagos debe ser igual a la diferencia: ${formatCOP(Math.abs(difference))}`);
+                        return;
+                      }
+                    }
+
+                    if (finalizeNewProduct.stock < finalizeNewQuantity) {
+                      toast.error(`Stock insuficiente de ${finalizeNewProduct.name}`);
+                      return;
+                    }
+
+                    setIsLoading(true);
+                    try {
+                      // Calcular payment_method
+                      const paymentCount = (finalizePaymentCash > 0 ? 1 : 0) +
+                                          (finalizePaymentTransfer > 0 ? 1 : 0) +
+                                          (finalizePaymentOther > 0 ? 1 : 0);
+
+                      let calculatedPaymentMethod = undefined;
+                      if (difference !== 0) {
+                        if (paymentCount > 1) {
+                          calculatedPaymentMethod = 'Mixto';
+                        } else if (finalizePaymentCash > 0) {
+                          calculatedPaymentMethod = 'Efectivo';
+                        } else if (finalizePaymentTransfer > 0) {
+                          calculatedPaymentMethod = 'Transferencia';
+                        } else if (finalizePaymentOther > 0) {
+                          calculatedPaymentMethod = 'Nequi';
+                        }
+                      }
+
+                      const success = await finalizeExchange(
+                        exchangeToFinalize.id,
+                        {
+                          new_product_id: finalizeNewProduct.id,
+                          new_product_name: finalizeNewProduct.name,
+                          new_quantity: finalizeNewQuantity,
+                          new_price: finalizeNewPrice,
+                          new_unit_ids: finalizeNewProduct.use_unit_ids ? finalizeNewUnitIds : undefined,
+                          payment_method: calculatedPaymentMethod,
+                          payment_cash: finalizePaymentCash,
+                          payment_transfer: finalizePaymentTransfer,
+                          payment_other: finalizePaymentOther,
+                        }
+                      );
+
+                      if (success) {
+                        toast.success('Cambio finalizado exitosamente');
+                        setFinalizeDialogOpen(false);
+                        await loadData();
+                      } else {
+                        toast.error('Error al finalizar el cambio');
+                      }
+                    } catch (error) {
+                      console.error('Error finalizing exchange:', error);
+                      toast.error('Error al procesar la finalización');
+                    } finally {
+                      setIsLoading(false);
+                    }
+                  }}
+                  disabled={isLoading}
+                >
+                  {isLoading ? 'Procesando...' : 'Finalizar Cambio'}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>
