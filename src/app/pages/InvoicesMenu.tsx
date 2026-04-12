@@ -700,11 +700,11 @@ export function InvoicesMenu() {
         <div className="max-w-6xl mx-auto">
           <Card className="border-zinc-200 dark:border-zinc-800">
             <CardHeader className="border-b border-zinc-200 dark:border-zinc-800 space-y-4">
-              <div className="flex items-center justify-between">
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="w-5 h-5" />
-                  Facturas realizadas
-                  <Badge variant="outline" className="ml-2 bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                <CardTitle className="flex items-center gap-2 flex-wrap">
+                  <FileText className="w-5 h-5 flex-shrink-0" />
+                  <span className="text-base sm:text-lg">Facturas realizadas</span>
+                  <Badge variant="outline" className="bg-green-50 dark:bg-green-950 text-green-700 dark:text-green-400 border-green-200 dark:border-green-800">
                     {getFilteredInvoices().length} {getFilteredInvoices().length === 1 ? 'factura' : 'facturas'}
                   </Badge>
                 </CardTitle>
@@ -715,10 +715,10 @@ export function InvoicesMenu() {
                 <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
                 <Input
                   type="text"
-                  placeholder="Buscar por número de factura o nombre del cliente..."
+                  placeholder="Buscar factura o cliente..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
+                  className="pl-10 text-sm"
                 />
               </div>
 
@@ -817,7 +817,7 @@ export function InvoicesMenu() {
                     setPaymentFilter('all');
                     setStatusFilter('all');
                   }}
-                  className="text-xs"
+                  className="text-xs w-full sm:w-auto"
                 >
                   <X className="w-3 h-3 mr-1" />
                   Limpiar filtros
@@ -826,93 +826,93 @@ export function InvoicesMenu() {
             </CardHeader>
             <CardContent className="p-0">
               {loading ? (
-                <div className="text-center py-12 text-zinc-500 dark:text-zinc-400">
+                <div className="text-center py-8 sm:py-12 px-4 text-zinc-500 dark:text-zinc-400">
                   <Loader2 className="w-8 h-8 mx-auto mb-3 animate-spin" />
-                  <p>Cargando facturas...</p>
+                  <p className="text-sm sm:text-base">Cargando facturas...</p>
                 </div>
               ) : getFilteredInvoices().length === 0 ? (
-                <div className="text-center py-12 text-zinc-500 dark:text-zinc-400">
-                  <FileText className="w-16 h-16 mx-auto mb-4 text-zinc-300 dark:text-zinc-700" />
-                  <p className="text-lg font-medium">No hay facturas</p>
-                  <p className="text-sm mt-1">No se encontraron facturas con los filtros aplicados</p>
+                <div className="text-center py-8 sm:py-12 px-4 text-zinc-500 dark:text-zinc-400">
+                  <FileText className="w-12 h-12 sm:w-16 sm:h-16 mx-auto mb-4 text-zinc-300 dark:text-zinc-700" />
+                  <p className="text-base sm:text-lg font-medium">No hay facturas</p>
+                  <p className="text-xs sm:text-sm mt-1">No se encontraron facturas con los filtros aplicados</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full min-w-[640px]">
                     <thead className="bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
                       <tr>
-                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Factura</th>
-                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Cliente</th>
-                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Tipo</th>
-                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Total</th>
-                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Método Pago</th>
-                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Estado</th>
-                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Fecha</th>
-                        <th className="text-center text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Acción</th>
+                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-2 sm:px-4 py-3 whitespace-nowrap">Factura</th>
+                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-2 sm:px-4 py-3 whitespace-nowrap">Cliente</th>
+                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-2 sm:px-4 py-3 hidden lg:table-cell whitespace-nowrap">Tipo</th>
+                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-2 sm:px-4 py-3 whitespace-nowrap">Total</th>
+                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-2 sm:px-4 py-3 hidden md:table-cell whitespace-nowrap">Método Pago</th>
+                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-2 sm:px-4 py-3 whitespace-nowrap">Estado</th>
+                        <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-2 sm:px-4 py-3 hidden xl:table-cell whitespace-nowrap">Fecha</th>
+                        <th className="text-center text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-2 sm:px-4 py-3 whitespace-nowrap">Acción</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
                       {getFilteredInvoices().map((invoice) => (
-                        <tr 
+                        <tr
                           key={invoice.id}
                           className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors"
                         >
-                          <td className="px-4 py-3">
-                            <span className="text-sm font-mono font-semibold text-zinc-900 dark:text-zinc-100">
+                          <td className="px-2 sm:px-4 py-3 whitespace-nowrap">
+                            <span className="text-xs sm:text-sm font-mono font-semibold text-zinc-900 dark:text-zinc-100">
                               #{invoice.number}
                             </span>
                           </td>
-                          <td className="px-4 py-3">
-                            <div className="text-sm text-zinc-900 dark:text-zinc-100">
+                          <td className="px-2 sm:px-4 py-3">
+                            <div className="text-xs sm:text-sm text-zinc-900 dark:text-zinc-100 truncate max-w-[150px] sm:max-w-none">
                               {invoice.customer_name || 'Sin cliente'}
                             </div>
                             {invoice.customer_document && (
-                              <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                              <div className="text-xs text-zinc-500 dark:text-zinc-400 hidden sm:block">
                                 {invoice.customer_document}
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-2 sm:px-4 py-3 hidden lg:table-cell whitespace-nowrap">
                             {invoice.is_credit ? (
-                              <Badge variant="outline" className="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800">
+                              <Badge variant="outline" className="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800 text-xs">
                                 <CreditCard className="w-3 h-3 mr-1" />
                                 Crédito
                               </Badge>
                             ) : invoice.type === 'wholesale' ? (
-                              <Badge variant="outline" className="bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800">
+                              <Badge variant="outline" className="bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800 text-xs">
                                 Al Mayor
                               </Badge>
                             ) : (
-                              <Badge variant="outline" className="bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
+                              <Badge variant="outline" className="bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 text-xs">
                                 Regular
                               </Badge>
                             )}
                           </td>
-                          <td className="px-4 py-3">
-                            <span className="text-sm font-bold text-green-600 dark:text-green-400">
+                          <td className="px-2 sm:px-4 py-3 whitespace-nowrap">
+                            <span className="text-xs sm:text-sm font-bold text-green-600 dark:text-green-400">
                               {formatCOP(invoice.total)}
                             </span>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-2 sm:px-4 py-3 hidden md:table-cell whitespace-nowrap">
                             {invoice.payment_method ? (
                               <>
                                 {invoice.payment_method.toLowerCase().includes('efectivo') ? (
-                                  <Badge variant="outline" className="bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
+                                  <Badge variant="outline" className="bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 text-xs">
                                     <Banknote className="w-3 h-3 mr-1" />
                                     Efectivo
                                   </Badge>
                                 ) : invoice.payment_method.toLowerCase().includes('transferencia') ? (
-                                  <Badge variant="outline" className="bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800">
+                                  <Badge variant="outline" className="bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800 text-xs">
                                     <ArrowRightLeft className="w-3 h-3 mr-1" />
                                     Transferencia
                                   </Badge>
                                 ) : invoice.payment_method.toLowerCase().includes('nequi') ? (
-                                  <Badge variant="outline" className="bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800">
+                                  <Badge variant="outline" className="bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800 text-xs">
                                     <ArrowRightLeft className="w-3 h-3 mr-1" />
                                     Nequi
                                   </Badge>
                                 ) : invoice.payment_method.toLowerCase().includes('daviplata') ? (
-                                  <Badge variant="outline" className="bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800">
+                                  <Badge variant="outline" className="bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-400 border-amber-200 dark:border-amber-800 text-xs">
                                     <ArrowRightLeft className="w-3 h-3 mr-1" />
                                     Daviplata
                                   </Badge>
@@ -926,46 +926,47 @@ export function InvoicesMenu() {
                               <span className="text-xs text-zinc-400 dark:text-zinc-600">-</span>
                             )}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-2 sm:px-4 py-3 whitespace-nowrap">
                             {invoice.status === 'paid' ? (
-                              <Badge variant="outline" className="bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
+                              <Badge variant="outline" className="bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 text-xs">
                                 <CheckCircle className="w-3 h-3 mr-1" />
-                                Pagada
+                                <span className="hidden sm:inline">Pagada</span>
                               </Badge>
                             ) : invoice.status === 'returned' ? (
-                              <Badge variant="outline" className="bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800">
+                              <Badge variant="outline" className="bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-400 border-red-200 dark:border-red-800 text-xs">
                                 <RotateCcw className="w-3 h-3 mr-1" />
-                                Devolución
+                                <span className="hidden sm:inline">Devolución</span>
                               </Badge>
                             ) : invoice.status === 'partial_return' ? (
-                              <Badge variant="outline" className="bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800">
+                              <Badge variant="outline" className="bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800 text-xs">
                                 <AlertTriangle className="w-3 h-3 mr-1" />
-                                Devolución Parcial
+                                <span className="hidden sm:inline">Devolución Parcial</span>
                               </Badge>
                             ) : invoice.status === 'pending_confirmation' ? (
-                              <Badge variant="outline" className="bg-yellow-50 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800">
+                              <Badge variant="outline" className="bg-yellow-50 dark:bg-yellow-950 text-yellow-700 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800 text-xs">
                                 <Clock className="w-3 h-3 mr-1" />
-                                Confirmación
+                                <span className="hidden sm:inline">Confirmación</span>
                               </Badge>
                             ) : (
-                              <Badge variant="outline" className="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-400 border-slate-200 dark:border-slate-800">
+                              <Badge variant="outline" className="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-400 border-slate-200 dark:border-slate-800 text-xs">
                                 <Clock className="w-3 h-3 mr-1" />
-                                Pendiente
+                                <span className="hidden sm:inline">Pendiente</span>
                               </Badge>
                             )}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-2 sm:px-4 py-3 hidden xl:table-cell whitespace-nowrap">
                             <span className="text-xs text-zinc-500 dark:text-zinc-400">
                               {extractColombiaDateTime(invoice.date)}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-center">
+                          <td className="px-2 sm:px-4 py-3 text-center whitespace-nowrap">
                             <div className="flex gap-1 justify-center">
                               <Button
                                 variant="ghost"
                                 size="sm"
                                 onClick={() => handlePreviewInvoice(invoice)}
-                                className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                                className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 h-8 w-8 p-0"
+                                title="Ver"
                               >
                                 <Eye className="w-4 h-4" />
                               </Button>
@@ -980,7 +981,8 @@ export function InvoicesMenu() {
                                   setSelectedInvoice(invoice);
                                   setShowPrintSelectionModal(true);
                                 }}
-                                className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300"
+                                className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 h-8 w-8 p-0"
+                                title="Imprimir"
                               >
                                 <Printer className="w-4 h-4" />
                               </Button>
@@ -1280,32 +1282,95 @@ export function InvoicesMenu() {
                 <div>
                   <div className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-2">Productos</div>
                   <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead className="bg-zinc-50 dark:bg-zinc-900">
-                        <tr>
-                          <th className="text-left px-3 py-2 text-zinc-600 dark:text-zinc-400">Producto</th>
-                          <th className="text-center px-3 py-2 text-zinc-600 dark:text-zinc-400">Cant.</th>
-                          <th className="text-right px-3 py-2 text-zinc-600 dark:text-zinc-400">Precio</th>
-                          <th className="text-right px-3 py-2 text-zinc-600 dark:text-zinc-400">Total</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                        {selectedInvoice.items.map((item: any, idx: number) => (
-                          <tr key={idx}>
-                            <td className="px-3 py-2">
-                              <div className="font-medium text-zinc-900 dark:text-zinc-100">{item.productName || item.product_name || 'Sin nombre'}</div>
-                              {item.productCode && (
-                                <div className="text-xs text-zinc-500 dark:text-zinc-400">{item.productCode}</div>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-center text-zinc-700 dark:text-zinc-300">{item.quantity}</td>
-                            <td className="px-3 py-2 text-right text-zinc-700 dark:text-zinc-300">{formatCOP(item.price)}</td>
-                            <td className="px-3 py-2 text-right font-medium text-zinc-900 dark:text-zinc-100">{formatCOP(item.total || item.subtotal || (item.price * item.quantity))}</td>
+                    <div className="max-h-[400px] overflow-y-auto">
+                      <table className="w-full text-sm">
+                        <thead className="bg-zinc-50 dark:bg-zinc-900 sticky top-0 z-10">
+                          <tr>
+                            <th className="text-left px-3 py-2 text-zinc-600 dark:text-zinc-400">Producto</th>
+                            <th className="text-center px-3 py-2 text-zinc-600 dark:text-zinc-400">Cant.</th>
+                            <th className="text-right px-3 py-2 text-zinc-600 dark:text-zinc-400">Precio</th>
+                            <th className="text-right px-3 py-2 text-zinc-600 dark:text-zinc-400">Total</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                          {selectedInvoice.items.map((item: any, idx: number) => (
+                            <tr key={idx}>
+                              <td className="px-3 py-2 bg-white dark:bg-zinc-950">
+                                <div className="font-medium text-zinc-900 dark:text-zinc-100">{item.productName || item.product_name || 'Sin nombre'}</div>
+                                {item.productCode && (
+                                  <div className="text-xs text-zinc-500 dark:text-zinc-400">{item.productCode}</div>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 text-center text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-950">{item.quantity}</td>
+                              <td className="px-3 py-2 text-right text-zinc-700 dark:text-zinc-300 bg-white dark:bg-zinc-950">{formatCOP(item.price)}</td>
+                              <td className="px-3 py-2 text-right font-medium text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950">{formatCOP(item.total || item.subtotal || (item.price * item.quantity))}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
+
+                  {/* Métodos de Pago */}
+                  {selectedInvoice.payment_method && (
+                    <div className="mt-4 border border-zinc-200 dark:border-zinc-800 rounded-lg p-4 bg-zinc-50 dark:bg-zinc-900/50">
+                      <div className="text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">Métodos de Pago</div>
+                      <div className="space-y-2">
+                        {selectedInvoice.payment_cash !== undefined && selectedInvoice.payment_cash > 0 && (
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800 text-xs">
+                                <Banknote className="w-3 h-3 mr-1" />
+                                Efectivo
+                              </Badge>
+                            </div>
+                            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                              {formatCOP(selectedInvoice.payment_cash)}
+                            </span>
+                          </div>
+                        )}
+                        {selectedInvoice.payment_transfer !== undefined && selectedInvoice.payment_transfer > 0 && (
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-400 border-sky-200 dark:border-sky-800 text-xs">
+                                <ArrowRightLeft className="w-3 h-3 mr-1" />
+                                Transferencia
+                              </Badge>
+                            </div>
+                            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                              {formatCOP(selectedInvoice.payment_transfer)}
+                            </span>
+                          </div>
+                        )}
+                        {selectedInvoice.payment_other !== undefined && selectedInvoice.payment_other > 0 && (
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="bg-purple-50 dark:bg-purple-950 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800 text-xs">
+                                <ArrowRightLeft className="w-3 h-3 mr-1" />
+                                Nequi/Daviplata
+                              </Badge>
+                            </div>
+                            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                              {formatCOP(selectedInvoice.payment_other)}
+                            </span>
+                          </div>
+                        )}
+                        {/* Fallback para facturas antiguas sin campos separados */}
+                        {(!selectedInvoice.payment_cash && !selectedInvoice.payment_transfer && !selectedInvoice.payment_other) && selectedInvoice.payment_method && (
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800 text-xs">
+                                {selectedInvoice.payment_method}
+                              </Badge>
+                            </div>
+                            <span className="font-semibold text-zinc-900 dark:text-zinc-100">
+                              {formatCOP(selectedInvoice.total)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="mt-4 border-t border-zinc-200 dark:border-zinc-800 pt-4">
                     <div className="flex justify-between text-lg font-bold">

@@ -287,14 +287,14 @@ export function Closures() {
     const previousMonthInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
       const invDate = extractColombiaDate(inv.date);
-      return invDate.substring(0, 7) === previousMonthStr && inv.status === 'paid';
+      return invDate.substring(0, 7) === previousMonthStr && (inv.status === 'paid' || inv.status === 'partial_return');
     });
     const previousMonthRevenue = previousMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
     const currentMonthInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
       const invDate = extractColombiaDate(inv.date);
-      return invDate.substring(0, 7) === currentMonthStr && inv.status === 'paid';
+      return invDate.substring(0, 7) === currentMonthStr && (inv.status === 'paid' || inv.status === 'partial_return');
     });
     const currentMonthRevenue = currentMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
