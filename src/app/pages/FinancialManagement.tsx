@@ -452,19 +452,42 @@ export function FinancialManagement() {
 
       const monthInvoices = invoices.filter(inv => extractColombiaDate(inv.date).startsWith(monthStr));
       const monthExpenses = expenses.filter(exp => extractColombiaDate(exp.date).startsWith(monthStr));
+      const monthExchanges = exchanges.filter(ex => extractColombiaDate(ex.date).startsWith(monthStr));
 
       // Incluir todas las facturas pagadas (regulares y crédito) + devoluciones parciales
-      const ingresos = monthInvoices
-        .filter(inv => inv.status === 'paid' || inv.status === 'partial_return')
-        .reduce((sum, inv) => sum + inv.total, 0);
+      const paidInvoices = monthInvoices.filter(inv => inv.status === 'paid' || inv.status === 'partial_return');
+      const facturasPagas = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
+
+      // Calcular impacto de cambios del mes
+      const impactoCambios = monthExchanges.reduce((sum, exchange) => {
+        if (exchange.price_difference > 0) {
+          return sum + exchange.price_difference;
+        } else if (exchange.price_difference < 0) {
+          return sum + exchange.price_difference;
+        }
+        return sum;
+      }, 0);
+
+      const ingresos = facturasPagas + impactoCambios;
 
       const gastos = monthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+
+      // Calcular costos de productos vendidos en el mes
+      let costos = 0;
+      paidInvoices.forEach(invoice => {
+        invoice.items.forEach(item => {
+          const product = products.find(p => p.id === item.productId);
+          if (product && product.current_cost) {
+            costos += product.current_cost * item.quantity;
+          }
+        });
+      });
 
       last6Months.push({
         month: date.toLocaleDateString('es-CO', { month: 'short' }),
         ingresos,
         gastos,
-        ganancias: ingresos - gastos
+        ganancias: ingresos - gastos - costos
       });
     }
 
