@@ -129,6 +129,7 @@ export function FinancialManagement() {
   const [ingresosOpen, setIngresosOpen] = useState(false);
   const [egresosOpen, setEgresosOpen] = useState(false);
   const [cuentasPorCobrarOpen, setCuentasPorCobrarOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // Filtros para modales
   const [searchTerm, setSearchTerm] = useState('');
@@ -439,6 +440,166 @@ export function FinancialManagement() {
     }, 300);
   };
 
+  const handleExportReport = () => {
+    setIsExporting(true);
+    try {
+      const doc = new jsPDF();
+      const companyName = getCurrentCompany() === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
+      const pageWidth = doc.internal.pageSize.getWidth();
+      const stats = getStats();
+      const topListsData = getTopLists();
+
+      // Header
+      doc.setFontSize(18);
+      doc.setFont('helvetica', 'bold');
+      doc.text(companyName, pageWidth / 2, 20, { align: 'center' });
+
+      doc.setFontSize(14);
+      doc.text('Reporte Financiero', pageWidth / 2, 28, { align: 'center' });
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Fecha: ${new Date().toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' })}`, pageWidth / 2, 35, { align: 'center' });
+
+      let y = 45;
+
+      // Overview Financiero
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Overview Financiero', 20, y);
+      y += 8;
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Ingresos del Mes: ${formatCOP(stats.currentMonth.ingresoNeto)}`, 20, y);
+      y += 6;
+      doc.text(`Gastos del Mes: ${formatCOP(stats.currentMonth.totalGastos)}`, 20, y);
+      y += 6;
+      doc.text(`Ganancias Netas: ${formatCOP(stats.currentMonth.ganancias)}`, 20, y);
+      y += 6;
+      doc.text(`Margen de Ganancia: ${stats.currentMonth.margen.toFixed(1)}%`, 20, y);
+      y += 10;
+
+      // Comparación con mes anterior
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(9);
+      doc.text(`Ingresos vs mes anterior: ${stats.ingresosChange >= 0 ? '+' : ''}${stats.ingresosChange.toFixed(1)}%`, 20, y);
+      y += 5;
+      doc.text(`Gastos vs mes anterior: ${stats.gastosChange >= 0 ? '+' : ''}${stats.gastosChange.toFixed(1)}%`, 20, y);
+      y += 5;
+      doc.text(`Ganancias vs mes anterior: ${stats.gananciasChange >= 0 ? '+' : ''}${stats.gananciasChange.toFixed(1)}%`, 20, y);
+      y += 12;
+
+      // Desglose Financiero
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Desglose Financiero', 20, y);
+      y += 8;
+
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Facturas Pagas: ${formatCOP(stats.currentMonth.facturasPagas)}`, 25, y);
+      y += 6;
+      if (stats.currentMonth.impactoCambios !== 0) {
+        doc.text(`Impacto de Cambios: ${stats.currentMonth.impactoCambios > 0 ? '+' : ''}${formatCOP(stats.currentMonth.impactoCambios)}`, 25, y);
+        y += 6;
+      }
+      doc.text(`Costos de Productos: ${formatCOP(stats.currentMonth.totalCostos)}`, 25, y);
+      y += 6;
+      doc.text(`Gastos Operativos: ${formatCOP(stats.currentMonth.totalGastos)}`, 25, y);
+      y += 12;
+
+      // Top 5 Gastos
+      if (topListsData.topExpenses.length > 0) {
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Top 5 Gastos del Mes', 20, y);
+        y += 8;
+
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        topListsData.topExpenses.forEach((expense: any, idx: number) => {
+          if (y > 270) {
+            doc.addPage();
+            y = 20;
+          }
+          doc.text(`${idx + 1}. ${expense.description} - ${formatCOP(expense.amount)}`, 25, y);
+          y += 5;
+        });
+        y += 7;
+      }
+
+      // Top 5 Facturas
+      if (topListsData.topInvoices.length > 0) {
+        if (y > 240) {
+          doc.addPage();
+          y = 20;
+        }
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Top 5 Facturas Más Grandes', 20, y);
+        y += 8;
+
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        topListsData.topInvoices.forEach((invoice: any, idx: number) => {
+          if (y > 270) {
+            doc.addPage();
+            y = 20;
+          }
+          const customerName = invoice.customer_name || 'Cliente general';
+          doc.text(`${idx + 1}. ${invoice.number} - ${customerName} - ${formatCOP(invoice.total)}`, 25, y);
+          y += 5;
+        });
+        y += 7;
+      }
+
+      // Top 5 Clientes
+      if (topListsData.topCustomers.length > 0) {
+        if (y > 240) {
+          doc.addPage();
+          y = 20;
+        }
+        doc.setFontSize(12);
+        doc.setFont('helvetica', 'bold');
+        doc.text('Top 5 Mejores Clientes', 20, y);
+        y += 8;
+
+        doc.setFontSize(9);
+        doc.setFont('helvetica', 'normal');
+        topListsData.topCustomers.forEach((customer: any, idx: number) => {
+          if (y > 270) {
+            doc.addPage();
+            y = 20;
+          }
+          doc.text(`${idx + 1}. ${customer.name} - ${customer.count} compras - ${formatCOP(customer.total)}`, 25, y);
+          y += 5;
+        });
+      }
+
+      // Footer en cada página
+      const pageCount = doc.getNumberOfPages();
+      for (let i = 1; i <= pageCount; i++) {
+        doc.setPage(i);
+        doc.setFontSize(8);
+        doc.setFont('helvetica', 'italic');
+        doc.text(`Página ${i} de ${pageCount}`, pageWidth / 2, 285, { align: 'center' });
+        doc.text(`Generado con Gestión de Finanzas - ${companyName}`, pageWidth / 2, 290, { align: 'center' });
+      }
+
+      // Generar nombre de archivo con fecha
+      const fileName = `Reporte_Financiero_${new Date().toISOString().slice(0, 10)}.pdf`;
+      doc.save(fileName);
+
+      toast.success('Reporte exportado exitosamente');
+    } catch (error) {
+      console.error('Error al exportar reporte:', error);
+      toast.error('Error al generar el reporte');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   // Get chart data
   const getChartData = () => {
     const stats = getStats();
@@ -613,9 +774,13 @@ export function FinancialManagement() {
                 Panel de control financiero y análisis de rendimiento
               </p>
             </div>
-            <Button className="bg-emerald-600 hover:bg-emerald-700">
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-700"
+              onClick={handleExportReport}
+              disabled={isExporting}
+            >
               <Download className="w-4 h-4 mr-2" />
-              Exportar Reporte
+              {isExporting ? 'Generando...' : 'Exportar Reporte'}
             </Button>
           </div>
         </div>
