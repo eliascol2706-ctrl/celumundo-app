@@ -541,7 +541,7 @@ export function CustomersNew() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => navigate(`/customers/${customer.document}`)}
+                              onClick={() => navigate(`/clientes/${customer.document}`)}
                               className="hover:bg-emerald-50 hover:border-emerald-300"
                             >
                               <Eye className="w-4 h-4" />

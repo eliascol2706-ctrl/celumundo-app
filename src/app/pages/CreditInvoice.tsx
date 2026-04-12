@@ -1262,7 +1262,7 @@ export function CreditInvoice() {
           overdueDays={warningData.overdueDays}
           onRegisterPayment={() => {
             setShowWarningModal(false);
-            navigate(`/customers/${selectedCustomer.document}`);
+            navigate(`/clientes/${selectedCustomer.document}`);
           }}
           onContinueAnyway={() => {
             // Solo admin puede continuar

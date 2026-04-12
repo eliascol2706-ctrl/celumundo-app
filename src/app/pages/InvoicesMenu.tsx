@@ -16,6 +16,7 @@ import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
 
 export function InvoicesMenu() {
   const navigate = useNavigate();
+  const currentUser = getCurrentUser();
   const [stats, setStats] = useState({
     regularToday: 0,
     creditToday: 0,
@@ -51,7 +52,7 @@ export function InvoicesMenu() {
   const [periodFilter, setPeriodFilter] = useState<'today' | 'yesterday' | 'currentMonth' | 'previousMonth' | 'all'>('today');
   const [sortBy, setSortBy] = useState<'recent' | 'oldest' | 'highest' | 'lowest'>('recent');
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'efectivo' | 'transferencia' | 'nequi' | 'daviplata' | 'otros' | 'mixto'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending_confirmation' | 'pending'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending_confirmation' | 'pending' | 'partial_return'>('all');
 
   useEffect(() => {
     loadStats();
@@ -205,9 +206,10 @@ export function InvoicesMenu() {
     // Filtrar por estado
     if (statusFilter !== 'all') {
       filtered = filtered.filter(inv => {
-        if (statusFilter === 'paid') return inv.status === 'paid' || inv.status === 'partial_return';
+        if (statusFilter === 'paid') return inv.status === 'paid';
         if (statusFilter === 'pending_confirmation') return inv.status === 'pending_confirmation';
         if (statusFilter === 'pending') return inv.is_credit && inv.status === 'pending';
+        if (statusFilter === 'partial_return') return inv.status === 'partial_return';
         return true;
       });
     }
@@ -800,6 +802,7 @@ export function InvoicesMenu() {
                       <SelectItem value="paid">Pagadas</SelectItem>
                       <SelectItem value="pending_confirmation">En confirmación</SelectItem>
                       <SelectItem value="pending">Pendiente por crédito</SelectItem>
+                      <SelectItem value="partial_return">Parcialmente devueltas</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -997,17 +1000,19 @@ export function InvoicesMenu() {
             </CardContent>
           </Card>
 
-          {/* Botón de Historial */}
-          <div className="mt-6 text-center">
-            <Button 
-              variant="outline" 
-              onClick={() => navigate('/facturacion/historial')}
-              className="px-8 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-zinc-300 dark:border-zinc-700"
-            >
-              <FileText className="w-4 h-4 mr-2" />
-              Historial Completo de Facturas
-            </Button>
-          </div>
+          {/* Botón de Gestión de Finanzas - Solo para Admin */}
+          {currentUser?.role === 'admin' && (
+            <div className="mt-6 text-center">
+              <Button
+                variant="outline"
+                onClick={() => navigate('/facturacion/historial')}
+                className="px-8 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-zinc-300 dark:border-zinc-700"
+              >
+                <FileText className="w-4 h-4 mr-2" />
+                Gestión de Finanzas
+              </Button>
+            </div>
+          )}
         </div>
       </div>
 

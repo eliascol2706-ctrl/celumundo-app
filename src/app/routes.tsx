@@ -7,7 +7,7 @@ import { Products } from './pages/Products';
 import { InvoicesMenu } from './pages/InvoicesMenu';
 import { RegularInvoice } from './pages/RegularInvoice';
 import { CreditInvoice } from './pages/CreditInvoice';
-import { InvoicesHistory } from './pages/InvoicesHistory';
+import { FinancialManagement } from './pages/FinancialManagement';
 import { Movements } from './pages/Movements';
 import { Expenses } from './pages/Expenses';
 import { Reports } from './pages/Reports';
@@ -93,11 +93,11 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'facturacion/historial', 
+      {
+        path: 'facturacion/historial',
         element: (
-          <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <InvoicesHistory />
+          <ProtectedRoute allowedRoles={['admin']}>
+            <FinancialManagement />
           </ProtectedRoute>
         )
       },
@@ -141,8 +141,8 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'customers/:document', 
+      {
+        path: 'clientes/:document',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
             <CustomerProfile />

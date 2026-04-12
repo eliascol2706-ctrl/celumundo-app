@@ -173,9 +173,10 @@ export interface MonthlyClosure {
   company: 'celumundo' | 'repuestos';
   month: string;
   year: number;
-  total_revenue: number;
+  total_revenue: number; // Ingresos netos del mes (facturas pagadas y parcialmente devueltas)
   total_invoices: number;
   daily_closures_count: number;
+  real_profit?: number; // Ganancias reales (ventas - costo productos - gastos)
   closed_by: string;
   closed_at: string;
   created_at?: string;
@@ -1691,6 +1692,171 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
   return data;
 };
 
+/**
+ * Revierte una devolución, devolviendo los productos al inventario de la factura
+ */
+export const revertReturn = async (returnId: string): Promise<boolean> => {
+  try {
+    // Obtener la devolución
+    const { data: returnData, error: returnError } = await supabase
+      .from('returns')
+      .select('*')
+      .eq('id', returnId)
+      .single();
+
+    if (returnError || !returnData) {
+      console.error('Error obteniendo devolución:', returnError);
+      return false;
+    }
+
+    // Obtener la factura original
+    const { data: invoice, error: invoiceError } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('id', returnData.invoice_id)
+      .single();
+
+    if (invoiceError || !invoice) {
+      console.error('Error obteniendo factura:', invoiceError);
+      return false;
+    }
+
+    // Procesar cada item devuelto
+    for (const item of returnData.items) {
+      // Crear movimiento de salida (restar del inventario)
+      await addMovement({
+        type: 'exit',
+        product_id: item.productId,
+        product_name: item.productName,
+        quantity: item.quantity,
+        reason: 'Reversión de devolución',
+        reference: `Factura ${returnData.invoice_number}`,
+        user_name: getCurrentUser()?.username || 'Sistema',
+        unit_ids: item.unitIds || []
+      });
+
+      // Actualizar stock y IDs registradas (restar del stock)
+      const { data: product } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', item.productId)
+        .single();
+
+      if (product) {
+        const newStock = product.stock - item.quantity;
+        let newRegisteredIds = product.registered_ids || [];
+
+        // Si el producto usa IDs únicas, eliminarlas del array
+        if (product.use_unit_ids && item.unitIds && item.unitIds.length > 0) {
+          newRegisteredIds = newRegisteredIds.filter((id: string) => !item.unitIds!.includes(id));
+        }
+
+        await updateProduct(item.productId, {
+          stock: newStock,
+          registered_ids: newRegisteredIds
+        });
+      }
+    }
+
+    // Obtener todas las devoluciones de esta factura (excluyendo la actual)
+    const allReturns = await getReturnsByInvoice(returnData.invoice_id);
+    const otherReturns = allReturns.filter(r => r.id !== returnId);
+
+    // Reconstruir los items de la factura agregando los items revertidos
+    const currentItems = invoice.items as InvoiceItem[];
+    const updatedItems = [...currentItems];
+
+    // Agregar de vuelta los items de la devolución
+    returnData.items.forEach((returnItem: any) => {
+      const existingItemIndex = updatedItems.findIndex(
+        (invItem) => invItem.productId === returnItem.productId
+      );
+
+      if (existingItemIndex >= 0) {
+        // El producto ya existe en la factura, aumentar la cantidad
+        updatedItems[existingItemIndex] = {
+          ...updatedItems[existingItemIndex],
+          quantity: updatedItems[existingItemIndex].quantity + returnItem.quantity,
+          total: (updatedItems[existingItemIndex].quantity + returnItem.quantity) * updatedItems[existingItemIndex].price
+        };
+      } else {
+        // El producto no existe, agregarlo
+        updatedItems.push({
+          productId: returnItem.productId,
+          productName: returnItem.productName,
+          productCode: returnItem.productCode || '',
+          quantity: returnItem.quantity,
+          price: returnItem.price,
+          total: returnItem.quantity * returnItem.price,
+          useUnitIds: returnItem.useUnitIds || false,
+          unitIds: returnItem.unitIds || []
+        });
+      }
+    });
+
+    // Recalcular totales
+    const newSubtotal = updatedItems.reduce((sum, item) => sum + item.total, 0);
+    const taxRate = invoice.subtotal > 0 ? invoice.tax / invoice.subtotal : 0;
+    const newTax = newSubtotal * taxRate;
+    const newTotal = newSubtotal + newTax;
+
+    // Determinar el nuevo estado de la factura
+    let newStatus: 'paid' | 'partial_return' | 'returned' = 'paid';
+
+    if (otherReturns.length > 0) {
+      // Hay otras devoluciones, verificar si son totales o parciales
+      const totalReturnedItems: { [key: string]: number } = {};
+      otherReturns.forEach(ret => {
+        ret.items.forEach(item => {
+          totalReturnedItems[item.productId] = (totalReturnedItems[item.productId] || 0) + item.quantity;
+        });
+      });
+
+      // Verificar si todos los productos están devueltos
+      const allReturned = updatedItems.every(item => {
+        const returnedQty = totalReturnedItems[item.productId] || 0;
+        return returnedQty >= item.quantity;
+      });
+
+      newStatus = allReturned ? 'returned' : 'partial_return';
+    }
+
+    // Actualizar la factura
+    const { error: updateError } = await supabase
+      .from('invoices')
+      .update({
+        status: newStatus,
+        items: updatedItems,
+        subtotal: newSubtotal,
+        tax: newTax,
+        total: newTotal
+      })
+      .eq('id', returnData.invoice_id);
+
+    if (updateError) {
+      console.error('Error actualizando factura:', updateError);
+      return false;
+    }
+
+    // Eliminar el registro de devolución
+    const { error: deleteError } = await supabase
+      .from('returns')
+      .delete()
+      .eq('id', returnId);
+
+    if (deleteError) {
+      console.error('Error eliminando devolución:', deleteError);
+      return false;
+    }
+
+    console.log(`[revertReturn] Devolución ${returnData.return_number} revertida exitosamente`);
+    return true;
+  } catch (error) {
+    console.error('Error revirtiendo devolución:', error);
+    return false;
+  }
+};
+
 export const getReturnsStats = async () => {
   const returns = await getReturns();
   const invoices = await getInvoices();
@@ -1725,9 +1891,9 @@ export const calculateNetRevenue = (invoices: Invoice[], returns: Return[], exch
   let totalTransfer = 0;
   let totalOthers = 0;
 
-  // Sumar pagos de facturas pagadas (no créditos pendientes)
+  // Sumar pagos de facturas pagadas (incluye crédito pagado y devoluciones parciales)
   invoices
-    .filter(inv => inv.status === 'paid' && !inv.is_credit)
+    .filter(inv => inv.status === 'paid' || inv.status === 'partial_return')
     .forEach(invoice => {
       const paymentStr = invoice.payment_method || '';
 
@@ -1787,7 +1953,6 @@ export const calculateNetRevenue = (invoices: Invoice[], returns: Return[], exch
     });
 
   const totalRevenue = totalCash + totalTransfer + totalOthers;
-  const totalReturns = returns.reduce((sum, ret) => sum + ret.total, 0);
 
   // Calcular impacto de CAMBIOS
   // - Si price_difference > 0: El cliente pagó más (SUMA)
@@ -1802,7 +1967,9 @@ export const calculateNetRevenue = (invoices: Invoice[], returns: Return[], exch
     return sum; // Sin impacto si es 0
   }, 0);
 
-  return totalRevenue - totalReturns + exchangesImpact;
+  // No restamos totalReturns porque las facturas 'returned' ya no se cuentan en totalRevenue
+  // Solo incluimos facturas 'paid' y 'partial_return'
+  return totalRevenue + exchangesImpact;
 };
 
 // ============================================
@@ -2632,13 +2799,14 @@ export const calculateExchangeImpact = (exchanges: Exchange[]): number => {
  * Calcula los ingresos netos considerando cambios
  */
 export const calculateNetRevenueWithExchanges = (invoices: Invoice[], exchanges: Exchange[]): number => {
+  // Solo incluir facturas pagadas y con devolución parcial (no las completamente devueltas)
   const totalRevenue = invoices
-    .filter(inv => inv.status === 'paid' || inv.status === 'partial_return' || inv.status === 'returned')
+    .filter(inv => inv.status === 'paid' || inv.status === 'partial_return')
     .reduce((sum, inv) => sum + inv.total, 0);
-  
+
   // Sumar el impacto de los cambios (positivo si se cobró, negativo si se devolvió)
   const exchangeImpact = calculateExchangeImpact(exchanges);
-  
+
   return totalRevenue + exchangeImpact;
 };
 

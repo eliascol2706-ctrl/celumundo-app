@@ -24,6 +24,10 @@ interface MonthlyClosureDialogProps {
     comparisonData: any[];
     dailySalesData: any[];
     creditComparisonData: any[];
+    netRevenue: number;
+    totalProductCost: number;
+    realProfit: number;
+    currentMonthRevenue: number;
   };
   onSuccess: () => void;
 }
@@ -68,17 +72,16 @@ export function MonthlyClosureDialog({
       try {
         const currentMonth = new Date().toISOString().substring(0, 7);
         const currentYear = new Date().getFullYear();
-        const closuresIds = monthlyStats.closures.map(c => c.id);
 
         await addMonthlyClosure({
           month: currentMonth,
           year: currentYear,
-          totalRevenue: monthlyStats.totalRevenue,
-          totalInvoices: monthlyStats.totalInvoices,
-          totalPendingCredit: monthlyStats.totalPendingCredit,
-          dailyClosures: closuresIds,
-          closedBy: closedByName.trim(),
-          closedAt: new Date().toISOString(),
+          total_revenue: monthlyStats.netRevenue, // Ingresos netos (facturas pagadas + parcialmente devueltas)
+          total_invoices: monthlyStats.totalInvoices,
+          daily_closures_count: monthlyStats.closures.length,
+          real_profit: monthlyStats.realProfit, // Ganancias reales (ventas - costos - gastos)
+          closed_by: closedByName.trim(),
+          closed_at: new Date().toISOString(),
         });
 
         setIsLoading(false);
@@ -293,25 +296,92 @@ export function MonthlyClosureDialog({
                   <Card>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Ganancias
+                        Ganancias Reales
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
                       <div className={`text-2xl font-bold ${
-                        (monthlyStats.totalRevenue - monthlyStats.totalExpenses) >= 0
+                        monthlyStats.realProfit >= 0
                           ? 'text-blue-600 dark:text-blue-400'
                           : 'text-red-600 dark:text-red-400'
                       }`}>
-                        COP {formatCOP(monthlyStats.totalRevenue - monthlyStats.totalExpenses)}
+                        COP {formatCOP(monthlyStats.realProfit)}
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Ingresos - Gastos
+                        Ventas - Costos - Gastos
                       </p>
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                        Gastos: COP {formatCOP(monthlyStats.totalExpenses)}
-                      </p>
+                      <div className="mt-2 space-y-1">
+                        <p className="text-xs text-zinc-600 dark:text-zinc-400">
+                          Costo productos: COP {formatCOP(monthlyStats.totalProductCost)}
+                        </p>
+                        <p className="text-xs text-red-600 dark:text-red-400">
+                          Gastos: COP {formatCOP(monthlyStats.totalExpenses)}
+                        </p>
+                      </div>
                     </CardContent>
                   </Card>
+                </div>
+
+                {/* Ingresos Netos Card - Full Width */}
+                <Card className="bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-950/30 dark:to-green-950/30 border-emerald-200 dark:border-emerald-800">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base font-semibold text-emerald-900 dark:text-emerald-100">
+                      Ingresos Netos del Mes
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                      <div className="flex-1 space-y-6">
+                        <div>
+                          <div className="text-4xl font-bold text-emerald-600 dark:text-emerald-400">
+                            COP {formatCOP(monthlyStats.netRevenue)}
+                          </div>
+                          <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-2">
+                            Total de facturas pagadas y parcialmente devueltas
+                          </p>
+                        </div>
+
+                        <div className="pt-4 border-t border-emerald-300 dark:border-emerald-700">
+                          <div className={`text-3xl font-bold ${
+                            (monthlyStats.netRevenue - monthlyStats.totalExpenses) >= 0
+                              ? 'text-blue-600 dark:text-blue-400'
+                              : 'text-red-600 dark:text-red-400'
+                          }`}>
+                            COP {formatCOP(monthlyStats.netRevenue - monthlyStats.totalExpenses)}
+                          </div>
+                          <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-2">
+                            Ingresos netos restando gastos del mes
+                          </p>
+                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">
+                            Gastos: COP {formatCOP(monthlyStats.totalExpenses)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex-shrink-0 bg-white/50 dark:bg-zinc-900/50 p-4 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                        <div className="text-sm space-y-1">
+                          <p className="text-zinc-600 dark:text-zinc-400">
+                            Este valor incluye:
+                          </p>
+                          <ul className="list-disc list-inside space-y-1 text-zinc-700 dark:text-zinc-300">
+                            <li>Facturas pagadas completamente</li>
+                            <li>Facturas con devolución parcial</li>
+                          </ul>
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2 pt-2 border-t border-emerald-200 dark:border-emerald-800">
+                            Las devoluciones completas no se cuentan ya que la factura pasa a estado "Devuelta"
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Nota explicativa */}
+                <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                  <p className="text-sm text-blue-800 dark:text-blue-200">
+                    <strong>Nota:</strong> Los <strong>Ingresos Totales del Mes</strong> (basados en los cierres diarios) y los <strong>Ingresos Netos</strong> no siempre concordarán exactamente.
+                    Los Ingresos Netos evalúan factura por factura considerando solo aquellas que están pagadas o con devolución parcial, excluyendo automáticamente las devoluciones completas,
+                    lo que proporciona un cálculo más exacto y preciso del dinero realmente obtenido en el mes.
+                  </p>
                 </div>
 
                 {/* Closures Summary */}

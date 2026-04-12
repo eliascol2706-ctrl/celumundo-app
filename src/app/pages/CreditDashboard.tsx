@@ -131,7 +131,7 @@ export function CreditDashboard() {
           <p className="text-sm text-zinc-500 mt-1">Panel de control de cartera de clientes</p>
         </div>
         <Button 
-          onClick={() => navigate('/customers')}
+          onClick={() => navigate('/clientes')}
           className="bg-emerald-600 hover:bg-emerald-700"
         >
           <Users className="w-4 h-4 mr-2" />
@@ -230,7 +230,7 @@ export function CreditDashboard() {
                   <div 
                     key={debtor.id}
                     className="p-4 hover:bg-zinc-50 transition-colors cursor-pointer flex items-center justify-between"
-                    onClick={() => navigate(`/customers/${debtor.document}`)}
+                    onClick={() => navigate(`/clientes/${debtor.document}`)}
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-2">

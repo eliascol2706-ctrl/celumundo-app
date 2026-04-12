@@ -97,10 +97,22 @@ export function Dashboard() {
           .filter(i => i.is_credit && i.status === 'pending')
           .length;
 
+        // Calcular impacto de cambios para totalRevenue
+        const exchangesImpact = exchanges.reduce((sum, exchange) => {
+          if (exchange.price_difference > 0) {
+            return sum + exchange.price_difference;
+          } else if (exchange.price_difference < 0) {
+            return sum + exchange.price_difference;
+          }
+          return sum;
+        }, 0);
+
+        const invoicesTotalRevenue = invoices.filter(i => i.status === 'paid' || i.status === 'partial_return').reduce((sum, inv) => sum + inv.total, 0);
+
         setStats({
           totalProducts: products.length,
           totalInvoices: invoices.length,
-          totalRevenue: invoices.filter(i => i.status === 'paid' || i.status === 'partial_return').reduce((sum, inv) => sum + inv.total, 0),
+          totalRevenue: invoicesTotalRevenue + exchangesImpact,
           lowStockProducts: lowStock.length,
           recentMovements: recentMovs.length,
           totalExpenses,

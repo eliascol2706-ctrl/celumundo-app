@@ -12,7 +12,7 @@ export function AgingReport() {
       {/* Header */}
       <div className="border-b border-zinc-200 bg-white">
         <div className="p-6">
-          <Button variant="ghost" onClick={() => navigate('/customers')} className="mb-4">
+          <Button variant="ghost" onClick={() => navigate('/clientes')} className="mb-4">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Volver a Clientes
           </Button>

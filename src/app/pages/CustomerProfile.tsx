@@ -71,14 +71,38 @@ export function CustomerProfile() {
 
       if (!customerData) {
         toast.error('Cliente no encontrado');
-        navigate('/customers');
+        navigate('/clientes');
         return;
       }
 
-      setCustomer(customerData);
       const customerInvoices = allInvoices.filter(
         (inv) => inv.customer_document === document && inv.is_credit
       );
+
+      // Calcular el estado correcto del cliente basándose en sus facturas
+      let calculatedStatus: 'active' | 'overdue' | 'blocked' = 'active';
+
+      if (customerData.blocked) {
+        calculatedStatus = 'blocked';
+      } else {
+        // Verificar si tiene facturas pendientes vencidas
+        const today = new Date();
+        const hasOverdueInvoices = customerInvoices.some((inv) => {
+          if (inv.status !== 'pending' || !inv.due_date) return false;
+          const dueDate = new Date(inv.due_date);
+          return dueDate < today;
+        });
+
+        calculatedStatus = hasOverdueInvoices ? 'overdue' : 'active';
+      }
+
+      // Si el estado calculado es diferente al guardado, actualizar en la base de datos
+      if (calculatedStatus !== customerData.status) {
+        await updateCustomer(customerData.id, { status: calculatedStatus });
+        customerData.status = calculatedStatus;
+      }
+
+      setCustomer(customerData);
       setInvoices(customerInvoices);
       setHistory(historyData);
     } catch (error) {
@@ -100,7 +124,27 @@ export function CustomerProfile() {
     if (!confirm(confirmMessage)) return;
 
     setIsUpdating(true);
-    const result = await updateCustomer(customer.id, { blocked: newBlockedStatus });
+
+    // Calcular el nuevo estado
+    let newStatus: 'active' | 'overdue' | 'blocked';
+    if (newBlockedStatus) {
+      newStatus = 'blocked';
+    } else {
+      // Si se desbloquea, verificar si tiene facturas vencidas
+      const today = new Date();
+      const hasOverdueInvoices = invoices.some((inv) => {
+        if (inv.status !== 'pending' || !inv.due_date) return false;
+        const dueDate = new Date(inv.due_date);
+        return dueDate < today;
+      });
+      newStatus = hasOverdueInvoices ? 'overdue' : 'active';
+    }
+
+    const result = await updateCustomer(customer.id, {
+      blocked: newBlockedStatus,
+      status: newStatus
+    });
+
     if (result) {
       await addCreditHistory({
         customer_document: customer.document,
@@ -222,7 +266,7 @@ export function CustomerProfile() {
       {/* Header */}
       <div className="border-b border-zinc-200 bg-white">
         <div className="p-6">
-          <Button variant="ghost" onClick={() => navigate('/customers')} className="mb-4">
+          <Button variant="ghost" onClick={() => navigate('/clientes')} className="mb-4">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Volver a Clientes
           </Button>

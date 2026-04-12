@@ -1,0 +1,1354 @@
+import {
+  getInvoices,
+  getColombiaDate,
+  extractColombiaDate,
+  extractColombiaDateTime,
+  getCurrentCompany,
+  getCreditPaymentsByInvoice,
+  getReturns,
+  getExchanges,
+  getProducts,
+  getExpenses,
+  getCustomers,
+  type CreditPayment,
+  type Return,
+  type Exchange
+} from '../lib/supabase';
+import { useEffect, useState, useRef } from 'react';
+import { useNavigate } from 'react-router';
+import {
+  ArrowLeft,
+  Receipt,
+  CreditCard,
+  CheckCircle,
+  Calendar,
+  Search,
+  Eye,
+  TrendingUp,
+  TrendingDown,
+  FileText,
+  Loader2,
+  DollarSign,
+  Printer,
+  PiggyBank,
+  BarChart3,
+  Download,
+  Users,
+  ShoppingCart,
+  Wallet,
+  ChevronDown,
+  ChevronUp,
+  ArrowUpRight,
+  ArrowDownRight
+} from 'lucide-react';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
+import { Badge } from '../components/ui/badge';
+import { toast } from 'sonner';
+import { formatCOP } from '../lib/currency';
+import { jsPDF } from 'jspdf';
+import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer
+} from 'recharts';
+
+interface InvoiceItem {
+  productId: string;
+  productName: string;
+  productCode: string;
+  quantity: number;
+  price: number;
+  total: number;
+  useUnitIds?: boolean;
+  unitIds?: string[];
+}
+
+interface Invoice {
+  id: string;
+  company: 'celumundo' | 'repuestos';
+  number: string;
+  date: string;
+  type: 'regular' | 'wholesale';
+  customer_name?: string;
+  customer_document?: string;
+  items: InvoiceItem[];
+  subtotal: number;
+  tax: number;
+  total: number;
+  status: 'pending' | 'paid' | 'cancelled' | 'pending_confirmation';
+  payment_method?: string;
+  payment_note?: string;
+  payment_cash?: number;
+  payment_transfer?: number;
+  payment_other?: number;
+  attended_by?: string;
+  is_credit?: boolean;
+  credit_balance?: number;
+  due_date?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+type ModalType = 'paid' | 'credit' | null;
+
+export function FinancialManagement() {
+  const navigate = useNavigate();
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
+  const [returns, setReturns] = useState<Return[]>([]);
+  const [exchanges, setExchanges] = useState<Exchange[]>([]);
+  const [products, setProducts] = useState<any[]>([]);
+  const [expenses, setExpenses] = useState<any[]>([]);
+  const [customers, setCustomers] = useState<any[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [activeModal, setActiveModal] = useState<ModalType>(null);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
+  const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
+  const [isThermalPrintDialogOpen, setIsThermalPrintDialogOpen] = useState(false);
+  const [creditPayments, setCreditPayments] = useState<CreditPayment[]>([]);
+
+  // Estado para tabs y collapsibles
+  const [activeTab, setActiveTab] = useState('tendencias');
+  const [ingresosOpen, setIngresosOpen] = useState(false);
+  const [egresosOpen, setEgresosOpen] = useState(false);
+  const [cuentasPorCobrarOpen, setCuentasPorCobrarOpen] = useState(false);
+
+  // Filtros para modales
+  const [searchTerm, setSearchTerm] = useState('');
+  const [dateFilter, setDateFilter] = useState('');
+
+  // Ref para impresión térmica
+  const thermalPrintRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setIsLoading(true);
+    const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData] = await Promise.all([
+      getInvoices(),
+      getReturns(),
+      getExchanges(),
+      getProducts(),
+      getExpenses(),
+      getCustomers()
+    ]);
+    setInvoices(invoicesData);
+    setReturns(returnsData);
+    setExchanges(exchangesData);
+    setProducts(productsData);
+    setExpenses(expensesData);
+    setCustomers(customersData);
+    setIsLoading(false);
+  };
+
+  // Calcular estadísticas con comparación de mes anterior
+  const getStats = () => {
+    const today = getColombiaDate();
+    const thisMonth = today.slice(0, 7);
+
+    // Calcular mes anterior
+    const [year, month] = thisMonth.split('-').map(Number);
+    const prevMonth = month === 1
+      ? `${year - 1}-12`
+      : `${year}-${String(month - 1).padStart(2, '0')}`;
+
+    const calculateMonthStats = (targetMonth: string) => {
+      const monthInvoices = invoices.filter((inv) => {
+        const invDate = extractColombiaDate(inv.date);
+        return invDate.startsWith(targetMonth);
+      });
+
+      const monthReturns = returns.filter((ret) => {
+        const retDate = extractColombiaDate(ret.date);
+        return retDate.startsWith(targetMonth);
+      });
+
+      const monthExchanges = exchanges.filter((ex) => {
+        const exDate = extractColombiaDate(ex.date);
+        return exDate.startsWith(targetMonth);
+      });
+
+      const monthExpenses = expenses.filter((exp) => {
+        const expDate = extractColombiaDate(exp.date);
+        return expDate.startsWith(targetMonth);
+      });
+
+      // Incluir todas las facturas pagadas (regulares y crédito) + devoluciones parciales
+      // Las facturas con status 'returned' ya están excluidas, no necesitamos restar devoluciones
+      const facturasPagas = monthInvoices
+        .filter((inv) => inv.status === 'paid' || inv.status === 'partial_return')
+        .reduce((sum, inv) => sum + inv.total, 0);
+
+      const totalDevoluciones = monthReturns.reduce((sum, ret) => sum + ret.total, 0);
+
+      const impactoCambios = monthExchanges.reduce((sum, exchange) => {
+        if (exchange.price_difference > 0) {
+          return sum + exchange.price_difference;
+        } else if (exchange.price_difference < 0) {
+          return sum + exchange.price_difference;
+        }
+        return sum;
+      }, 0);
+
+      // No restamos totalDevoluciones porque las facturas 'returned' ya no se cuentan en facturasPagas
+      const ingresoNeto = facturasPagas + impactoCambios;
+
+      const facturasPagasList = monthInvoices.filter((inv) => inv.status === 'paid' || inv.status === 'partial_return');
+      let totalCostos = 0;
+
+      facturasPagasList.forEach((invoice) => {
+        invoice.items.forEach((item) => {
+          const product = products.find((p) => p.id === item.productId);
+          if (product && product.current_cost) {
+            totalCostos += product.current_cost * item.quantity;
+          }
+        });
+      });
+
+      const totalGastos = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
+      const ganancias = ingresoNeto - totalCostos - totalGastos;
+      const margen = ingresoNeto > 0 ? (ganancias / ingresoNeto) * 100 : 0;
+
+      return {
+        ingresoNeto,
+        totalGastos,
+        ganancias,
+        margen,
+        totalCostos,
+        totalDevoluciones,
+        impactoCambios,
+        facturasPagas,
+        invoicesCount: monthInvoices.length,
+        expenses: monthExpenses
+      };
+    };
+
+    const currentMonth = calculateMonthStats(thisMonth);
+    const previousMonth = calculateMonthStats(prevMonth);
+
+    const ingresosChange = previousMonth.ingresoNeto > 0
+      ? ((currentMonth.ingresoNeto - previousMonth.ingresoNeto) / previousMonth.ingresoNeto) * 100
+      : 0;
+
+    const gastosChange = previousMonth.totalGastos > 0
+      ? ((currentMonth.totalGastos - previousMonth.totalGastos) / previousMonth.totalGastos) * 100
+      : 0;
+
+    const gananciasChange = previousMonth.ganancias > 0
+      ? ((currentMonth.ganancias - previousMonth.ganancias) / previousMonth.ganancias) * 100
+      : 0;
+
+    return {
+      currentMonth,
+      previousMonth,
+      ingresosChange,
+      gastosChange,
+      gananciasChange,
+      thisMonth,
+      prevMonth
+    };
+  };
+
+  // Filtrar facturas según el modal activo
+  const getFilteredInvoices = (type: ModalType) => {
+    if (!type) return [];
+
+    let filtered = invoices;
+
+    if (type === 'paid') {
+      filtered = filtered.filter((inv) => inv.status === 'paid' || inv.status === 'partial_return');
+    } else if (type === 'credit') {
+      filtered = filtered.filter((inv) => inv.is_credit);
+    }
+
+    if (searchTerm) {
+      filtered = filtered.filter(
+        (inv) =>
+          inv.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (inv.customer_name && inv.customer_name.toLowerCase().includes(searchTerm.toLowerCase()))
+      );
+    }
+
+    if (dateFilter) {
+      filtered = filtered.filter((inv) => inv.date.startsWith(dateFilter));
+    }
+
+    return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  };
+
+  const openModal = (type: ModalType) => {
+    setActiveModal(type);
+  };
+
+  const closeModal = () => {
+    setActiveModal(null);
+    setSearchTerm('');
+    setDateFilter('');
+  };
+
+  const viewInvoice = (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    setIsViewDialogOpen(true);
+  };
+
+  const openPrintDialog = async (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    if (invoice.is_credit) {
+      const payments = await getCreditPaymentsByInvoice(invoice.id);
+      setCreditPayments(payments);
+    } else {
+      setCreditPayments([]);
+    }
+    setIsPrintDialogOpen(true);
+  };
+
+  const handlePrintPDF = () => {
+    if (!selectedInvoice) return;
+
+    const doc = new jsPDF();
+    const companyName = getCurrentCompany() === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
+    const pageWidth = doc.internal.pageSize.getWidth();
+
+    doc.setFontSize(20);
+    doc.setFont('helvetica', 'bold');
+    doc.text(companyName, pageWidth / 2, 20, { align: 'center' });
+
+    doc.setFontSize(12);
+    doc.setFont('helvetica', 'normal');
+    doc.text(`Factura ${selectedInvoice.number}`, pageWidth / 2, 30, { align: 'center' });
+
+    let y = 45;
+    doc.setFontSize(10);
+    doc.text(`Fecha: ${extractColombiaDateTime(selectedInvoice.date)}`, 20, y);
+    y += 6;
+
+    if (selectedInvoice.customer_name) {
+      doc.text(`Cliente: ${selectedInvoice.customer_name}`, 20, y);
+      y += 6;
+    }
+
+    if (selectedInvoice.customer_document) {
+      doc.text(`Documento: ${selectedInvoice.customer_document}`, 20, y);
+      y += 6;
+    }
+
+    if (selectedInvoice.attended_by) {
+      doc.text(`Atendido por: ${selectedInvoice.attended_by}`, 20, y);
+      y += 6;
+    }
+
+    y += 5;
+
+    doc.setFont('helvetica', 'bold');
+    doc.text('Cant.', 20, y);
+    doc.text('Producto', 40, y);
+    doc.text('Precio', 130, y);
+    doc.text('Total', 170, y);
+    y += 2;
+    doc.line(20, y, 190, y);
+    y += 6;
+
+    doc.setFont('helvetica', 'normal');
+    selectedInvoice.items.forEach((item) => {
+      if (y > 270) {
+        doc.addPage();
+        y = 20;
+      }
+
+      doc.text(item.quantity.toString(), 20, y);
+      const productName = item.productName.length > 40 ? item.productName.substring(0, 40) + '...' : item.productName;
+      doc.text(productName, 40, y);
+      doc.text(formatCOP(item.price), 130, y);
+      doc.text(formatCOP(item.total), 170, y);
+      y += 6;
+    });
+
+    y += 5;
+    doc.line(20, y, 190, y);
+    y += 8;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(14);
+    doc.text(`TOTAL: ${formatCOP(selectedInvoice.total)}`, pageWidth - 20, y, { align: 'right' });
+
+    doc.autoPrint();
+    window.open(doc.output('bloburl'), '_blank');
+    toast.success('Abriendo vista de impresión PDF');
+    setIsPrintDialogOpen(false);
+  };
+
+  const handleThermalPrint = () => {
+    setIsPrintDialogOpen(false);
+    setIsThermalPrintDialogOpen(true);
+
+    setTimeout(() => {
+      if (!thermalPrintRef.current) return;
+
+      const printFrame = document.createElement('iframe');
+      printFrame.style.position = 'absolute';
+      printFrame.style.width = '0';
+      printFrame.style.height = '0';
+      printFrame.style.border = 'none';
+
+      document.body.appendChild(printFrame);
+
+      const printDocument = printFrame.contentWindow?.document;
+      if (!printDocument) return;
+
+      printDocument.open();
+      printDocument.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Impresión Térmica</title>
+          </head>
+          <body>
+            ${thermalPrintRef.current.innerHTML}
+          </body>
+        </html>
+      `);
+      printDocument.close();
+
+      setTimeout(() => {
+        printFrame.contentWindow?.print();
+        setTimeout(() => {
+          document.body.removeChild(printFrame);
+          setIsThermalPrintDialogOpen(false);
+        }, 100);
+      }, 500);
+    }, 300);
+  };
+
+  // Get chart data
+  const getChartData = () => {
+    const stats = getStats();
+
+    // Data for tendencias (last 6 months)
+    const last6Months = [];
+    const today = new Date();
+    for (let i = 5; i >= 0; i--) {
+      const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+      const monthInvoices = invoices.filter(inv => extractColombiaDate(inv.date).startsWith(monthStr));
+      const monthExpenses = expenses.filter(exp => extractColombiaDate(exp.date).startsWith(monthStr));
+
+      // Incluir todas las facturas pagadas (regulares y crédito) + devoluciones parciales
+      const ingresos = monthInvoices
+        .filter(inv => inv.status === 'paid' || inv.status === 'partial_return')
+        .reduce((sum, inv) => sum + inv.total, 0);
+
+      const gastos = monthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+
+      last6Months.push({
+        month: date.toLocaleDateString('es-CO', { month: 'short' }),
+        ingresos,
+        gastos,
+        ganancias: ingresos - gastos
+      });
+    }
+
+    // Payment methods data - incluir todas las facturas pagadas
+    const paymentMethodsData = [
+      {
+        name: 'Efectivo',
+        value: invoices
+          .filter(inv => (inv.status === 'paid' || inv.status === 'partial_return') && inv.payment_cash)
+          .reduce((sum, inv) => sum + (inv.payment_cash || 0), 0)
+      },
+      {
+        name: 'Transferencia',
+        value: invoices
+          .filter(inv => (inv.status === 'paid' || inv.status === 'partial_return') && inv.payment_transfer)
+          .reduce((sum, inv) => sum + (inv.payment_transfer || 0), 0)
+      },
+      {
+        name: 'Otros',
+        value: invoices
+          .filter(inv => (inv.status === 'paid' || inv.status === 'partial_return') && inv.payment_other)
+          .reduce((sum, inv) => sum + (inv.payment_other || 0), 0)
+      }
+    ].filter(item => item.value > 0);
+
+    // Expenses by category
+    const expenseCategories = stats.currentMonth.expenses.reduce((acc: any, exp: any) => {
+      const category = exp.category || 'Sin categoría';
+      acc[category] = (acc[category] || 0) + exp.amount;
+      return acc;
+    }, {});
+
+    const expensesChartData = Object.entries(expenseCategories).map(([name, value]) => ({
+      name,
+      value: value as number
+    }));
+
+    return {
+      tendencias: last6Months,
+      paymentMethods: paymentMethodsData,
+      expenseCategories: expensesChartData
+    };
+  };
+
+  // Get top lists data
+  const getTopLists = () => {
+    const stats = getStats();
+
+    // Top 5 expenses
+    const topExpenses = stats.currentMonth.expenses
+      .sort((a: any, b: any) => b.amount - a.amount)
+      .slice(0, 5);
+
+    // Top 5 largest invoices - solo facturas que generaron ingresos
+    const topInvoices = invoices
+      .filter(inv =>
+        extractColombiaDate(inv.date).startsWith(stats.thisMonth) &&
+        (inv.status === 'paid' || inv.status === 'partial_return')
+      )
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 5);
+
+    // Top 5 customers by purchase amount
+    const customerTotals = invoices
+      .filter(inv =>
+        extractColombiaDate(inv.date).startsWith(stats.thisMonth) &&
+        (inv.status === 'paid' || inv.status === 'partial_return') &&
+        inv.customer_document
+      )
+      .reduce((acc: any, inv) => {
+        const doc = inv.customer_document!;
+        if (!acc[doc]) {
+          acc[doc] = {
+            document: doc,
+            name: inv.customer_name || 'Cliente sin nombre',
+            total: 0,
+            count: 0
+          };
+        }
+        acc[doc].total += inv.total;
+        acc[doc].count += 1;
+        return acc;
+      }, {});
+
+    const topCustomers = Object.values(customerTotals)
+      .sort((a: any, b: any) => b.total - a.total)
+      .slice(0, 5);
+
+    return {
+      topExpenses,
+      topInvoices,
+      topCustomers
+    };
+  };
+
+  const stats = getStats();
+  const chartData = getChartData();
+  const topLists = getTopLists();
+  const COLORS = ['#10b981', '#3b82f6', '#8b5cf6', '#f59e0b', '#ef4444'];
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-zinc-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-zinc-50">
+      {/* Header */}
+      <div className="bg-white border-b border-zinc-200">
+        <div className="p-6">
+          <Button variant="ghost" onClick={() => navigate('/facturacion')} className="mb-4">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Volver a Facturación
+          </Button>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-semibold text-zinc-900">Gestión de Finanzas</h1>
+              <p className="text-sm text-zinc-500 mt-1">
+                Panel de control financiero y análisis de rendimiento
+              </p>
+            </div>
+            <Button className="bg-emerald-600 hover:bg-emerald-700">
+              <Download className="w-4 h-4 mr-2" />
+              Exportar Reporte
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-6 space-y-6">
+        {/* Section 1: Overview Financiero */}
+        <div>
+          <h2 className="text-xl font-semibold text-zinc-900 mb-4">Overview Financiero</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {/* Ingresos del Mes */}
+            <Card className="border-zinc-200 shadow-sm hover:shadow-md transition-shadow">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-medium text-zinc-600">Ingresos del Mes</CardTitle>
+                  <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4 text-emerald-600" />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-zinc-900">{formatCOP(stats.currentMonth.ingresoNeto)}</div>
+                <div className="flex items-center gap-1 mt-2">
+                  {stats.ingresosChange >= 0 ? (
+                    <ArrowUpRight className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <ArrowDownRight className="w-4 h-4 text-red-600" />
+                  )}
+                  <span className={`text-sm font-medium ${stats.ingresosChange >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {stats.ingresosChange >= 0 ? '+' : ''}{stats.ingresosChange.toFixed(1)}%
+                  </span>
+                  <span className="text-xs text-zinc-500">vs mes anterior</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Gastos del Mes */}
+            <Card className="border-zinc-200 shadow-sm hover:shadow-md transition-shadow">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-medium text-zinc-600">Gastos del Mes</CardTitle>
+                  <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">
+                    <Wallet className="w-4 h-4 text-red-600" />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-zinc-900">{formatCOP(stats.currentMonth.totalGastos)}</div>
+                <div className="flex items-center gap-1 mt-2">
+                  {stats.gastosChange >= 0 ? (
+                    <ArrowUpRight className="w-4 h-4 text-red-600" />
+                  ) : (
+                    <ArrowDownRight className="w-4 h-4 text-emerald-600" />
+                  )}
+                  <span className={`text-sm font-medium ${stats.gastosChange >= 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                    {stats.gastosChange >= 0 ? '+' : ''}{stats.gastosChange.toFixed(1)}%
+                  </span>
+                  <span className="text-xs text-zinc-500">vs mes anterior</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Ganancias Netas */}
+            <Card className="border-zinc-200 shadow-sm hover:shadow-md transition-shadow">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-medium text-zinc-600">Ganancias Netas</CardTitle>
+                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                    <DollarSign className="w-4 h-4 text-blue-600" />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-zinc-900">{formatCOP(stats.currentMonth.ganancias)}</div>
+                <div className="flex items-center gap-1 mt-2">
+                  {stats.gananciasChange >= 0 ? (
+                    <ArrowUpRight className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <ArrowDownRight className="w-4 h-4 text-red-600" />
+                  )}
+                  <span className={`text-sm font-medium ${stats.gananciasChange >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {stats.gananciasChange >= 0 ? '+' : ''}{stats.gananciasChange.toFixed(1)}%
+                  </span>
+                  <span className="text-xs text-zinc-500">vs mes anterior</span>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Margen de Ganancia */}
+            <Card className="border-zinc-200 shadow-sm hover:shadow-md transition-shadow">
+              <CardHeader className="pb-2">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm font-medium text-zinc-600">Margen de Ganancia</CardTitle>
+                  <div className="w-8 h-8 rounded-full bg-purple-100 flex items-center justify-center">
+                    <BarChart3 className="w-4 h-4 text-purple-600" />
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-zinc-900">{stats.currentMonth.margen.toFixed(1)}%</div>
+                <div className="flex items-center gap-1 mt-2">
+                  {stats.currentMonth.margen >= stats.previousMonth.margen ? (
+                    <ArrowUpRight className="w-4 h-4 text-emerald-600" />
+                  ) : (
+                    <ArrowDownRight className="w-4 h-4 text-red-600" />
+                  )}
+                  <span className={`text-sm font-medium ${stats.currentMonth.margen >= stats.previousMonth.margen ? 'text-emerald-600' : 'text-red-600'}`}>
+                    {(stats.currentMonth.margen - stats.previousMonth.margen).toFixed(1)}pts
+                  </span>
+                  <span className="text-xs text-zinc-500">vs mes anterior</span>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Section 2: Análisis Visual */}
+        <Card className="border-zinc-200">
+          <CardHeader>
+            <CardTitle className="text-lg">Análisis Visual</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="tendencias">Tendencias</TabsTrigger>
+                <TabsTrigger value="metodos">Métodos de Pago</TabsTrigger>
+                <TabsTrigger value="gastos">Categorías de Gastos</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="tendencias" className="pt-6">
+                <ResponsiveContainer width="100%" height={300}>
+                  <LineChart data={chartData.tendencias}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" />
+                    <YAxis />
+                    <Tooltip formatter={(value: any) => formatCOP(value)} />
+                    <Legend />
+                    <Line type="monotone" dataKey="ingresos" stroke="#10b981" strokeWidth={2} name="Ingresos" />
+                    <Line type="monotone" dataKey="gastos" stroke="#ef4444" strokeWidth={2} name="Gastos" />
+                    <Line type="monotone" dataKey="ganancias" stroke="#3b82f6" strokeWidth={2} name="Ganancias" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </TabsContent>
+
+              <TabsContent value="metodos" className="pt-6">
+                <ResponsiveContainer width="100%" height={300}>
+                  <PieChart>
+                    <Pie
+                      data={chartData.paymentMethods}
+                      cx="50%"
+                      cy="50%"
+                      labelLine={false}
+                      label={(entry) => `${entry.name}: ${formatCOP(entry.value)}`}
+                      outerRadius={80}
+                      fill="#8884d8"
+                      dataKey="value"
+                    >
+                      {chartData.paymentMethods.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value: any) => formatCOP(value)} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </TabsContent>
+
+              <TabsContent value="gastos" className="pt-6">
+                <ResponsiveContainer width="100%" height={300}>
+                  <BarChart data={chartData.expenseCategories}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip formatter={(value: any) => formatCOP(value)} />
+                    <Bar dataKey="value" fill="#ef4444" name="Monto" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+        </Card>
+
+        {/* Section 3: Detalles Financieros */}
+        <div>
+          <h2 className="text-xl font-semibold text-zinc-900 mb-4">Detalles Financieros</h2>
+          <div className="space-y-3">
+            {/* Ingresos */}
+            <Collapsible open={ingresosOpen} onOpenChange={setIngresosOpen}>
+              <Card className="border-zinc-200">
+                <CollapsibleTrigger className="w-full">
+                  <CardHeader className="cursor-pointer hover:bg-zinc-50 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center">
+                          <TrendingUp className="w-5 h-5 text-emerald-600" />
+                        </div>
+                        <div className="text-left">
+                          <CardTitle className="text-lg">Ingresos</CardTitle>
+                          <p className="text-sm text-zinc-500">{formatCOP(stats.currentMonth.ingresoNeto)}</p>
+                        </div>
+                      </div>
+                      {ingresosOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                    </div>
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="pt-0 space-y-2">
+                    <div className="flex justify-between py-2 border-b border-zinc-100">
+                      <span className="text-sm text-zinc-600">Facturas Pagas y Parciales</span>
+                      <span className="text-sm font-medium">{formatCOP(stats.currentMonth.facturasPagas)}</span>
+                    </div>
+                    {stats.currentMonth.impactoCambios !== 0 && (
+                      <div className="flex justify-between py-2 border-b border-zinc-100">
+                        <span className="text-sm text-zinc-600">Impacto de Cambios</span>
+                        <span className={`text-sm font-medium ${stats.currentMonth.impactoCambios > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {stats.currentMonth.impactoCambios > 0 ? '+' : ''}{formatCOP(stats.currentMonth.impactoCambios)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between py-2 font-semibold">
+                      <span className="text-sm">Total Neto</span>
+                      <span className="text-sm">{formatCOP(stats.currentMonth.ingresoNeto)}</span>
+                    </div>
+                    {stats.currentMonth.totalDevoluciones > 0 && (
+                      <div className="flex justify-between py-2 pt-3 border-t border-zinc-200">
+                        <span className="text-xs text-zinc-500">Devoluciones registradas (ref.)</span>
+                        <span className="text-xs text-zinc-500">{formatCOP(stats.currentMonth.totalDevoluciones)}</span>
+                      </div>
+                    )}
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
+
+            {/* Egresos */}
+            <Collapsible open={egresosOpen} onOpenChange={setEgresosOpen}>
+              <Card className="border-zinc-200">
+                <CollapsibleTrigger className="w-full">
+                  <CardHeader className="cursor-pointer hover:bg-zinc-50 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-red-100 flex items-center justify-center">
+                          <Wallet className="w-5 h-5 text-red-600" />
+                        </div>
+                        <div className="text-left">
+                          <CardTitle className="text-lg">Egresos</CardTitle>
+                          <p className="text-sm text-zinc-500">{formatCOP(stats.currentMonth.totalCostos + stats.currentMonth.totalGastos)}</p>
+                        </div>
+                      </div>
+                      {egresosOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                    </div>
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="pt-0 space-y-2">
+                    <div className="flex justify-between py-2 border-b border-zinc-100">
+                      <span className="text-sm text-zinc-600">Costos de Productos</span>
+                      <span className="text-sm font-medium">{formatCOP(stats.currentMonth.totalCostos)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 border-b border-zinc-100">
+                      <span className="text-sm text-zinc-600">Gastos Operativos</span>
+                      <span className="text-sm font-medium">{formatCOP(stats.currentMonth.totalGastos)}</span>
+                    </div>
+                    <div className="flex justify-between py-2 font-semibold">
+                      <span className="text-sm">Total Egresos</span>
+                      <span className="text-sm">{formatCOP(stats.currentMonth.totalCostos + stats.currentMonth.totalGastos)}</span>
+                    </div>
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
+
+            {/* Cuentas por Cobrar */}
+            <Collapsible open={cuentasPorCobrarOpen} onOpenChange={setCuentasPorCobrarOpen}>
+              <Card className="border-zinc-200">
+                <CollapsibleTrigger className="w-full">
+                  <CardHeader className="cursor-pointer hover:bg-zinc-50 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center">
+                          <CreditCard className="w-5 h-5 text-blue-600" />
+                        </div>
+                        <div className="text-left">
+                          <CardTitle className="text-lg">Cuentas por Cobrar</CardTitle>
+                          <p className="text-sm text-zinc-500">
+                            {formatCOP(
+                              invoices
+                                .filter(inv => inv.is_credit && inv.status === 'pending' && inv.credit_balance)
+                                .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0)
+                            )}
+                          </p>
+                        </div>
+                      </div>
+                      {cuentasPorCobrarOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
+                    </div>
+                  </CardHeader>
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <CardContent className="pt-0">
+                    <Button
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => openModal('credit')}
+                    >
+                      Ver Facturas a Crédito
+                    </Button>
+                  </CardContent>
+                </CollapsibleContent>
+              </Card>
+            </Collapsible>
+          </div>
+        </div>
+
+        {/* Section 4: Top Lists */}
+        <div>
+          <h2 className="text-xl font-semibold text-zinc-900 mb-4">Rankings del Mes</h2>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Top Gastos */}
+            <Card className="border-zinc-200">
+              <CardHeader>
+                <CardTitle className="text-base">Top 5 Gastos</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {topLists.topExpenses.map((expense: any, idx: number) => (
+                    <div key={expense.id} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="w-6 h-6 rounded-full flex items-center justify-center p-0">
+                          {idx + 1}
+                        </Badge>
+                        <div>
+                          <p className="text-sm font-medium">{expense.description}</p>
+                          <p className="text-xs text-zinc-500">{expense.category || 'Sin categoría'}</p>
+                        </div>
+                      </div>
+                      <span className="text-sm font-semibold text-red-600">{formatCOP(expense.amount)}</span>
+                    </div>
+                  ))}
+                  {topLists.topExpenses.length === 0 && (
+                    <p className="text-sm text-zinc-500 text-center py-4">No hay gastos este mes</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Top Facturas */}
+            <Card className="border-zinc-200">
+              <CardHeader>
+                <CardTitle className="text-base">Top 5 Facturas Más Grandes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {topLists.topInvoices.map((invoice: Invoice, idx: number) => (
+                    <div key={invoice.id} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="w-6 h-6 rounded-full flex items-center justify-center p-0">
+                          {idx + 1}
+                        </Badge>
+                        <div>
+                          <p className="text-sm font-medium">{invoice.number}</p>
+                          <p className="text-xs text-zinc-500">{invoice.customer_name || 'Cliente general'}</p>
+                        </div>
+                      </div>
+                      <span className="text-sm font-semibold text-emerald-600">{formatCOP(invoice.total)}</span>
+                    </div>
+                  ))}
+                  {topLists.topInvoices.length === 0 && (
+                    <p className="text-sm text-zinc-500 text-center py-4">No hay facturas este mes</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Top Clientes */}
+            <Card className="border-zinc-200">
+              <CardHeader>
+                <CardTitle className="text-base">Top 5 Mejores Clientes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-3">
+                  {topLists.topCustomers.map((customer: any, idx: number) => (
+                    <div key={customer.document} className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="w-6 h-6 rounded-full flex items-center justify-center p-0">
+                          {idx + 1}
+                        </Badge>
+                        <div>
+                          <p className="text-sm font-medium">{customer.name}</p>
+                          <p className="text-xs text-zinc-500">{customer.count} compras</p>
+                        </div>
+                      </div>
+                      <span className="text-sm font-semibold text-blue-600">{formatCOP(customer.total)}</span>
+                    </div>
+                  ))}
+                  {topLists.topCustomers.length === 0 && (
+                    <p className="text-sm text-zinc-500 text-center py-4">No hay clientes con compras este mes</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Section 5: Quick Actions */}
+        <Card className="border-zinc-200">
+          <CardHeader>
+            <CardTitle className="text-base">Acciones Rápidas</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              <Button variant="outline" onClick={() => openModal('paid')}>
+                <CheckCircle className="w-4 h-4 mr-2" />
+                Ver Facturas Pagas
+              </Button>
+              <Button variant="outline" onClick={() => openModal('credit')}>
+                <CreditCard className="w-4 h-4 mr-2" />
+                Ver Créditos
+              </Button>
+              <Button variant="outline" onClick={() => navigate('/gastos')}>
+                <Wallet className="w-4 h-4 mr-2" />
+                Gestionar Gastos
+              </Button>
+              <Button variant="outline" onClick={() => navigate('/clientes')}>
+                <Users className="w-4 h-4 mr-2" />
+                Ver Clientes
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Modal de Facturas Pagas */}
+      <Dialog open={activeModal === 'paid'} onOpenChange={(open) => !open && closeModal()}>
+        <DialogContent className="max-w-5xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-2xl">
+              <CheckCircle className="w-6 h-6 text-emerald-600" />
+              Facturas Pagas
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-4 py-4 border-y border-zinc-200">
+            <div>
+              <Label>Buscar por Cliente o ID</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Nombre del cliente o ID..."
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Filtrar por Fecha</Label>
+              <Input
+                type="date"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {getFilteredInvoices('paid').length === 0 ? (
+              <div className="text-center py-12 text-zinc-500">
+                <Receipt className="w-16 h-16 mx-auto mb-4 text-zinc-300" />
+                <p>No se encontraron facturas pagas</p>
+              </div>
+            ) : (
+              getFilteredInvoices('paid').map((invoice) => (
+                <div
+                  key={invoice.id}
+                  className="p-4 bg-emerald-50 border border-emerald-200 rounded-lg hover:bg-emerald-100 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-lg text-zinc-900">{invoice.number}</span>
+                        <span className="text-sm text-zinc-500">{extractColombiaDateTime(invoice.date)}</span>
+                        {invoice.customer_name && (
+                          <span className="text-sm text-zinc-700 font-medium">
+                            {invoice.customer_name}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 mt-2">
+                        <span className="text-xl font-bold text-emerald-600">
+                          {formatCOP(invoice.total)}
+                        </span>
+                        {invoice.payment_method && (
+                          <span className="text-xs px-2 py-1 bg-zinc-200 text-zinc-700 rounded">
+                            {invoice.payment_method}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => viewInvoice(invoice)}>
+                        <Eye className="w-4 h-4 mr-2" />
+                        Ver
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => openPrintDialog(invoice)}>
+                        <Printer className="w-4 h-4 mr-2" />
+                        Imprimir
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Facturas a Crédito */}
+      <Dialog open={activeModal === 'credit'} onOpenChange={(open) => !open && closeModal()}>
+        <DialogContent className="max-w-5xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-2xl">
+              <CreditCard className="w-6 h-6 text-blue-600" />
+              Facturas a Crédito
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="grid grid-cols-2 gap-4 py-4 border-y border-zinc-200">
+            <div>
+              <Label>Buscar por Cliente o ID</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                <Input
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  placeholder="Nombre del cliente o ID..."
+                  className="pl-9"
+                />
+              </div>
+            </div>
+            <div>
+              <Label>Filtrar por Fecha</Label>
+              <Input
+                type="date"
+                value={dateFilter}
+                onChange={(e) => setDateFilter(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-3">
+            {getFilteredInvoices('credit').length === 0 ? (
+              <div className="text-center py-12 text-zinc-500">
+                <CreditCard className="w-16 h-16 mx-auto mb-4 text-zinc-300" />
+                <p>No se encontraron facturas a crédito</p>
+              </div>
+            ) : (
+              getFilteredInvoices('credit').map((invoice) => (
+                <div
+                  key={invoice.id}
+                  className="p-4 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-lg text-zinc-900">{invoice.number}</span>
+                        <span className="text-sm text-zinc-500">{extractColombiaDateTime(invoice.date)}</span>
+                        {invoice.customer_name && (
+                          <span className="text-sm text-zinc-700 font-medium">
+                            {invoice.customer_name}
+                          </span>
+                        )}
+                        {invoice.status === 'pending' && (
+                          <span className="text-xs px-2 py-1 bg-amber-200 text-amber-700 rounded">
+                            Pendiente
+                          </span>
+                        )}
+                        {invoice.status === 'paid' && (
+                          <span className="text-xs px-2 py-1 bg-emerald-200 text-emerald-700 rounded">
+                            Pagada
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-4 mt-2">
+                        <span className="text-xl font-bold text-blue-600">
+                          {formatCOP(invoice.total)}
+                        </span>
+                        {invoice.credit_balance !== undefined && invoice.credit_balance > 0 && (
+                          <span className="text-sm text-red-600 font-medium">
+                            Saldo: {formatCOP(invoice.credit_balance)}
+                          </span>
+                        )}
+                        {invoice.due_date && (
+                          <span className="text-xs px-2 py-1 bg-zinc-200 text-zinc-700 rounded">
+                            Vence: {invoice.due_date}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => viewInvoice(invoice)}>
+                        <Eye className="w-4 h-4 mr-2" />
+                        Ver
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => openPrintDialog(invoice)}>
+                        <Printer className="w-4 h-4 mr-2" />
+                        Imprimir
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Vista de Factura */}
+      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="text-2xl">Factura {selectedInvoice?.number}</DialogTitle>
+          </DialogHeader>
+          {selectedInvoice && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4 p-4 bg-zinc-50 rounded-lg">
+                <div>
+                  <p className="text-xs text-zinc-500">Fecha y Hora</p>
+                  <p className="font-medium">{extractColombiaDateTime(selectedInvoice.date)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-zinc-500">Estado</p>
+                  <p className="font-medium">
+                    {selectedInvoice.status === 'paid'
+                      ? 'Pagada'
+                      : selectedInvoice.status === 'pending_confirmation'
+                      ? 'En Confirmación'
+                      : 'Pendiente'}
+                  </p>
+                </div>
+                {selectedInvoice.customer_name && (
+                  <div>
+                    <p className="text-xs text-zinc-500">Cliente</p>
+                    <p className="font-medium">{selectedInvoice.customer_name}</p>
+                  </div>
+                )}
+                {selectedInvoice.customer_document && (
+                  <div>
+                    <p className="text-xs text-zinc-500">Documento</p>
+                    <p className="font-medium">{selectedInvoice.customer_document}</p>
+                  </div>
+                )}
+                {selectedInvoice.payment_method && (
+                  <div>
+                    <p className="text-xs text-zinc-500">Método de Pago</p>
+                    <p className="font-medium">{selectedInvoice.payment_method}</p>
+                  </div>
+                )}
+                {selectedInvoice.attended_by && (
+                  <div>
+                    <p className="text-xs text-zinc-500">Atendido por</p>
+                    <p className="font-medium">{selectedInvoice.attended_by}</p>
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <h3 className="font-semibold mb-3">Productos</h3>
+                <div className="space-y-2">
+                  {selectedInvoice.items.map((item, idx) => (
+                    <div key={idx} className="p-3 bg-zinc-50 rounded border border-zinc-200">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <p className="font-medium">{item.productName}</p>
+                          <p className="text-sm text-zinc-500">Código: {item.productCode}</p>
+                          <p className="text-sm text-zinc-600 mt-1">
+                            {item.quantity} x {formatCOP(item.price)}
+                          </p>
+                        </div>
+                        <p className="font-bold text-lg">{formatCOP(item.total)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-zinc-200">
+                <div className="flex justify-between text-2xl font-bold">
+                  <span>Total:</span>
+                  <span className="text-emerald-600">{formatCOP(selectedInvoice.total)}</span>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsViewDialogOpen(false)}>
+              Cerrar
+            </Button>
+            {selectedInvoice && (
+              <Button onClick={() => { setIsViewDialogOpen(false); openPrintDialog(selectedInvoice); }}>
+                <Printer className="w-4 h-4 mr-2" />
+                Imprimir
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Selección de Tipo de Impresión */}
+      <Dialog open={isPrintDialogOpen} onOpenChange={setIsPrintDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Seleccionar Tipo de Impresión</DialogTitle>
+            <DialogDescription>
+              Elige el formato de impresión para la factura {selectedInvoice?.number}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-4 py-4">
+            <Button
+              onClick={handlePrintPDF}
+              className="h-24 flex flex-col gap-2 bg-blue-600 hover:bg-blue-700"
+            >
+              <FileText className="w-8 h-8" />
+              <span>PDF Carta</span>
+              <span className="text-xs opacity-80">Tamaño estándar</span>
+            </Button>
+            <Button
+              onClick={handleThermalPrint}
+              className="h-24 flex flex-col gap-2 bg-emerald-600 hover:bg-emerald-700"
+            >
+              <Receipt className="w-8 h-8" />
+              <span>Tirilla 80mm</span>
+              <span className="text-xs opacity-80">Impresora térmica</span>
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Vista Previa Impresión Térmica */}
+      <Dialog open={isThermalPrintDialogOpen} onOpenChange={setIsThermalPrintDialogOpen}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Vista Previa - Impresión Térmica</DialogTitle>
+            <DialogDescription>
+              Vista previa para impresora térmica SAT-22TUE de 80mm
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedInvoice && (
+            <div ref={thermalPrintRef}>
+              <ThermalInvoicePrint
+                invoice={selectedInvoice}
+                creditPayments={creditPayments}
+              />
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

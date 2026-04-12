@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react';
-import { RotateCcw, Search, Plus, X, AlertCircle, CheckCircle, Package, FileText, Calendar } from 'lucide-react';
-import { 
-  getInvoices, 
-  getReturns, 
-  addReturn, 
+import { RotateCcw, Search, Plus, X, AlertCircle, CheckCircle, Package, FileText, Calendar, Undo2 } from 'lucide-react';
+import {
+  getInvoices,
+  getReturns,
+  addReturn,
+  revertReturn,
   getProducts,
   updateProduct,
   getCurrentUser,
   getCurrentCompany,
-  type Invoice, 
-  type Return 
+  type Invoice,
+  type Return
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -32,9 +33,10 @@ export function Returns() {
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'full' | 'partial'>('all');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isReverting, setIsReverting] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
-  
+
   // Estados para el modal de selección de facturas
   const [isInvoiceSelectorOpen, setIsInvoiceSelectorOpen] = useState(false);
   const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
@@ -218,6 +220,32 @@ export function Returns() {
       toast.error('Error al registrar la devolución');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleRevertReturn = async (returnToRevert: Return) => {
+    const confirmMessage = `¿Estás seguro de revertir la devolución ${returnToRevert.return_number}?\n\n` +
+      `Esto devolverá los productos a la factura ${returnToRevert.invoice_number} y los restará del inventario.`;
+
+    if (!confirm(confirmMessage)) {
+      return;
+    }
+
+    try {
+      setIsReverting(true);
+      const success = await revertReturn(returnToRevert.id);
+
+      if (success) {
+        toast.success('Devolución revertida exitosamente');
+        await loadData();
+      } else {
+        toast.error('Error al revertir la devolución');
+      }
+    } catch (error) {
+      console.error('Error al revertir devolución:', error);
+      toast.error('Error al revertir la devolución');
+    } finally {
+      setIsReverting(false);
     }
   };
 
@@ -423,6 +451,7 @@ export function Returns() {
                   <th className="text-left py-2 px-3 text-sm font-medium">Motivo</th>
                   <th className="text-right py-2 px-3 text-sm font-medium">Total</th>
                   <th className="text-center py-2 px-3 text-sm font-medium">Productos</th>
+                  <th className="text-center py-2 px-3 text-sm font-medium">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -455,11 +484,23 @@ export function Returns() {
                         ))}
                       </div>
                     </td>
+                    <td className="py-3 px-3 text-center">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => handleRevertReturn(ret)}
+                        disabled={isReverting}
+                        className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:text-blue-300 dark:hover:bg-blue-950"
+                      >
+                        <Undo2 className="w-4 h-4 mr-1" />
+                        Revertir
+                      </Button>
+                    </td>
                   </tr>
                 ))}
                 {paginatedReturns.length === 0 && (
                   <tr>
-                    <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                    <td colSpan={8} className="py-8 text-center text-muted-foreground">
                       {searchTerm || filterType !== 'all'
                         ? 'No se encontraron devoluciones con los filtros aplicados'
                         : 'No hay devoluciones registradas'}

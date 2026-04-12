@@ -169,7 +169,7 @@ export function CustomerCreditInfo({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => navigate(`/customers/${customer.document}`)}
+            onClick={() => navigate(`/clientes/${customer.document}`)}
           >
             <Eye className="w-4 h-4 mr-1" />
             Ver Perfil

@@ -291,12 +291,44 @@ export function Closures() {
     });
     const previousMonthRevenue = previousMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
+    // Calcular impacto de cambios del mes anterior
+    const previousMonthExchanges = exchanges.filter(ex => {
+      if (!ex.date) return false;
+      const exDate = extractColombiaDate(ex.date);
+      return exDate.substring(0, 7) === previousMonthStr;
+    });
+    const previousMonthExchangeImpact = previousMonthExchanges.reduce((sum, exchange) => {
+      if (exchange.price_difference > 0) {
+        return sum + exchange.price_difference;
+      } else if (exchange.price_difference < 0) {
+        return sum + exchange.price_difference;
+      }
+      return sum;
+    }, 0);
+
+    const previousMonthNetRevenue = previousMonthRevenue + previousMonthExchangeImpact;
+
     const currentMonthInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
       const invDate = extractColombiaDate(inv.date);
       return invDate.substring(0, 7) === currentMonthStr && (inv.status === 'paid' || inv.status === 'partial_return');
     });
     const currentMonthRevenue = currentMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
+
+    // Calcular impacto de cambios del mes actual
+    const currentMonthExchanges = exchanges.filter(ex => {
+      if (!ex.date) return false;
+      const exDate = extractColombiaDate(ex.date);
+      return exDate.substring(0, 7) === currentMonthStr;
+    });
+    const currentMonthExchangeImpact = currentMonthExchanges.reduce((sum, exchange) => {
+      if (exchange.price_difference > 0) {
+        return sum + exchange.price_difference; // Cliente pagó diferencia
+      } else if (exchange.price_difference < 0) {
+        return sum + exchange.price_difference; // Se devolvió dinero (negativo)
+      }
+      return sum;
+    }, 0);
 
     // Calcular créditos pendientes del mes actual
     const currentMonthCreditInvoices = invoices.filter(inv => {
@@ -326,6 +358,26 @@ export function Closures() {
     });
     const totalExpenses = currentMonthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
+    // Los ingresos netos incluyen las facturas pagadas + el impacto de cambios
+    // Las facturas 'returned' ya no se cuentan en currentMonthRevenue
+    const netRevenue = currentMonthRevenue + currentMonthExchangeImpact;
+
+    // Calcular costo de productos vendidos en el mes
+    let totalProductCost = 0;
+    currentMonthInvoices.forEach(invoice => {
+      if (invoice.items && Array.isArray(invoice.items)) {
+        invoice.items.forEach((item: any) => {
+          const product = products.find(p => p.id === item.productId);
+          if (product && product.current_cost) {
+            totalProductCost += product.current_cost * item.quantity;
+          }
+        });
+      }
+    });
+
+    // Calcular ganancias reales (ingresos netos - costo de productos - gastos)
+    const realProfit = netRevenue - totalProductCost - totalExpenses;
+
     // Crear objetos Date para obtener nombres de meses en español
     const previousMonthDate = new Date(previousMonthStr + '-01T12:00:00');
     const currentMonthDate = new Date(currentMonthStr + '-01T12:00:00');
@@ -334,12 +386,12 @@ export function Closures() {
       {
         id: 'prev-month',
         name: previousMonthDate.toLocaleDateString('es-ES', { month: 'short' }),
-        ventas: previousMonthRevenue,
+        ventas: previousMonthNetRevenue,
       },
       {
         id: 'current-month',
         name: currentMonthDate.toLocaleDateString('es-ES', { month: 'short' }),
-        ventas: currentMonthRevenue,
+        ventas: netRevenue,
       },
     ];
 
@@ -374,6 +426,10 @@ export function Closures() {
       dailySalesData,
       currentMonthRevenue,
       previousMonthRevenue,
+      netRevenue,
+      previousMonthNetRevenue,
+      totalProductCost,
+      realProfit,
     };
   };
 
@@ -814,7 +870,7 @@ export function Closures() {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold text-green-600 dark:text-green-400">
-                  COP {formatCOP(monthlyStats.currentMonthRevenue)}
+                  COP {formatCOP(monthlyStats.netRevenue)}
                 </div>
               </CardContent>
             </Card>
@@ -851,14 +907,14 @@ export function Closures() {
               </ResponsiveContainer>
               <div className="mt-4 p-3 bg-muted rounded-lg">
                 <p className="text-sm">
-                  {monthlyStats.currentMonthRevenue > monthlyStats.previousMonthRevenue ? (
+                  {monthlyStats.netRevenue > monthlyStats.previousMonthNetRevenue ? (
                     <span className="text-green-600 dark:text-green-400 font-medium flex items-center">
                       <TrendingUp className="h-4 w-4 mr-1" />
-                      Incremento de COP {formatCOP(monthlyStats.currentMonthRevenue - monthlyStats.previousMonthRevenue)} respecto al mes anterior
+                      Incremento de COP {formatCOP(monthlyStats.netRevenue - monthlyStats.previousMonthNetRevenue)} respecto al mes anterior
                     </span>
-                  ) : monthlyStats.currentMonthRevenue < monthlyStats.previousMonthRevenue ? (
+                  ) : monthlyStats.netRevenue < monthlyStats.previousMonthNetRevenue ? (
                     <span className="text-red-600 dark:text-red-400 font-medium">
-                      ↓ Disminución de COP {formatCOP(monthlyStats.previousMonthRevenue - monthlyStats.currentMonthRevenue)} respecto al mes anterior
+                      ↓ Disminución de COP {formatCOP(monthlyStats.previousMonthNetRevenue - monthlyStats.netRevenue)} respecto al mes anterior
                     </span>
                   ) : (
                     <span className="text-muted-foreground font-medium">
