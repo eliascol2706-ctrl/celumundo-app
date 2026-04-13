@@ -131,6 +131,10 @@ export function FinancialManagement() {
   const [cuentasPorCobrarOpen, setCuentasPorCobrarOpen] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
+  // Estado para modal de desglose diario
+  const [isDailyBreakdownOpen, setIsDailyBreakdownOpen] = useState(false);
+  const [selectedDate, setSelectedDate] = useState(getColombiaDate());
+
   // Filtros para modales
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('');
@@ -438,6 +442,66 @@ export function FinancialManagement() {
         }, 100);
       }, 500);
     }, 300);
+  };
+
+  // Calcular estadísticas de un día específico
+  const getDailyStats = (date: string) => {
+    // Filtrar facturas del día
+    const dayInvoices = invoices.filter(inv => {
+      const invDate = extractColombiaDate(inv.date);
+      return invDate === date && (inv.status === 'paid' || inv.status === 'partial_return');
+    });
+
+    // Filtrar gastos del día
+    const dayExpenses = expenses.filter(exp => {
+      const expDate = extractColombiaDate(exp.date);
+      return expDate === date;
+    });
+
+    // Filtrar cambios del día
+    const dayExchanges = exchanges.filter(ex => {
+      const exDate = extractColombiaDate(ex.date);
+      return exDate === date;
+    });
+
+    // Calcular ingresos
+    const facturasPagas = dayInvoices.reduce((sum, inv) => sum + inv.total, 0);
+    const impactoCambios = dayExchanges.reduce((sum, exchange) => {
+      if (exchange.price_difference > 0) {
+        return sum + exchange.price_difference;
+      } else if (exchange.price_difference < 0) {
+        return sum + exchange.price_difference;
+      }
+      return sum;
+    }, 0);
+    const ingresosNetos = facturasPagas + impactoCambios;
+
+    // Calcular costos de productos
+    let costos = 0;
+    dayInvoices.forEach(invoice => {
+      invoice.items.forEach(item => {
+        const product = products.find(p => p.id === item.productId);
+        if (product && product.current_cost) {
+          costos += product.current_cost * item.quantity;
+        }
+      });
+    });
+
+    // Calcular gastos
+    const gastos = dayExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+
+    // Calcular ganancias
+    const ganancias = ingresosNetos - costos - gastos;
+
+    return {
+      invoices: dayInvoices,
+      ingresosNetos,
+      gastos,
+      costos,
+      ganancias,
+      facturasPagas,
+      impactoCambios
+    };
   };
 
   const handleExportReport = () => {
@@ -866,6 +930,15 @@ export function FinancialManagement() {
                   </span>
                   <span className="text-xs text-zinc-500">vs mes anterior</span>
                 </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full mt-3"
+                  onClick={() => setIsDailyBreakdownOpen(true)}
+                >
+                  <Calendar className="w-4 h-4 mr-2" />
+                  Desglosar ganancias
+                </Button>
               </CardContent>
             </Card>
 
@@ -1535,6 +1608,147 @@ export function FinancialManagement() {
               />
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Desglose Diario de Ganancias */}
+      <Dialog open={isDailyBreakdownOpen} onOpenChange={setIsDailyBreakdownOpen}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Calendar className="w-5 h-5 text-blue-600" />
+              Desglose de Ganancias por Día
+            </DialogTitle>
+            <DialogDescription>
+              Selecciona una fecha para ver el detalle de ingresos y ganancias
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* Selector de fecha */}
+            <div>
+              <Label htmlFor="date-selector" className="text-sm font-medium mb-2 block">
+                Fecha
+              </Label>
+              <Input
+                id="date-selector"
+                type="date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                className="w-full"
+              />
+            </div>
+
+            {/* Resumen financiero del día */}
+            {(() => {
+              const dailyStats = getDailyStats(selectedDate);
+              return (
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {/* Ingresos Netos */}
+                    <Card className="border-emerald-200 bg-emerald-50">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium text-emerald-700">Ingresos Netos</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold text-emerald-600">
+                          {formatCOP(dailyStats.ingresosNetos)}
+                        </div>
+                        <div className="text-xs text-zinc-600 mt-2 space-y-1">
+                          <div>Facturas: {formatCOP(dailyStats.facturasPagas)}</div>
+                          {dailyStats.impactoCambios !== 0 && (
+                            <div className={dailyStats.impactoCambios > 0 ? 'text-emerald-600' : 'text-red-600'}>
+                              Cambios: {dailyStats.impactoCambios > 0 ? '+' : ''}{formatCOP(dailyStats.impactoCambios)}
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Egresos */}
+                    <Card className="border-red-200 bg-red-50">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium text-red-700">Egresos</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold text-red-600">
+                          {formatCOP(dailyStats.costos + dailyStats.gastos)}
+                        </div>
+                        <div className="text-xs text-zinc-600 mt-2 space-y-1">
+                          <div>Costos: {formatCOP(dailyStats.costos)}</div>
+                          <div>Gastos: {formatCOP(dailyStats.gastos)}</div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    {/* Ganancias */}
+                    <Card className="border-blue-200 bg-blue-50">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-medium text-blue-700">Ganancias</CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className={`text-2xl font-bold ${dailyStats.ganancias >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                          {formatCOP(dailyStats.ganancias)}
+                        </div>
+                        <div className="text-xs text-zinc-600 mt-2">
+                          Margen: {dailyStats.ingresosNetos > 0 ? ((dailyStats.ganancias / dailyStats.ingresosNetos) * 100).toFixed(1) : '0.0'}%
+                        </div>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Lista de facturas */}
+                  <div>
+                    <h3 className="font-semibold text-sm mb-3 flex items-center gap-2">
+                      <Receipt className="w-4 h-4" />
+                      Facturas del Día ({dailyStats.invoices.length})
+                    </h3>
+                    {dailyStats.invoices.length > 0 ? (
+                      <div className="border border-zinc-200 rounded-lg overflow-hidden">
+                        <div className="max-h-60 overflow-y-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-zinc-100 sticky top-0">
+                              <tr>
+                                <th className="text-left py-2 px-3 font-medium">Número</th>
+                                <th className="text-left py-2 px-3 font-medium">Cliente</th>
+                                <th className="text-left py-2 px-3 font-medium">Hora</th>
+                                <th className="text-right py-2 px-3 font-medium">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {dailyStats.invoices.map((inv) => (
+                                <tr key={inv.id} className="border-t border-zinc-100 hover:bg-zinc-50">
+                                  <td className="py-2 px-3 font-medium">{inv.number}</td>
+                                  <td className="py-2 px-3">{inv.customer_name || 'Cliente general'}</td>
+                                  <td className="py-2 px-3">
+                                    {new Date(inv.date).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
+                                  </td>
+                                  <td className="py-2 px-3 text-right font-semibold text-emerald-600">
+                                    {formatCOP(inv.total)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-8 text-zinc-500 bg-zinc-50 rounded-lg border border-zinc-200">
+                        <Receipt className="w-12 h-12 mx-auto mb-2 text-zinc-300" />
+                        <p>No hay facturas para esta fecha</p>
+                      </div>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDailyBreakdownOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
