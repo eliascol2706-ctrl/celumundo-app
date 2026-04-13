@@ -254,6 +254,17 @@ export interface Session {
   company: 'celumundo' | 'repuestos';
 }
 
+export interface PublicCatalog {
+  id: string;
+  company: 'celumundo' | 'repuestos';
+  product_id: string;
+  price_type: 'price1' | 'price2' | 'final_price';
+  display_order: number;
+  image_url?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 // ============================================
 // GESTIÓN DE USUARIOS
 // ============================================
@@ -504,12 +515,73 @@ export const deleteProduct = async (id: string): Promise<boolean> => {
     .from('products')
     .delete()
     .eq('id', id);
-  
+
   if (error) {
     console.error('Error deleting product:', error);
     return false;
   }
   return true;
+};
+
+// ============================================
+// GESTIÓN DE IMÁGENES DEL CATÁLOGO
+// ============================================
+
+export const uploadCatalogImage = async (file: File, catalogId: string): Promise<string | null> => {
+  try {
+    const fileExt = file.name.split('.').pop();
+    const fileName = `${catalogId}_${Date.now()}.${fileExt}`;
+    const filePath = `${fileName}`;
+
+    const { data, error } = await supabase.storage
+      .from('catalog-images')
+      .upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false
+      });
+
+    if (error) {
+      console.error('Error uploading catalog image:', error);
+      return null;
+    }
+
+    // Obtener la URL pública de la imagen
+    const { data: { publicUrl } } = supabase.storage
+      .from('catalog-images')
+      .getPublicUrl(filePath);
+
+    return publicUrl;
+  } catch (error) {
+    console.error('Error uploading catalog image:', error);
+    return null;
+  }
+};
+
+export const deleteCatalogImage = async (imageUrl: string): Promise<boolean> => {
+  try {
+    // Extraer el path del archivo desde la URL
+    const urlParts = imageUrl.split('/catalog-images/');
+    if (urlParts.length < 2) {
+      console.error('Invalid image URL format');
+      return false;
+    }
+
+    const filePath = urlParts[1];
+
+    const { error } = await supabase.storage
+      .from('catalog-images')
+      .remove([filePath]);
+
+    if (error) {
+      console.error('Error deleting catalog image:', error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error deleting catalog image:', error);
+    return false;
+  }
 };
 
 // ============================================
@@ -3145,4 +3217,165 @@ export const getWarrantiesStats = async () => {
     totalActiveUnits,
     resolutionRate
   };
+};
+
+// ============================================
+// CATÁLOGO PÚBLICO
+// ============================================
+
+export const getCatalogProducts = async (company: 'celumundo' | 'repuestos'): Promise<PublicCatalog[]> => {
+  try {
+    const { data, error } = await supabase
+      .from('public_catalogs')
+      .select('*')
+      .eq('company', company)
+      .order('display_order', { ascending: true });
+
+    if (error) {
+      if (error.code === '42P01' || error.message?.includes('relation') || error.message?.includes('does not exist')) {
+        console.error('⚠️ La tabla "public_catalogs" no existe en Supabase.');
+        console.error('📋 SOLUCIÓN: Ejecuta el script SQL proporcionado para crear la tabla');
+        return [];
+      }
+      console.error('Error fetching catalog products:', error);
+      return [];
+    }
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching catalog products:', error);
+    return [];
+  }
+};
+
+export const addProductToCatalog = async (
+  company: 'celumundo' | 'repuestos',
+  productId: string,
+  priceType: 'price1' | 'price2' | 'final_price',
+  imageUrl?: string
+): Promise<PublicCatalog | null> => {
+  try {
+    // Get current max display_order for this company
+    const { data: existing } = await supabase
+      .from('public_catalogs')
+      .select('display_order')
+      .eq('company', company)
+      .order('display_order', { ascending: false })
+      .limit(1)
+      .single();
+
+    const nextOrder = existing ? existing.display_order + 1 : 1;
+
+    const { data, error } = await supabase
+      .from('public_catalogs')
+      .insert([{
+        company,
+        product_id: productId,
+        price_type: priceType,
+        display_order: nextOrder,
+        image_url: imageUrl || null
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding product to catalog:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error adding product to catalog:', error);
+    return null;
+  }
+};
+
+export const removeProductFromCatalog = async (catalogId: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase
+      .from('public_catalogs')
+      .delete()
+      .eq('id', catalogId);
+
+    if (error) {
+      console.error('Error removing product from catalog:', error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error removing product from catalog:', error);
+    return false;
+  }
+};
+
+export const updateCatalogPriceType = async (
+  catalogId: string,
+  priceType: 'price1' | 'price2' | 'final_price'
+): Promise<PublicCatalog | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('public_catalogs')
+      .update({ price_type: priceType })
+      .eq('id', catalogId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating catalog price type:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error updating catalog price type:', error);
+    return null;
+  }
+};
+
+export const updateCatalogDisplayOrder = async (
+  catalogId: string,
+  newOrder: number
+): Promise<PublicCatalog | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('public_catalogs')
+      .update({ display_order: newOrder })
+      .eq('id', catalogId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating catalog display order:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error updating catalog display order:', error);
+    return null;
+  }
+};
+
+export const updateCatalogImage = async (
+  catalogId: string,
+  imageUrl: string | null
+): Promise<PublicCatalog | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('public_catalogs')
+      .update({ image_url: imageUrl })
+      .eq('id', catalogId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating catalog image:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error updating catalog image:', error);
+    return null;
+  }
 };
