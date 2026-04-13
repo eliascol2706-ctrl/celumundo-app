@@ -359,26 +359,29 @@ export function InvoicesMenu() {
         throw new Error('Error al confirmar el pago');
       }
 
-      // Procesar inventario: reducir stock y eliminar IDs únicas
+      // ✅ Al aprobar una factura en confirmación:
+      // - El stock YA fue restado cuando se creó la factura
+      // - Las IDs únicas fueron INHABILITADAS (no eliminadas)
+      // - Los movimientos NO fueron registrados
+      //
+      // Entonces ahora debemos:
+      // 1. Convertir IDs inhabilitadas en eliminadas definitivamente
+      // 2. Registrar los movimientos de salida
       for (const item of selectedInvoice.items) {
         const product = products.find(p => p.id === item.productId);
         if (!product) continue;
 
-        const updates: any = {
-          stock: product.stock - item.quantity
-        };
-
-        // Si el producto tiene IDs únicas, eliminar las que se vendieron
+        // Si el producto usa IDs únicas, convertir las inhabilitadas en eliminadas
         if (item.unitIds && item.unitIds.length > 0 && product.registered_ids) {
-          const remainingIds = product.registered_ids.filter(
-            (idObj: any) => !item.unitIds.includes(idObj.id)
-          );
-          updates.registered_ids = remainingIds;
+          const { removeIds } = await import('../lib/unit-ids-utils');
+          const newRegisteredIds = removeIds(product.registered_ids, item.unitIds);
+
+          await updateProduct(product.id, {
+            registered_ids: newRegisteredIds
+          });
         }
 
-        await updateProduct(product.id, updates);
-
-        // Registrar movimiento de salida
+        // Registrar movimiento de salida (no se registró cuando se creó la factura en confirmación)
         await addMovement({
           type: 'exit',
           product_id: product.id,

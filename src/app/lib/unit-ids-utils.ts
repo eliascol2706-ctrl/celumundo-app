@@ -5,8 +5,9 @@
 export type UnitIdWithNote = {
   id: string;
   note: string;
-  disabled?: boolean; // Para facturas en confirmación
-  reservedBy?: string; // ID de la factura que la reservó
+  disabled?: boolean; // Para facturas en confirmación o cambios en espera
+  reservedBy?: string; // ID de la factura/cambio que la reservó
+  reservationType?: 'invoice' | 'exchange'; // Tipo de reserva
 };
 
 /**
@@ -115,4 +116,30 @@ export function enableIds(registeredIds: UnitIdWithNote[], invoiceId: string): U
  */
 export function removeIds(registeredIds: UnitIdWithNote[], idsToRemove: string[]): UnitIdWithNote[] {
   return registeredIds.filter(item => !idsToRemove.includes(item.id));
+}
+
+/**
+ * Restaura IDs al inventario con marca de "en cambio" (para cambios pendientes)
+ */
+export function restoreIdsForExchange(
+  registeredIds: UnitIdWithNote[],
+  idsToRestore: string[],
+  exchangeId: string
+): UnitIdWithNote[] {
+  const newIds = idsToRestore.map(id => ({
+    id,
+    note: '',
+    disabled: true,
+    reservedBy: exchangeId,
+    reservationType: 'exchange' as const
+  }));
+
+  return [...newIds, ...registeredIds];
+}
+
+/**
+ * Libera IDs marcadas como "en cambio" cuando se cancela un cambio
+ */
+export function releaseExchangeIds(registeredIds: UnitIdWithNote[], exchangeId: string): UnitIdWithNote[] {
+  return registeredIds.filter(item => !(item.reservedBy === exchangeId && item.reservationType === 'exchange'));
 }

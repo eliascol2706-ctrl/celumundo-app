@@ -2511,7 +2511,16 @@ export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_
 
     // Si el producto usa IDs únicas, agregarlas de vuelta
     if (originalProduct.use_unit_ids && exchangeData.original_unit_ids && exchangeData.original_unit_ids.length > 0) {
-      newRegisteredIds = [...exchangeData.original_unit_ids, ...newRegisteredIds];
+      if (isPendingExchange) {
+        // Para cambios pendientes, restaurar las IDs pero marcarlas como "en cambio"
+        const { restoreIdsForExchange } = await import('./unit-ids-utils');
+        newRegisteredIds = restoreIdsForExchange(newRegisteredIds, exchangeData.original_unit_ids, data.id);
+      } else {
+        // Para cambios completados, agregar las IDs normalmente como disponibles
+        const { convertToIdsWithNotes } = await import('./unit-ids-utils');
+        const idsAsObjects = convertToIdsWithNotes(exchangeData.original_unit_ids);
+        newRegisteredIds = [...idsAsObjects, ...newRegisteredIds];
+      }
     }
 
     await updateProduct(exchangeData.original_product_id, {
@@ -2622,16 +2631,30 @@ export const finalizeExchange = async (
       const newStock = newProduct.stock - finalizeData.new_quantity;
       let newRegisteredIds = newProduct.registered_ids || [];
 
-      // Si el producto usa IDs únicas, removerlas
+      // Si el producto usa IDs únicas, eliminarlas definitivamente
       if (newProduct.use_unit_ids && finalizeData.new_unit_ids && finalizeData.new_unit_ids.length > 0) {
-        newRegisteredIds = newRegisteredIds.filter((idObj: any) => {
-          const idStr = typeof idObj === 'object' ? idObj.id : idObj;
-          return !finalizeData.new_unit_ids?.includes(idStr);
-        });
+        const { removeIds } = await import('./unit-ids-utils');
+        newRegisteredIds = removeIds(newRegisteredIds, finalizeData.new_unit_ids);
       }
 
       await updateProduct(finalizeData.new_product_id, {
         stock: newStock,
+        registered_ids: newRegisteredIds
+      });
+    }
+
+    // 3.5. Liberar las IDs del producto original que estaban marcadas como "en cambio"
+    const { data: originalProduct } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', exchange.original_product_id)
+      .single();
+
+    if (originalProduct && originalProduct.use_unit_ids && exchange.original_unit_ids && exchange.original_unit_ids.length > 0) {
+      const { releaseExchangeIds } = await import('./unit-ids-utils');
+      const newRegisteredIds = releaseExchangeIds(originalProduct.registered_ids || [], exchangeId);
+
+      await updateProduct(exchange.original_product_id, {
         registered_ids: newRegisteredIds
       });
     }
@@ -2719,12 +2742,10 @@ export const cancelExchange = async (exchangeId: string): Promise<boolean> => {
       const newStock = originalProduct.stock - exchange.original_quantity;
       let newRegisteredIds = originalProduct.registered_ids || [];
 
-      // Si el producto usa IDs únicas, removerlas
+      // Si el producto usa IDs únicas, liberar las IDs que estaban marcadas como "en cambio"
       if (originalProduct.use_unit_ids && exchange.original_unit_ids && exchange.original_unit_ids.length > 0) {
-        newRegisteredIds = newRegisteredIds.filter((idObj: any) => {
-          const idStr = typeof idObj === 'object' ? idObj.id : idObj;
-          return !exchange.original_unit_ids?.includes(idStr);
-        });
+        const { releaseExchangeIds } = await import('./unit-ids-utils');
+        newRegisteredIds = releaseExchangeIds(newRegisteredIds, exchangeId);
       }
 
       await updateProduct(exchange.original_product_id, {
