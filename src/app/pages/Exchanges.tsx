@@ -189,14 +189,18 @@ export default function Exchanges() {
   const handleOriginalQuantityChange = (qty: number) => {
     if (!originalProduct) return;
     setOriginalQuantity(qty);
-    
+
     // Ajustar IDs únicas si aplica
     if (originalProduct.use_unit_ids) {
       if (exchangeType === 'invoice' && selectedInvoice) {
+        // Si es de factura, mantener las IDs de la factura hasta la cantidad
         const invoiceItem = selectedInvoice.items.find(item => item.productId === originalProduct.id);
         if (invoiceItem?.unitIds) {
           setOriginalUnitIds(invoiceItem.unitIds.slice(0, qty));
         }
+      } else {
+        // Para cambios directos y pendientes, limpiar las IDs cuando cambia la cantidad
+        setOriginalUnitIds([]);
       }
     }
   };
@@ -204,11 +208,10 @@ export default function Exchanges() {
   const handleNewQuantityChange = (qty: number) => {
     if (!newProduct) return;
     setNewQuantity(qty);
-    
-    // Ajustar IDs únicas si aplica
-    if (newProduct.use_unit_ids && newProduct.registered_ids) {
-      const ids = extractIds(newProduct.registered_ids);
-      setNewUnitIds(ids.slice(0, qty));
+
+    // Limpiar IDs si la cantidad cambió
+    if (newProduct.use_unit_ids) {
+      setNewUnitIds([]);
     }
   };
 
@@ -845,17 +848,33 @@ export default function Exchanges() {
                       />
                     </div>
 
-                    {originalProduct.use_unit_ids && exchangeType === 'direct' && (
+                    {originalProduct.use_unit_ids && (exchangeType === 'direct' || exchangeType === 'pending') && (
                       <div className="space-y-2">
-                        <Label>IDs Únicas</Label>
-                        <Input
-                          placeholder="Ej: 0001,0002"
-                          value={originalUnitIds.join(',')}
-                          onChange={(e) => setOriginalUnitIds(e.target.value.split(',').map(id => id.trim()))}
-                        />
-                        <p className="text-xs text-muted-foreground">
-                          Separar con comas. Se requieren {originalQuantity} ID(s)
-                        </p>
+                        <Label>IDs Únicas (Se requieren {originalQuantity} ID(s) de 4 dígitos)</Label>
+                        <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                          {Array.from({ length: originalQuantity }).map((_, index) => (
+                            <div key={index} className="space-y-1">
+                              <Label className="text-xs text-muted-foreground text-center block">#{index + 1}</Label>
+                              <Input
+                                placeholder="0001"
+                                maxLength={4}
+                                value={originalUnitIds[index] || ''}
+                                onChange={(e) => {
+                                  const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                  const newIds = [...originalUnitIds];
+                                  newIds[index] = value.padStart(4, '0');
+                                  setOriginalUnitIds(newIds.filter(id => id && id !== '0000'));
+                                }}
+                                className="font-mono text-center text-sm h-9"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        {originalUnitIds.length !== originalQuantity && (
+                          <p className="text-xs text-red-600 dark:text-red-400">
+                            ⚠️ Debes ingresar exactamente {originalQuantity} ID(s)
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -948,28 +967,34 @@ export default function Exchanges() {
 
                     {newProduct.use_unit_ids && (
                       <div className="space-y-2">
-                        <Label>IDs Únicas</Label>
-                        <Select
-                          value={newUnitIds[0] || ''}
-                          onValueChange={(value) => {
-                            const ids = extractIds(newProduct.registered_ids || []);
-                            const selectedIds = ids.slice(0, newQuantity);
-                            if (selectedIds.includes(value)) {
-                              setNewUnitIds(selectedIds.filter(id => ids.indexOf(id) === ids.indexOf(value) ? true : false).slice(0, newQuantity));
-                            }
-                          }}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="IDs seleccionadas automáticamente" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {extractIds(newProduct.registered_ids || []).slice(0, 10).map(id => (
-                              <SelectItem key={id} value={id}>{id}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-muted-foreground">
-                          IDs seleccionadas: {newUnitIds.join(', ')}
+                        <Label>IDs Únicas (Se requieren {newQuantity} ID(s) de 4 dígitos)</Label>
+                        <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                          {Array.from({ length: newQuantity }).map((_, index) => (
+                            <div key={index} className="space-y-1">
+                              <Label className="text-xs text-muted-foreground text-center block">#{index + 1}</Label>
+                              <Input
+                                placeholder="0001"
+                                maxLength={4}
+                                value={newUnitIds[index] || ''}
+                                onChange={(e) => {
+                                  const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                  const newIds = [...newUnitIds];
+                                  newIds[index] = value.padStart(4, '0');
+                                  setNewUnitIds(newIds.filter(id => id && id !== '0000'));
+                                }}
+                                className="font-mono text-center text-sm h-9"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        {newUnitIds.length !== newQuantity && (
+                          <p className="text-xs text-red-600 dark:text-red-400">
+                            ⚠️ Debes ingresar exactamente {newQuantity} ID(s)
+                          </p>
+                        )}
+                        <p className="text-xs text-blue-600 dark:text-blue-400">
+                          💡 IDs disponibles: {extractIds(newProduct.registered_ids || []).slice(0, 10).join(', ')}
+                          {extractIds(newProduct.registered_ids || []).length > 10 && '...'}
                         </p>
                       </div>
                     )}
@@ -1435,9 +1460,9 @@ export default function Exchanges() {
                         onChange={(e) => {
                           const qty = parseInt(e.target.value) || 1;
                           setFinalizeNewQuantity(qty);
-                          if (finalizeNewProduct.use_unit_ids && finalizeNewProduct.registered_ids) {
-                            const ids = extractIds(finalizeNewProduct.registered_ids);
-                            setFinalizeNewUnitIds(ids.slice(0, qty));
+                          // Limpiar IDs cuando cambia la cantidad
+                          if (finalizeNewProduct.use_unit_ids) {
+                            setFinalizeNewUnitIds([]);
                           }
                         }}
                       />
@@ -1453,6 +1478,40 @@ export default function Exchanges() {
                         onChange={(e) => setFinalizeNewPrice(parseFloat(e.target.value) || 0)}
                       />
                     </div>
+
+                    {finalizeNewProduct.use_unit_ids && (
+                      <div className="space-y-2">
+                        <Label>IDs Únicas (Se requieren {finalizeNewQuantity} ID(s) de 4 dígitos)</Label>
+                        <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+                          {Array.from({ length: finalizeNewQuantity }).map((_, index) => (
+                            <div key={index} className="space-y-1">
+                              <Label className="text-xs text-muted-foreground text-center block">#{index + 1}</Label>
+                              <Input
+                                placeholder="0001"
+                                maxLength={4}
+                                value={finalizeNewUnitIds[index] || ''}
+                                onChange={(e) => {
+                                  const value = e.target.value.replace(/\D/g, '').slice(0, 4);
+                                  const newIds = [...finalizeNewUnitIds];
+                                  newIds[index] = value.padStart(4, '0');
+                                  setFinalizeNewUnitIds(newIds.filter(id => id && id !== '0000'));
+                                }}
+                                className="font-mono text-center text-sm h-9"
+                              />
+                            </div>
+                          ))}
+                        </div>
+                        {finalizeNewUnitIds.length !== finalizeNewQuantity && (
+                          <p className="text-xs text-red-600 dark:text-red-400">
+                            ⚠️ Debes ingresar exactamente {finalizeNewQuantity} ID(s)
+                          </p>
+                        )}
+                        <p className="text-xs text-blue-600 dark:text-blue-400">
+                          💡 IDs disponibles: {extractIds(finalizeNewProduct.registered_ids || []).slice(0, 10).join(', ')}
+                          {extractIds(finalizeNewProduct.registered_ids || []).length > 10 && '...'}
+                        </p>
+                      </div>
+                    )}
 
                     <div className="p-3 bg-muted rounded-lg">
                       <p className="text-sm font-medium">Total Nuevo Producto:</p>
