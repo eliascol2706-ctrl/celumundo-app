@@ -24,7 +24,8 @@ import {
   Eye,
   EyeOff,
   RefreshCw,
-  Shield
+  Shield,
+  Wallet
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { getCurrentUser, logoutUser, getSession, getProducts, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession, canCreateInvoice } from '../lib/supabase';
@@ -61,6 +62,7 @@ const adminNavigation = [
   {
     section: 'Finanzas y Reportes',
     items: [
+      { name: 'Gestión de Finanzas', href: '/facturacion/historial', icon: Wallet },
       { name: 'Gastos', href: '/gastos', icon: Receipt },
       { name: 'Cierres', href: '/cierres', icon: DoorOpen },
       { name: 'Reportes', href: '/reportes', icon: BarChart3 },

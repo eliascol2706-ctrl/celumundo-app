@@ -10,9 +10,11 @@ import {
   getProducts,
   getExpenses,
   getCustomers,
+  getWarranties,
   type CreditPayment,
   type Return,
-  type Exchange
+  type Exchange,
+  type Warranty
 } from '../lib/supabase';
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
@@ -116,6 +118,7 @@ export function FinancialManagement() {
   const [products, setProducts] = useState<any[]>([]);
   const [expenses, setExpenses] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
+  const [warranties, setWarranties] = useState<Warranty[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -135,6 +138,9 @@ export function FinancialManagement() {
   const [isDailyBreakdownOpen, setIsDailyBreakdownOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(getColombiaDate());
 
+  // Estado para modal de desglose de ingresos
+  const [isIncomeBreakdownOpen, setIsIncomeBreakdownOpen] = useState(false);
+
   // Filtros para modales
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('');
@@ -148,13 +154,14 @@ export function FinancialManagement() {
 
   const loadData = async () => {
     setIsLoading(true);
-    const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData] = await Promise.all([
+    const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData, warrantiesData] = await Promise.all([
       getInvoices(),
       getReturns(),
       getExchanges(),
       getProducts(),
       getExpenses(),
-      getCustomers()
+      getCustomers(),
+      getWarranties()
     ]);
     setInvoices(invoicesData);
     setReturns(returnsData);
@@ -162,6 +169,7 @@ export function FinancialManagement() {
     setProducts(productsData);
     setExpenses(expensesData);
     setCustomers(customersData);
+    setWarranties(warrantiesData);
     setIsLoading(false);
   };
 
@@ -867,7 +875,24 @@ export function FinancialManagement() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-zinc-900">{formatCOP(stats.currentMonth.ingresoNeto)}</div>
-                <div className="flex items-center gap-1 mt-2">
+
+                {/* Desglose */}
+                <div className="mt-3 pt-3 border-t border-zinc-200 space-y-1">
+                  <div className="flex justify-between text-xs text-zinc-600">
+                    <span>Facturas pagas</span>
+                    <span className="font-medium">{formatCOP(stats.currentMonth.facturasPagas)}</span>
+                  </div>
+                  {stats.currentMonth.impactoCambios !== 0 && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-zinc-600">Impacto cambios</span>
+                      <span className={`font-medium ${stats.currentMonth.impactoCambios > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                        {stats.currentMonth.impactoCambios > 0 ? '+' : ''}{formatCOP(stats.currentMonth.impactoCambios)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1 mt-3">
                   {stats.ingresosChange >= 0 ? (
                     <ArrowUpRight className="w-4 h-4 text-emerald-600" />
                   ) : (
@@ -878,6 +903,16 @@ export function FinancialManagement() {
                   </span>
                   <span className="text-xs text-zinc-500">vs mes anterior</span>
                 </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full mt-3"
+                  onClick={() => setIsIncomeBreakdownOpen(true)}
+                >
+                  <Eye className="w-4 h-4 mr-2" />
+                  Desglose
+                </Button>
               </CardContent>
             </Card>
 
@@ -893,7 +928,15 @@ export function FinancialManagement() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-zinc-900">{formatCOP(stats.currentMonth.totalGastos)}</div>
-                <div className="flex items-center gap-1 mt-2">
+
+                {/* Desglose */}
+                <div className="mt-3 pt-3 border-t border-zinc-200">
+                  <div className="text-xs text-zinc-500">
+                    Gastos operativos del mes
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 mt-3">
                   {stats.gastosChange >= 0 ? (
                     <ArrowUpRight className="w-4 h-4 text-red-600" />
                   ) : (
@@ -919,7 +962,24 @@ export function FinancialManagement() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-zinc-900">{formatCOP(stats.currentMonth.ganancias)}</div>
-                <div className="flex items-center gap-1 mt-2">
+
+                {/* Desglose */}
+                <div className="mt-3 pt-3 border-t border-zinc-200 space-y-1">
+                  <div className="flex justify-between text-xs">
+                    <span className="text-zinc-600">Ingresos</span>
+                    <span className="font-medium text-emerald-600">+{formatCOP(stats.currentMonth.ingresoNeto)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-zinc-600">Costos productos</span>
+                    <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.totalCostos)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-zinc-600">Gastos operativos</span>
+                    <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.totalGastos)}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 mt-3">
                   {stats.gananciasChange >= 0 ? (
                     <ArrowUpRight className="w-4 h-4 text-emerald-600" />
                   ) : (
@@ -930,6 +990,7 @@ export function FinancialManagement() {
                   </span>
                   <span className="text-xs text-zinc-500">vs mes anterior</span>
                 </div>
+
                 <Button
                   variant="outline"
                   size="sm"
@@ -954,7 +1015,23 @@ export function FinancialManagement() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-zinc-900">{stats.currentMonth.margen.toFixed(1)}%</div>
-                <div className="flex items-center gap-1 mt-2">
+
+                {/* Desglose */}
+                <div className="mt-3 pt-3 border-t border-zinc-200 space-y-1">
+                  <div className="text-xs text-zinc-500">
+                    Fórmula: (Ganancias / Ingresos) × 100
+                  </div>
+                  <div className="flex justify-between text-xs text-zinc-600">
+                    <span>Ganancias</span>
+                    <span className="font-medium">{formatCOP(stats.currentMonth.ganancias)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-zinc-600">
+                    <span>Ingresos</span>
+                    <span className="font-medium">{formatCOP(stats.currentMonth.ingresoNeto)}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 mt-3">
                   {stats.currentMonth.margen >= stats.previousMonth.margen ? (
                     <ArrowUpRight className="w-4 h-4 text-emerald-600" />
                   ) : (
@@ -1608,6 +1685,375 @@ export function FinancialManagement() {
               />
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Desglose de Ingresos del Mes */}
+      <Dialog open={isIncomeBreakdownOpen} onOpenChange={setIsIncomeBreakdownOpen}>
+        <DialogContent className="max-w-6xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="w-5 h-5 text-emerald-600" />
+              Desglose Detallado de Ingresos
+            </DialogTitle>
+            <DialogDescription>
+              Vista detallada de todos los componentes que conforman los ingresos del mes
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6">
+            {/* Month selector */}
+            <div>
+              <Label htmlFor="month-selector" className="text-sm font-medium mb-2 block">
+                Mes a analizar
+              </Label>
+              <Input
+                id="month-selector"
+                type="month"
+                defaultValue={stats.thisMonth}
+                onChange={(e) => {
+                  // This would require adding state for selected month if needed for filtering
+                  // For now, showing current month data
+                }}
+                className="w-64"
+              />
+            </div>
+
+            {/* Facturas Pagas */}
+            <div className="border border-emerald-200 rounded-lg p-4 bg-emerald-50">
+              <h3 className="font-semibold text-lg mb-3 flex items-center gap-2 text-emerald-700">
+                <Receipt className="w-5 h-5" />
+                Facturas Pagas
+              </h3>
+
+              {(() => {
+                const paidInvoices = invoices.filter(inv =>
+                  extractColombiaDate(inv.date).startsWith(stats.thisMonth) &&
+                  (inv.status === 'paid' || inv.status === 'partial_return')
+                );
+                const totalPaidInvoices = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
+
+                return (
+                  <>
+                    {paidInvoices.length > 0 ? (
+                      <div className="border border-emerald-300 rounded-lg overflow-hidden bg-white">
+                        <div className="max-h-60 overflow-y-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-emerald-100 sticky top-0">
+                              <tr>
+                                <th className="text-left py-2 px-3 font-medium">Número</th>
+                                <th className="text-left py-2 px-3 font-medium">Cliente</th>
+                                <th className="text-left py-2 px-3 font-medium">Fecha</th>
+                                <th className="text-left py-2 px-3 font-medium">Estado</th>
+                                <th className="text-right py-2 px-3 font-medium">Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {paidInvoices.map((inv) => (
+                                <tr key={inv.id} className="border-t border-emerald-100 hover:bg-emerald-50">
+                                  <td className="py-2 px-3 font-medium">{inv.number}</td>
+                                  <td className="py-2 px-3">{inv.customer_name || 'Cliente general'}</td>
+                                  <td className="py-2 px-3">{extractColombiaDate(inv.date)}</td>
+                                  <td className="py-2 px-3">
+                                    <Badge variant={inv.status === 'paid' ? 'default' : 'secondary'} className="text-xs">
+                                      {inv.status === 'paid' ? 'Pagada' : 'Parcial'}
+                                    </Badge>
+                                  </td>
+                                  <td className="py-2 px-3 text-right font-semibold text-emerald-600">
+                                    {formatCOP(inv.total)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-6 text-zinc-500 bg-white rounded-lg border border-emerald-200">
+                        <Receipt className="w-10 h-10 mx-auto mb-2 text-zinc-300" />
+                        <p className="text-sm">No hay facturas pagas este mes</p>
+                      </div>
+                    )}
+                    <div className="mt-3 flex justify-between items-center px-2">
+                      <span className="text-sm font-medium text-emerald-800">Total Facturas Pagas:</span>
+                      <span className="text-lg font-bold text-emerald-700">{formatCOP(totalPaidInvoices)}</span>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Devoluciones */}
+            <div className="border border-red-200 rounded-lg p-4 bg-red-50">
+              <h3 className="font-semibold text-lg mb-3 flex items-center gap-2 text-red-700">
+                <TrendingDown className="w-5 h-5" />
+                Devoluciones
+              </h3>
+
+              {(() => {
+                const monthReturns = returns.filter(ret =>
+                  extractColombiaDate(ret.date).startsWith(stats.thisMonth)
+                );
+                const totalReturns = monthReturns.reduce((sum, ret) => sum + ret.total, 0);
+
+                return (
+                  <>
+                    {monthReturns.length > 0 ? (
+                      <div className="border border-red-300 rounded-lg overflow-hidden bg-white">
+                        <div className="max-h-60 overflow-y-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-red-100 sticky top-0">
+                              <tr>
+                                <th className="text-left py-2 px-3 font-medium">Factura</th>
+                                <th className="text-left py-2 px-3 font-medium">Cliente</th>
+                                <th className="text-left py-2 px-3 font-medium">Fecha</th>
+                                <th className="text-left py-2 px-3 font-medium">Motivo</th>
+                                <th className="text-right py-2 px-3 font-medium">Monto</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {monthReturns.map((ret) => {
+                                const invoice = invoices.find(inv => inv.id === ret.invoice_id);
+                                return (
+                                  <tr key={ret.id} className="border-t border-red-100 hover:bg-red-50">
+                                    <td className="py-2 px-3 font-medium">{invoice?.number || 'N/A'}</td>
+                                    <td className="py-2 px-3">{ret.customer_name || 'N/A'}</td>
+                                    <td className="py-2 px-3">{extractColombiaDate(ret.date)}</td>
+                                    <td className="py-2 px-3 text-xs">{ret.reason || 'Sin motivo'}</td>
+                                    <td className="py-2 px-3 text-right font-semibold text-red-600">
+                                      -{formatCOP(ret.total)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-6 text-zinc-500 bg-white rounded-lg border border-red-200">
+                        <TrendingDown className="w-10 h-10 mx-auto mb-2 text-zinc-300" />
+                        <p className="text-sm">No hay devoluciones este mes</p>
+                      </div>
+                    )}
+                    <div className="mt-3 flex justify-between items-center px-2">
+                      <span className="text-sm font-medium text-red-800">Total Devoluciones:</span>
+                      <span className="text-lg font-bold text-red-700">-{formatCOP(totalReturns)}</span>
+                    </div>
+                    <p className="text-xs text-red-600 mt-1 px-2">
+                      * Las devoluciones ya están reflejadas en el estado de las facturas (parcialmente devueltas o devueltas)
+                    </p>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Cambios */}
+            <div className="border border-blue-200 rounded-lg p-4 bg-blue-50">
+              <h3 className="font-semibold text-lg mb-3 flex items-center gap-2 text-blue-700">
+                <ShoppingCart className="w-5 h-5" />
+                Cambios (Intercambios)
+              </h3>
+
+              {(() => {
+                const monthExchanges = exchanges.filter(ex =>
+                  extractColombiaDate(ex.date).startsWith(stats.thisMonth)
+                );
+                const totalExchangeImpact = monthExchanges.reduce((sum, ex) => sum + ex.price_difference, 0);
+                const positiveExchanges = monthExchanges.filter(ex => ex.price_difference > 0);
+                const negativeExchanges = monthExchanges.filter(ex => ex.price_difference < 0);
+                const neutralExchanges = monthExchanges.filter(ex => ex.price_difference === 0);
+
+                return (
+                  <>
+                    {monthExchanges.length > 0 ? (
+                      <div className="border border-blue-300 rounded-lg overflow-hidden bg-white">
+                        <div className="max-h-60 overflow-y-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-blue-100 sticky top-0">
+                              <tr>
+                                <th className="text-left py-2 px-3 font-medium">Factura</th>
+                                <th className="text-left py-2 px-3 font-medium">Cliente</th>
+                                <th className="text-left py-2 px-3 font-medium">Fecha</th>
+                                <th className="text-left py-2 px-3 font-medium">Tipo</th>
+                                <th className="text-right py-2 px-3 font-medium">Impacto</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {monthExchanges.map((ex) => {
+                                const invoice = invoices.find(inv => inv.id === ex.invoice_id);
+                                return (
+                                  <tr key={ex.id} className="border-t border-blue-100 hover:bg-blue-50">
+                                    <td className="py-2 px-3 font-medium">{invoice?.number || 'N/A'}</td>
+                                    <td className="py-2 px-3">{ex.customer_name || 'N/A'}</td>
+                                    <td className="py-2 px-3">{extractColombiaDate(ex.date)}</td>
+                                    <td className="py-2 px-3">
+                                      {ex.price_difference > 0 ? (
+                                        <Badge className="bg-emerald-100 text-emerald-700 text-xs">Upgrade</Badge>
+                                      ) : ex.price_difference < 0 ? (
+                                        <Badge className="bg-orange-100 text-orange-700 text-xs">Downgrade</Badge>
+                                      ) : (
+                                        <Badge variant="secondary" className="text-xs">Neutro</Badge>
+                                      )}
+                                    </td>
+                                    <td className={`py-2 px-3 text-right font-semibold ${
+                                      ex.price_difference > 0 ? 'text-emerald-600' :
+                                      ex.price_difference < 0 ? 'text-red-600' :
+                                      'text-zinc-600'
+                                    }`}>
+                                      {ex.price_difference > 0 ? '+' : ''}{formatCOP(ex.price_difference)}
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-6 text-zinc-500 bg-white rounded-lg border border-blue-200">
+                        <ShoppingCart className="w-10 h-10 mx-auto mb-2 text-zinc-300" />
+                        <p className="text-sm">No hay cambios este mes</p>
+                      </div>
+                    )}
+                    <div className="mt-3 space-y-2">
+                      <div className="flex justify-between items-center px-2 text-xs text-zinc-600">
+                        <span>Cambios positivos ({positiveExchanges.length}):</span>
+                        <span className="text-emerald-600 font-medium">
+                          +{formatCOP(positiveExchanges.reduce((sum, ex) => sum + ex.price_difference, 0))}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center px-2 text-xs text-zinc-600">
+                        <span>Cambios negativos ({negativeExchanges.length}):</span>
+                        <span className="text-red-600 font-medium">
+                          {formatCOP(negativeExchanges.reduce((sum, ex) => sum + ex.price_difference, 0))}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center px-2 text-xs text-zinc-600">
+                        <span>Cambios neutros ({neutralExchanges.length}):</span>
+                        <span className="text-zinc-600 font-medium">{formatCOP(0)}</span>
+                      </div>
+                      <div className="flex justify-between items-center px-2 pt-2 border-t border-blue-200">
+                        <span className="text-sm font-medium text-blue-800">Impacto Total de Cambios:</span>
+                        <span className={`text-lg font-bold ${
+                          totalExchangeImpact > 0 ? 'text-emerald-700' :
+                          totalExchangeImpact < 0 ? 'text-red-700' :
+                          'text-blue-700'
+                        }`}>
+                          {totalExchangeImpact > 0 ? '+' : ''}{formatCOP(totalExchangeImpact)}
+                        </span>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Garantías */}
+            <div className="border border-purple-200 rounded-lg p-4 bg-purple-50">
+              <h3 className="font-semibold text-lg mb-3 flex items-center gap-2 text-purple-700">
+                <CheckCircle className="w-5 h-5" />
+                Garantías
+              </h3>
+
+              {(() => {
+                const monthWarranties = warranties.filter(war =>
+                  extractColombiaDate(war.date).startsWith(stats.thisMonth)
+                );
+
+                return (
+                  <>
+                    {monthWarranties.length > 0 ? (
+                      <div className="border border-purple-300 rounded-lg overflow-hidden bg-white">
+                        <div className="max-h-60 overflow-y-auto">
+                          <table className="w-full text-sm">
+                            <thead className="bg-purple-100 sticky top-0">
+                              <tr>
+                                <th className="text-left py-2 px-3 font-medium">Factura</th>
+                                <th className="text-left py-2 px-3 font-medium">Cliente</th>
+                                <th className="text-left py-2 px-3 font-medium">Fecha</th>
+                                <th className="text-left py-2 px-3 font-medium">Estado</th>
+                                <th className="text-left py-2 px-3 font-medium">Tipo</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {monthWarranties.map((war) => {
+                                const invoice = invoices.find(inv => inv.id === war.invoice_id);
+                                return (
+                                  <tr key={war.id} className="border-t border-purple-100 hover:bg-purple-50">
+                                    <td className="py-2 px-3 font-medium">{invoice?.number || 'N/A'}</td>
+                                    <td className="py-2 px-3">{war.customer_name || 'N/A'}</td>
+                                    <td className="py-2 px-3">{extractColombiaDate(war.date)}</td>
+                                    <td className="py-2 px-3">
+                                      <Badge
+                                        variant={war.status === 'resolved' ? 'default' : 'secondary'}
+                                        className="text-xs"
+                                      >
+                                        {war.status === 'resolved' ? 'Resuelta' : 'Pendiente'}
+                                      </Badge>
+                                    </td>
+                                    <td className="py-2 px-3 text-xs">{war.warranty_type || 'N/A'}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-center py-6 text-zinc-500 bg-white rounded-lg border border-purple-200">
+                        <CheckCircle className="w-10 h-10 mx-auto mb-2 text-zinc-300" />
+                        <p className="text-sm">No hay garantías este mes</p>
+                      </div>
+                    )}
+                    <div className="mt-3 flex justify-between items-center px-2">
+                      <span className="text-sm font-medium text-purple-800">Total Garantías:</span>
+                      <span className="text-lg font-bold text-purple-700">{monthWarranties.length}</span>
+                    </div>
+                    <p className="text-xs text-purple-600 mt-1 px-2">
+                      * Las garantías representan reemplazos sin impacto monetario directo en ingresos
+                    </p>
+                  </>
+                );
+              })()}
+            </div>
+
+            {/* Resumen Final */}
+            <div className="border-2 border-zinc-300 rounded-lg p-4 bg-zinc-50">
+              <h3 className="font-semibold text-lg mb-4 text-zinc-800">Cálculo de Ingresos Netos del Mes</h3>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between py-2 border-b border-zinc-200">
+                  <span className="text-zinc-700">Facturas Pagas</span>
+                  <span className="font-semibold text-emerald-600">+{formatCOP(stats.currentMonth.facturasPagas)}</span>
+                </div>
+                <div className="flex justify-between py-2 border-b border-zinc-200">
+                  <span className="text-zinc-700">Impacto de Cambios</span>
+                  <span className={`font-semibold ${
+                    stats.currentMonth.impactoCambios > 0 ? 'text-emerald-600' :
+                    stats.currentMonth.impactoCambios < 0 ? 'text-red-600' :
+                    'text-zinc-600'
+                  }`}>
+                    {stats.currentMonth.impactoCambios > 0 ? '+' : ''}{formatCOP(stats.currentMonth.impactoCambios)}
+                  </span>
+                </div>
+                <div className="flex justify-between py-3 pt-4 border-t-2 border-zinc-400">
+                  <span className="text-lg font-bold text-zinc-900">Ingresos Netos</span>
+                  <span className="text-xl font-bold text-emerald-600">{formatCOP(stats.currentMonth.ingresoNeto)}</span>
+                </div>
+              </div>
+              <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded text-xs text-blue-700">
+                <strong>Nota:</strong> Los ingresos netos no restan las devoluciones porque las facturas con estado "devuelta"
+                ya están excluidas del cálculo de facturas pagas. Las facturas "parcialmente devueltas" se incluyen
+                con su total original.
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsIncomeBreakdownOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

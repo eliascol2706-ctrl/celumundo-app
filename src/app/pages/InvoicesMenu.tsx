@@ -999,20 +999,6 @@ export function InvoicesMenu() {
               )}
             </CardContent>
           </Card>
-
-          {/* Botón de Gestión de Finanzas - Solo para Admin */}
-          {currentUser?.role === 'admin' && (
-            <div className="mt-6 text-center">
-              <Button
-                variant="outline"
-                onClick={() => navigate('/facturacion/historial')}
-                className="px-8 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 border-zinc-300 dark:border-zinc-700"
-              >
-                <FileText className="w-4 h-4 mr-2" />
-                Gestión de Finanzas
-              </Button>
-            </div>
-          )}
         </div>
       </div>
 
