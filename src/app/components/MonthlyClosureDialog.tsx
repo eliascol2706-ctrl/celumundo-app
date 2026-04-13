@@ -375,6 +375,112 @@ export function MonthlyClosureDialog({
                   </CardContent>
                 </Card>
 
+                {/* Explicación de Diferencia entre Ingresos Totales e Ingresos Netos */}
+                <Card className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 border-amber-300 dark:border-amber-800">
+                  <CardHeader>
+                    <CardTitle className="text-base font-semibold text-amber-900 dark:text-amber-100 flex items-center gap-2">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      Justificación: ¿Por qué difieren los Ingresos del Mes y los Ingresos Netos?
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-4">
+                      {/* Resumen de la diferencia */}
+                      <div className="bg-white/70 dark:bg-zinc-900/70 p-4 rounded-lg border border-amber-200 dark:border-amber-800">
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                          <div>
+                            <p className="text-xs text-amber-700 dark:text-amber-300 mb-1">Ingresos del Mes (Cierres)</p>
+                            <p className="text-xl font-bold text-amber-900 dark:text-amber-100">
+                              COP {formatCOP(monthlyStats.totalRevenue)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-emerald-700 dark:text-emerald-300 mb-1">Ingresos Netos (Facturas)</p>
+                            <p className="text-xl font-bold text-emerald-900 dark:text-emerald-100">
+                              COP {formatCOP(monthlyStats.netRevenue)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-zinc-700 dark:text-zinc-300 mb-1">Diferencia</p>
+                            <p className={`text-xl font-bold ${
+                              Math.abs(monthlyStats.totalRevenue - monthlyStats.netRevenue) < 1000
+                                ? 'text-green-600 dark:text-green-400'
+                                : 'text-orange-600 dark:text-orange-400'
+                            }`}>
+                              COP {formatCOP(Math.abs(monthlyStats.totalRevenue - monthlyStats.netRevenue))}
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Explicación detallada */}
+                        <div className="space-y-3 pt-3 border-t border-amber-200 dark:border-amber-800">
+                          <div>
+                            <p className="text-sm font-semibold text-amber-900 dark:text-amber-100 mb-2">
+                              📊 Cálculo: Ingresos del Mes (Basado en Cierres Diarios)
+                            </p>
+                            <div className="pl-4 space-y-1 text-sm text-amber-800 dark:text-amber-200">
+                              <p>• Suma de todos los cierres diarios del mes</p>
+                              <p>• Incluye todas las facturas registradas cada día, sin importar su estado final</p>
+                              <p>• Puede incluir facturas que luego fueron devueltas completamente</p>
+                              <p className="font-mono text-xs bg-amber-100 dark:bg-amber-900/30 p-2 rounded mt-2">
+                                = Suma de {monthlyStats.closures.length} cierres diarios = COP {formatCOP(monthlyStats.totalRevenue)}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div>
+                            <p className="text-sm font-semibold text-emerald-900 dark:text-emerald-100 mb-2">
+                              💰 Cálculo: Ingresos Netos (Basado en Estado de Facturas)
+                            </p>
+                            <div className="pl-4 space-y-1 text-sm text-emerald-800 dark:text-emerald-200">
+                              <p>• Evalúa cada factura individualmente según su estado actual</p>
+                              <p>• Solo cuenta facturas con estado "Pagada" o "Parcialmente Devuelta"</p>
+                              <p>• Excluye automáticamente facturas con estado "Devuelta Completa"</p>
+                              <p>• Incluye el impacto de cambios (diferencias de precio)</p>
+                              <p className="font-mono text-xs bg-emerald-100 dark:bg-emerald-900/30 p-2 rounded mt-2">
+                                = Facturas Pagadas + Facturas Parcialmente Devueltas + Impacto Cambios = COP {formatCOP(monthlyStats.netRevenue)}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="bg-orange-100 dark:bg-orange-900/30 p-3 rounded-lg border border-orange-300 dark:border-orange-700">
+                            <p className="text-sm font-semibold text-orange-900 dark:text-orange-100 mb-2">
+                              ⚠️ ¿Por qué hay diferencia?
+                            </p>
+                            <div className="text-xs text-orange-800 dark:text-orange-200 space-y-1">
+                              <p>
+                                <strong>Motivo principal:</strong> Los cierres diarios capturan el momento en que se creó la factura,
+                                pero los Ingresos Netos reflejan el estado actual de cada factura.
+                              </p>
+                              <p className="mt-2">
+                                <strong>Ejemplos de diferencias:</strong>
+                              </p>
+                              <ul className="list-disc list-inside pl-2 space-y-1">
+                                <li>Una factura incluida en un cierre diario puede haber sido devuelta completamente después</li>
+                                <li>Una factura parcialmente devuelta cuenta su total en cierres, pero su impacto real es menor</li>
+                                <li>Los cambios de productos generan diferencias de precio que se reflejan solo en Ingresos Netos</li>
+                              </ul>
+                            </div>
+                          </div>
+
+                          <div className="bg-green-100 dark:bg-green-900/30 p-3 rounded-lg border border-green-300 dark:border-green-700">
+                            <p className="text-sm font-semibold text-green-900 dark:text-green-100 mb-1">
+                              ✅ Conclusión
+                            </p>
+                            <p className="text-xs text-green-800 dark:text-green-200">
+                              Los <strong>Ingresos Netos</strong> son más precisos porque consideran el estado final de cada operación,
+                              mientras que los <strong>Ingresos del Mes</strong> son un registro histórico del momento del cierre.
+                              Ambos valores son correctos, pero miden cosas diferentes.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 {/* Nota explicativa */}
                 <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
                   <p className="text-sm text-blue-800 dark:text-blue-200">

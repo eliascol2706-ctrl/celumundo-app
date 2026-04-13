@@ -1783,18 +1783,24 @@ export function FinancialManagement() {
               })()}
             </div>
 
-            {/* Devoluciones */}
+            {/* Devoluciones Parciales */}
             <div className="border border-red-200 rounded-lg p-4 bg-red-50">
               <h3 className="font-semibold text-lg mb-3 flex items-center gap-2 text-red-700">
                 <TrendingDown className="w-5 h-5" />
-                Devoluciones
+                Devoluciones Parciales
               </h3>
 
               {(() => {
-                const monthReturns = returns.filter(ret =>
-                  extractColombiaDate(ret.date).startsWith(stats.thisMonth)
-                );
-                const totalReturns = monthReturns.reduce((sum, ret) => sum + ret.total, 0);
+                // Filtrar solo devoluciones que corresponden a facturas con estado "partial_return"
+                const monthReturns = returns.filter(ret => {
+                  const retDate = extractColombiaDate(ret.date);
+                  if (!retDate.startsWith(stats.thisMonth)) return false;
+
+                  // Verificar que la factura asociada tenga estado "partial_return"
+                  const invoice = invoices.find(inv => inv.id === ret.invoice_id);
+                  return invoice?.status === 'partial_return';
+                });
+                const totalPartialReturns = monthReturns.reduce((sum, ret) => sum + ret.total, 0);
 
                 return (
                   <>
@@ -1808,7 +1814,7 @@ export function FinancialManagement() {
                                 <th className="text-left py-2 px-3 font-medium">Cliente</th>
                                 <th className="text-left py-2 px-3 font-medium">Fecha</th>
                                 <th className="text-left py-2 px-3 font-medium">Motivo</th>
-                                <th className="text-right py-2 px-3 font-medium">Monto</th>
+                                <th className="text-right py-2 px-3 font-medium">Monto Devuelto</th>
                               </tr>
                             </thead>
                             <tbody>
@@ -1833,15 +1839,15 @@ export function FinancialManagement() {
                     ) : (
                       <div className="text-center py-6 text-zinc-500 bg-white rounded-lg border border-red-200">
                         <TrendingDown className="w-10 h-10 mx-auto mb-2 text-zinc-300" />
-                        <p className="text-sm">No hay devoluciones este mes</p>
+                        <p className="text-sm">No hay devoluciones parciales este mes</p>
                       </div>
                     )}
                     <div className="mt-3 flex justify-between items-center px-2">
-                      <span className="text-sm font-medium text-red-800">Total Devoluciones:</span>
-                      <span className="text-lg font-bold text-red-700">-{formatCOP(totalReturns)}</span>
+                      <span className="text-sm font-medium text-red-800">Total Devoluciones Parciales:</span>
+                      <span className="text-lg font-bold text-red-700">-{formatCOP(totalPartialReturns)}</span>
                     </div>
                     <p className="text-xs text-red-600 mt-1 px-2">
-                      * Las devoluciones ya están reflejadas en el estado de las facturas (parcialmente devueltas o devueltas)
+                      * Solo se muestran devoluciones de facturas parcialmente devueltas que impactan los ingresos netos
                     </p>
                   </>
                 );
