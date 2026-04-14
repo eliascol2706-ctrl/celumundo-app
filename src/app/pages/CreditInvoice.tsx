@@ -21,7 +21,10 @@ import {
   Loader2,
   Hash,
   Edit,
-  Scan
+  Scan,
+  Printer,
+  Download,
+  FileText
 } from 'lucide-react';
 import {
   getCustomers,
@@ -49,6 +52,7 @@ import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
 import { includesIgnoreAccents } from '../lib/string-utils';
 import { CreditWarningModal } from '../components/CreditWarningModal';
+import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
 import { ProductSelectionModal } from '../components/ProductSelectionModal';
 
 interface InvoiceItem {
@@ -115,6 +119,7 @@ export function CreditInvoice() {
     overdueDays: 0,
     totalDebt: 0
   });
+
 
   useEffect(() => {
     loadData();
@@ -621,7 +626,12 @@ export function CreditInvoice() {
       });
 
       toast.success('Factura a crédito creada exitosamente');
-      navigate('/facturacion/historial');
+
+      // Guardar la factura en localStorage para mostrar modal en InvoicesMenu
+      localStorage.setItem('lastCreatedInvoice', JSON.stringify(invoice));
+
+      // Redirigir inmediatamente a facturación
+      navigate('/facturacion');
     } catch (error) {
       console.error('Error creating invoice:', error);
       toast.error('Error al crear la factura');
@@ -629,6 +639,7 @@ export function CreditInvoice() {
       setIsSubmitting(false);
     }
   };
+
 
   const getRiskBadge = () => {
     if (!selectedCustomer) return null;
@@ -1276,6 +1287,7 @@ export function CreditInvoice() {
           userRole={getCurrentUser()?.role || 'seller'}
         />
       )}
+
     </div>
   );
 }

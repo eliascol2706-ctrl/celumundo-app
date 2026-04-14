@@ -18,7 +18,10 @@ import {
   X,
   Hash,
   Edit,
-  Scan
+  Scan,
+  Printer,
+  Download,
+  FileText
 } from 'lucide-react';
 import {
   getProducts,
@@ -37,6 +40,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
 import { ProductSelectionModal } from '../components/ProductSelectionModal';
+import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
 
 interface InvoiceItem {
   productId: string;
@@ -114,6 +118,7 @@ export function RegularInvoice() {
   // Estados para el lector de código de barras
   const [barcodeBuffer, setBarcodeBuffer] = useState('');
   const barcodeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
 
   useEffect(() => {
     loadData();
@@ -543,11 +548,11 @@ export function RegularInvoice() {
 
           if (item.useUnitIds && item.unitIds && item.unitIds.length > 0) {
             if (invoiceStatus === 'paid') {
-              // Si está paga: ELIMINAR las IDs definitivamente
-              const { removeIds } = await import('../lib/unit-ids-utils');
-              newRegisteredIds = removeIds(product.registered_ids, item.unitIds);
+              // Si está paga: MARCAR como vendidas (no eliminar, para poder restaurar en devoluciones)
+              const { markIdsAsSold } = await import('../lib/unit-ids-utils');
+              newRegisteredIds = markIdsAsSold(product.registered_ids, item.unitIds);
             } else {
-              // Si está en confirmación: INHABILITAR las IDs
+              // Si está en confirmación: INHABILITAR las IDs temporalmente
               const { disableIds } = await import('../lib/unit-ids-utils');
               newRegisteredIds = disableIds(product.registered_ids, item.unitIds, invoice.id);
             }
@@ -579,7 +584,12 @@ export function RegularInvoice() {
           ? 'Factura creada y pagada exitosamente'
           : 'Factura creada - Pendiente de confirmación de pago'
       );
-      navigate('/facturacion/historial');
+
+      // Guardar la factura en localStorage para mostrar modal en InvoicesMenu
+      localStorage.setItem('lastCreatedInvoice', JSON.stringify(invoice));
+
+      // Redirigir inmediatamente a facturación
+      navigate('/facturacion');
     } catch (error) {
       console.error('Error creating invoice:', error);
       toast.error('Error al crear la factura');
@@ -1358,6 +1368,7 @@ export function RegularInvoice() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
     </div>
   );
 }

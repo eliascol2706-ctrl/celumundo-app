@@ -143,3 +143,33 @@ export function restoreIdsForExchange(
 export function releaseExchangeIds(registeredIds: UnitIdWithNote[], exchangeId: string): UnitIdWithNote[] {
   return registeredIds.filter(item => !(item.reservedBy === exchangeId && item.reservationType === 'exchange'));
 }
+
+/**
+ * Marca IDs como vendidas (disabled permanente sin reservedBy)
+ * Se usa al confirmar una factura - las IDs quedan deshabilitadas pero no se eliminan
+ */
+export function markIdsAsSold(registeredIds: UnitIdWithNote[], idsToMark: string[]): UnitIdWithNote[] {
+  return registeredIds.map(item => {
+    if (idsToMark.includes(item.id)) {
+      // Eliminar reservedBy pero mantener disabled: true
+      const { reservedBy, reservationType, ...rest } = item;
+      return { ...rest, disabled: true };
+    }
+    return item;
+  });
+}
+
+/**
+ * Restaura IDs devueltas (las vuelve a habilitar conservando su nota original)
+ * Se usa en devoluciones - simplemente quita el flag disabled
+ */
+export function restoreReturnedIds(registeredIds: UnitIdWithNote[], idsToRestore: string[]): UnitIdWithNote[] {
+  return registeredIds.map(item => {
+    if (idsToRestore.includes(item.id)) {
+      // Quitar el flag disabled, conservar todo lo demás (nota incluida)
+      const { disabled, reservedBy, reservationType, ...rest } = item;
+      return rest;
+    }
+    return item;
+  });
+}

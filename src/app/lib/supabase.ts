@@ -1723,17 +1723,18 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
       .select('*')
       .eq('id', item.productId)
       .single();
-    
+
     if (product) {
       const newStock = product.stock + item.quantity;
       let newRegisteredIds = product.registered_ids || [];
-      
-      // Si el producto usa IDs únicas, agregarlas de vuelta al inicio del array
+
+      // Si el producto usa IDs únicas, restaurarlas (quitando el flag disabled)
       if (product.use_unit_ids && item.unitIds && item.unitIds.length > 0) {
-        newRegisteredIds = [...item.unitIds, ...newRegisteredIds];
+        const { restoreReturnedIds } = await import('./unit-ids-utils');
+        newRegisteredIds = restoreReturnedIds(newRegisteredIds, item.unitIds);
       }
-      
-      await updateProduct(item.productId, { 
+
+      await updateProduct(item.productId, {
         stock: newStock,
         registered_ids: newRegisteredIds
       });

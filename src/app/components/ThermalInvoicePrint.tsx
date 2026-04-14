@@ -129,7 +129,7 @@ export function ThermalInvoicePrint({ invoice, creditPayments = [] }: ThermalInv
                 fontSize: '12pt',
               }}>{item.productName}</div>
               <div style={{ marginBottom: '1.5mm' }}>
-                {item.quantity} x ${formatCOP(item.price)} = ${formatCOP(item.total)}
+                {item.quantity} x {formatCOP(item.price)} = {formatCOP(item.total)}
               </div>
               {item.unitIds && item.unitIds.length > 0 && (
                 <div style={{
@@ -165,28 +165,45 @@ export function ThermalInvoicePrint({ invoice, creditPayments = [] }: ThermalInv
             justifyContent: 'space-between',
           }}>
             <span>TOTAL:</span>
-            <span>${formatCOP(invoice.total)}</span>
+            <span>{formatCOP(invoice.total)}</span>
           </div>
         </div>
         
         {/* Payment */}
-        <div style={{
-          marginBottom: '5mm',
-          fontSize: '11pt',
-          borderBottom: '1px dashed black',
-          paddingBottom: '4mm',
-        }}>
-          <div style={{ fontWeight: 'bold', marginBottom: '2mm', fontSize: '12pt' }}>Método de Pago:</div>
-          {invoice.payment_method === 'cash' && <div>Efectivo</div>}
-          {invoice.payment_method === 'transfer' && <div>Transferencia</div>}
-          {invoice.payment_method === 'mixed' && (
-            <>
-              <div>Mixto:</div>
-              <div>• Efectivo: ${formatCOP(invoice.payment_cash || 0)}</div>
-              <div>• Transferencia: ${formatCOP(invoice.payment_transfer || 0)}</div>
-            </>
-          )}
-        </div>
+        {invoice.payment_method && (
+          <div style={{
+            marginBottom: '5mm',
+            fontSize: '11pt',
+            borderBottom: '1px dashed black',
+            paddingBottom: '4mm',
+          }}>
+            <div style={{ fontWeight: 'bold', marginBottom: '2mm', fontSize: '12pt' }}>Método de Pago:</div>
+
+            {/* Si tiene campos separados de pago, mostrarlos detalladamente */}
+            {(invoice.payment_cash > 0 || invoice.payment_transfer > 0 || invoice.payment_other > 0) ? (
+              <div>
+                {invoice.payment_cash > 0 && (
+                  <div style={{ marginBottom: '1.5mm' }}>
+                    • Efectivo: {formatCOP(invoice.payment_cash)}
+                  </div>
+                )}
+                {invoice.payment_transfer > 0 && (
+                  <div style={{ marginBottom: '1.5mm' }}>
+                    • Transferencia: {formatCOP(invoice.payment_transfer)}
+                  </div>
+                )}
+                {invoice.payment_other > 0 && (
+                  <div style={{ marginBottom: '1.5mm' }}>
+                    • Otros: {formatCOP(invoice.payment_other)}
+                  </div>
+                )}
+              </div>
+            ) : (
+              /* Si no tiene campos separados, mostrar el método como string */
+              <div>{invoice.payment_method}</div>
+            )}
+          </div>
+        )}
         
         {/* Credit Section */}
         {invoice.is_credit && (
@@ -214,10 +231,10 @@ export function ThermalInvoicePrint({ invoice, creditPayments = [] }: ThermalInv
                   }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                       <span>{new Date(payment.date).toLocaleDateString('es-ES')}</span>
-                      <span>${formatCOP(payment.amount)}</span>
+                      <span>{formatCOP(payment.amount)}</span>
                     </div>
                     <div style={{ fontSize: '10pt', marginTop: '1mm' }}>
-                      {payment.payment_method === 'cash' ? 'Efectivo' : 
+                      {payment.payment_method === 'cash' ? 'Efectivo' :
                        payment.payment_method === 'transfer' ? 'Transferencia' : 'Otro'}
                     </div>
                   </div>
@@ -229,12 +246,12 @@ export function ThermalInvoicePrint({ invoice, creditPayments = [] }: ThermalInv
                 }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                     <span>Total Abonado:</span>
-                    <span>${formatCOP(creditPayments.reduce((sum: number, p: any) => sum + p.amount, 0))}</span>
+                    <span>{formatCOP(creditPayments.reduce((sum: number, p: any) => sum + p.amount, 0))}</span>
                   </div>
                 </div>
               </>
             )}
-            
+
             <div style={{
               fontWeight: 'bold',
               marginTop: '3mm',
@@ -242,7 +259,7 @@ export function ThermalInvoicePrint({ invoice, creditPayments = [] }: ThermalInv
             }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <span>Saldo Pendiente:</span>
-                <span>${formatCOP(invoice.credit_balance || invoice.total)}</span>
+                <span>{formatCOP(invoice.credit_balance || invoice.total)}</span>
               </div>
             </div>
             <div style={{ marginTop: '2mm', fontSize: '10pt' }}>
