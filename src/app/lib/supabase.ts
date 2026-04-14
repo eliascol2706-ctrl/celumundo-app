@@ -633,6 +633,27 @@ export const extractColombiaDate = (timestamp: string): string => {
   return result;
 };
 
+// Función auxiliar para convertir una fecha YYYY-MM-DD a un timestamp ISO en zona horaria de Colombia
+export const dateStringToColombiaISO = (dateString: string): string => {
+  // Crear una fecha a las 12:00 PM hora de Colombia para evitar problemas de límite de día
+  // Formato: YYYY-MM-DD -> YYYY-MM-DDTHH:MM:SS en zona de Colombia
+  const [year, month, day] = dateString.split('-').map(Number);
+
+  // Crear fecha en hora local (Colombia) a las 12:00 PM
+  const colombiaDate = new Date(year, month - 1, day, 12, 0, 0, 0);
+
+  // Ajustar por diferencia horaria de Colombia (GMT-5)
+  // Necesitamos calcular la diferencia entre la hora local del servidor y Colombia
+  const offsetColombia = -5 * 60; // Colombia es GMT-5 (en minutos)
+  const offsetLocal = colombiaDate.getTimezoneOffset(); // Offset del servidor en minutos (negativo para GMT+)
+  const offsetDiff = offsetLocal - offsetColombia; // Diferencia en minutos
+
+  // Ajustar la fecha
+  const adjustedDate = new Date(colombiaDate.getTime() - offsetDiff * 60 * 1000);
+
+  return adjustedDate.toISOString();
+};
+
 // Función auxiliar para extraer la fecha y hora completa, considerando zona horaria de Colombia
 export const extractColombiaDateTime = (timestamp: string): string => {
   if (!timestamp) return '';
@@ -1371,12 +1392,22 @@ export const getExpenses = async (): Promise<Expense[]> => {
 
 export const addExpense = async (expense: Omit<Expense, 'id' | 'company' | 'created_at' | 'updated_at'>): Promise<Expense | null> => {
   const company = getCurrentCompany();
+
+  // Convertir la fecha YYYY-MM-DD a timestamp ISO en zona horaria de Colombia
+  const expenseDate = expense.date.length === 10 && !expense.date.includes('T')
+    ? dateStringToColombiaISO(expense.date)
+    : expense.date;
+
   const { data, error } = await supabase
     .from('expenses')
-    .insert([{ ...expense, company }])
+    .insert([{
+      ...expense,
+      date: expenseDate,
+      company
+    }])
     .select()
     .single();
-  
+
   if (error) {
     console.error('Error adding expense:', error);
     return null;
@@ -1385,13 +1416,19 @@ export const addExpense = async (expense: Omit<Expense, 'id' | 'company' | 'crea
 };
 
 export const updateExpense = async (id: string, updates: Partial<Expense>): Promise<Expense | null> => {
+  // Si se está actualizando la fecha, convertirla a timestamp ISO en zona horaria de Colombia
+  const updatedData = { ...updates };
+  if (updates.date && updates.date.length === 10 && !updates.date.includes('T')) {
+    updatedData.date = dateStringToColombiaISO(updates.date);
+  }
+
   const { data, error } = await supabase
     .from('expenses')
-    .update(updates)
+    .update(updatedData)
     .eq('id', id)
     .select()
     .single();
-  
+
   if (error) {
     console.error('Error updating expense:', error);
     return null;
@@ -1643,14 +1680,24 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
   }
   
   const return_number = `${prefix}-${nextSequence.toString().padStart(4, '0')}`;
-  
+
+  // Convertir la fecha YYYY-MM-DD a timestamp ISO en zona horaria de Colombia
+  const returnDate = returnData.date && returnData.date.length === 10 && !returnData.date.includes('T')
+    ? dateStringToColombiaISO(returnData.date)
+    : returnData.date;
+
   // Crear registro de devolución
   const { data, error } = await supabase
     .from('returns')
-    .insert([{ ...returnData, company, return_number }])
+    .insert([{
+      ...returnData,
+      date: returnDate,
+      company,
+      return_number
+    }])
     .select()
     .single();
-  
+
   if (error) {
     console.error('Error adding return:', error);
     return null;
@@ -2160,14 +2207,23 @@ export const getCreditPaymentsByInvoice = async (invoiceId: string): Promise<Cre
 
 export const addCreditPayment = async (payment: Omit<CreditPayment, 'id' | 'company' | 'created_at'>): Promise<CreditPayment | null> => {
   const company = getCurrentCompany();
-  
+
+  // Convertir la fecha YYYY-MM-DD a timestamp ISO en zona horaria de Colombia
+  const paymentDate = payment.date && payment.date.length === 10 && !payment.date.includes('T')
+    ? dateStringToColombiaISO(payment.date)
+    : payment.date;
+
   // Crear el abono
   const { data, error } = await supabase
     .from('credit_payments')
-    .insert([{ ...payment, company }])
+    .insert([{
+      ...payment,
+      date: paymentDate,
+      company
+    }])
     .select()
     .single();
-  
+
   if (error) {
     console.error('Error adding credit payment:', error);
     return null;
