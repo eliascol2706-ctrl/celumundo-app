@@ -760,6 +760,7 @@ export function Closures() {
                       <th className="text-right py-2 px-3 text-sm font-medium">Efectivo</th>
                       <th className="text-right py-2 px-3 text-sm font-medium">Transferencias</th>
                       <th className="text-right py-2 px-3 text-sm font-medium">Total</th>
+                      <th className="text-right py-2 px-3 text-sm font-medium">Ganancias</th>
                       <th className="text-left py-2 px-3 text-sm font-medium">Cerrado por</th>
                     </tr>
                   </thead>
@@ -784,12 +785,15 @@ export function Closures() {
                               <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
                                 COP {formatCOP(closure.total)}
                               </td>
+                              <td className="py-2 px-3 text-right text-sm font-bold text-blue-600 dark:text-blue-400">
+                                COP {formatCOP(closure.total_profit || 0)}
+                              </td>
                               <td className="py-2 px-3 text-sm">{closure.closed_by}</td>
                             </tr>
                           ))}
                           {paginatedClosures.length === 0 && (
                             <tr>
-                              <td colSpan={6} className="py-8 text-center text-muted-foreground">
+                              <td colSpan={7} className="py-8 text-center text-muted-foreground">
                                 No hay cierres registrados
                               </td>
                             </tr>

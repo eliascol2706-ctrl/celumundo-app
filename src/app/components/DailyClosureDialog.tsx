@@ -179,14 +179,14 @@ export function DailyClosureDialog({
             if (paymentLower === 'efectivo') {
               totalCash += invoiceTotal;
               console.log(`  ✅ Efectivo (simple): ${invoiceTotal}`);
-            } else if (paymentLower === 'transferencia' || paymentLower === 'nequi' || paymentLower === 'daviplata') {
+            } else if (paymentLower === 'transferencia' || paymentLower === 'nequi' || paymentLower === 'daviplata' || paymentLower === 'nequi-daviplata') {
               totalTransfer += invoiceTotal;
-              console.log(`  ✅ Transferencia/Nequi/Daviplata (simple): ${invoiceTotal}`);
+              console.log(`  ✅ Transferencia/Nequi/Daviplata/Nequi-Daviplata (simple): ${invoiceTotal}`);
             } else if (paymentLower === 'otros') {
               totalTransfer += invoiceTotal;
               console.log(`  ✅ Otros (simple): ${invoiceTotal} (sumado a transferencias)`);
             } else {
-              console.log(`  ⚠️ Método de pago desconocido: "${paymentStr}"`);
+              console.log(`  ⚠️ Método de pago desconocido: \"${paymentStr}\"`);
             }
           }
         }
@@ -287,6 +287,7 @@ export function DailyClosureDialog({
         const totalCashValue = paymentTotals.totalCash;
         const totalTransferValue = paymentTotals.totalTransfer;
         const total = paymentTotals.total;
+        const totalProfit = total - totalCost; // Calcular ganancias
 
         await addDailyClosure({
           date: dayToClose,
@@ -296,6 +297,7 @@ export function DailyClosureDialog({
           total_cash: totalCashValue,
           total_transfer: totalTransferValue,
           total,
+          total_profit: totalProfit, // NUEVO: Almacenar ganancias
           closed_by: closedByName.trim(),
           closed_at: new Date().toISOString(),
         });
