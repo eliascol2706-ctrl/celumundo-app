@@ -26,7 +26,8 @@ interface DailyClosureDialogProps {
     pendingCreditBalance: number;
     creditInvoices: number;
     creditPayments?: any[]; // Abonos a créditos del día
-    exchanges?: any[]; // NUEVO: Cambios del día
+    exchanges?: any[]; // Cambios del día
+    serviceRevenue?: number; // NUEVO: Ingresos de servicio técnico
   };
   dayToClose: string; // YYYY-MM-DD date to close
   hourlyData: any[];
@@ -239,14 +240,27 @@ export function DailyClosureDialog({
       });
     }
 
+    // NUEVO: Sumar ingresos de servicio técnico
+    const serviceRevenue = dailyStats.serviceRevenue || 0;
+    if (serviceRevenue > 0) {
+      console.log(`[DEBUG Cierre] Ingresos Servicio Técnico: ${serviceRevenue}`);
+    }
+
     console.log('[DEBUG Cierre] ====== RESUMEN FINAL DE TOTALES ======');
     console.log(`[DEBUG Cierre] Total Efectivo: ${totalCash}`);
     console.log(`[DEBUG Cierre] Total Transferencias (incluye Nequi y Daviplata): ${totalTransfer}`);
     console.log(`[DEBUG Cierre] Total Otros: ${totalOthers}`);
-    console.log(`[DEBUG Cierre] TOTAL INGRESOS: ${totalCash + totalTransfer + totalOthers}`);
+    console.log(`[DEBUG Cierre] Servicio Técnico: ${serviceRevenue}`);
+    console.log(`[DEBUG Cierre] TOTAL INGRESOS: ${totalCash + totalTransfer + totalOthers + serviceRevenue}`);
     console.log('[DEBUG Cierre] =====================================');
 
-    return { totalCash, totalTransfer, totalOthers, total: totalCash + totalTransfer + totalOthers };
+    return {
+      totalCash,
+      totalTransfer,
+      totalOthers,
+      serviceRevenue,
+      total: totalCash + totalTransfer + totalOthers + serviceRevenue
+    };
   };
 
   const paymentTotals = calculatePaymentTotals();
@@ -364,6 +378,29 @@ export function DailyClosureDialog({
             {/* Phase 1: Stats and Charts */}
             {phase === 1 && (
               <div className="space-y-6">
+                {/* Servicio Técnico Alert */}
+                {(dailyStats.serviceRevenue || 0) > 0 && (
+                  <Card className="border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30">
+                    <CardContent className="pt-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex-shrink-0 bg-blue-600 dark:bg-blue-500 text-white rounded-full p-2">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                          </svg>
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                            Servicio Técnico incluido
+                          </h4>
+                          <p className="text-xs text-blue-700 dark:text-blue-300">
+                            Ingresos del Servicio Técnico: <span className="font-bold">COP {formatCOP(dailyStats.serviceRevenue || 0)}</span>
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* Top Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                   <Card>
@@ -376,6 +413,11 @@ export function DailyClosureDialog({
                       <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                         COP {formatCOP(paymentTotals.total)}
                       </div>
+                      {(dailyStats.serviceRevenue || 0) > 0 && (
+                        <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                          Incluye Servicio Técnico
+                        </p>
+                      )}
                     </CardContent>
                   </Card>
 

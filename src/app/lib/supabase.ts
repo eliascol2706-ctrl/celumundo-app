@@ -591,46 +591,124 @@ export const deleteCatalogImage = async (imageUrl: string): Promise<boolean> => 
 // Función auxiliar para obtener la fecha/hora en zona horaria de Colombia (GMT-5)
 export const getColombiaDateTime = (): Date => {
   const now = new Date();
-  // Convertir a hora de Colombia (GMT-5)
-  const colombiaTime = new Date(now.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
-  return colombiaTime;
+
+  // Usar Intl.DateTimeFormat para obtener componentes de fecha en zona Colombia
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+
+  const parts = formatter.formatToParts(now);
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '0';
+
+  const year = parseInt(get('year'));
+  const month = parseInt(get('month')) - 1; // Los meses en Date van de 0-11
+  const day = parseInt(get('day'));
+  const hour = parseInt(get('hour'));
+  const minute = parseInt(get('minute'));
+  const second = parseInt(get('second'));
+
+  // Crear objeto Date con la hora de Colombia
+  return new Date(year, month, day, hour, minute, second);
 };
 
 // Función auxiliar para obtener la fecha en formato YYYY-MM-DD en zona horaria de Colombia
 export const getColombiaDate = (): string => {
-  const colombiaTime = getColombiaDateTime();
-  const year = colombiaTime.getFullYear();
-  const month = String(colombiaTime.getMonth() + 1).padStart(2, '0');
-  const day = String(colombiaTime.getDate()).padStart(2, '0');
+  const now = new Date();
+
+  // Usar Intl.DateTimeFormat para obtener la fecha en zona horaria de Colombia
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  });
+
+  const parts = formatter.formatToParts(now);
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+
+  const year = get('year');
+  const month = get('month');
+  const day = get('day');
+
   return `${year}-${month}-${day}`;
+};
+
+// Función auxiliar para obtener el timestamp ISO completo en zona horaria de Colombia
+export const getColombiaTimestampISO = (): string => {
+  const now = new Date();
+
+  // Obtener la fecha/hora en formato de Colombia usando Intl
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  });
+
+  const parts = formatter.formatToParts(now);
+  const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+
+  const year = get('year');
+  const month = get('month');
+  const day = get('day');
+  const hour = get('hour');
+  const minute = get('minute');
+  const second = get('second');
+
+  // Devolver en formato ISO con offset de Colombia (-05:00)
+  return `${year}-${month}-${day}T${hour}:${minute}:${second}-05:00`;
 };
 
 // Función auxiliar para extraer la fecha (YYYY-MM-DD) de un timestamp, considerando zona horaria de Colombia
 export const extractColombiaDate = (timestamp: string): string => {
   if (!timestamp) return '';
+
   // Si el timestamp ya es solo fecha (YYYY-MM-DD), devolverlo tal cual
   if (timestamp.length === 10 && !timestamp.includes('T')) {
     return timestamp;
   }
-  // Convertir el timestamp a fecha en zona de Colombia
-  const date = new Date(timestamp);
-  const colombiaDate = new Date(date.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
-  const year = colombiaDate.getFullYear();
-  const month = String(colombiaDate.getMonth() + 1).padStart(2, '0');
-  const day = String(colombiaDate.getDate()).padStart(2, '0');
-  const result = `${year}-${month}-${day}`;
-  
-  // Debug temporal
-  if (timestamp.includes('2025-04')) {
-    console.log('[extractColombiaDate] DEBUG:', {
-      input: timestamp,
-      output: result,
-      dateObj: date.toISOString(),
-      colombiaDateObj: colombiaDate.toISOString()
+
+  try {
+    // Convertir el timestamp a fecha
+    const date = new Date(timestamp);
+
+    // Verificar si es una fecha válida
+    if (isNaN(date.getTime())) {
+      console.error('[extractColombiaDate] Fecha inválida:', timestamp);
+      return timestamp;
+    }
+
+    // Usar Intl.DateTimeFormat para obtener la fecha en zona horaria de Colombia
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
     });
+
+    const parts = formatter.formatToParts(date);
+    const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+
+    const year = get('year');
+    const month = get('month');
+    const day = get('day');
+
+    return `${year}-${month}-${day}`;
+  } catch (error) {
+    console.error('[extractColombiaDate] Error procesando fecha:', timestamp, error);
+    return timestamp;
   }
-  
-  return result;
 };
 
 // Función auxiliar para convertir una fecha YYYY-MM-DD a un timestamp ISO en zona horaria de Colombia
@@ -657,20 +735,49 @@ export const dateStringToColombiaISO = (dateString: string): string => {
 // Función auxiliar para extraer la fecha y hora completa, considerando zona horaria de Colombia
 export const extractColombiaDateTime = (timestamp: string): string => {
   if (!timestamp) return '';
+
   // Si el timestamp ya es solo fecha (YYYY-MM-DD), devolver con hora 00:00:00
   if (timestamp.length === 10 && !timestamp.includes('T')) {
     return `${timestamp} 00:00:00`;
   }
-  // Convertir el timestamp a fecha/hora en zona de Colombia
-  const date = new Date(timestamp);
-  const colombiaDate = new Date(date.toLocaleString('en-US', { timeZone: 'America/Bogota' }));
-  const year = colombiaDate.getFullYear();
-  const month = String(colombiaDate.getMonth() + 1).padStart(2, '0');
-  const day = String(colombiaDate.getDate()).padStart(2, '0');
-  const hours = String(colombiaDate.getHours()).padStart(2, '0');
-  const minutes = String(colombiaDate.getMinutes()).padStart(2, '0');
-  const seconds = String(colombiaDate.getSeconds()).padStart(2, '0');
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+
+  try {
+    // Convertir el timestamp a fecha
+    const date = new Date(timestamp);
+
+    // Verificar si es una fecha válida
+    if (isNaN(date.getTime())) {
+      console.error('[extractColombiaDateTime] Fecha inválida:', timestamp);
+      return timestamp;
+    }
+
+    // Usar Intl.DateTimeFormat para obtener la fecha en zona horaria de Colombia
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Bogota',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+
+    const parts = formatter.formatToParts(date);
+    const get = (type: string) => parts.find(p => p.type === type)?.value || '00';
+
+    const year = get('year');
+    const month = get('month');
+    const day = get('day');
+    const hour = get('hour');
+    const minute = get('minute');
+    const second = get('second');
+
+    return `${year}-${month}-${day} ${hour}:${minute}:${second}`;
+  } catch (error) {
+    console.error('[extractColombiaDateTime] Error procesando fecha:', timestamp, error);
+    return timestamp;
+  }
 };
 
 // Función para verificar si se puede facturar (validar cierre pendiente)

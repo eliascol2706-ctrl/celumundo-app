@@ -15,6 +15,7 @@ import {
   getCreditPayments,
   getExchanges,
 } from '../lib/supabase';
+import { getServiceOrders, type ServiceOrder } from '../lib/service-orders';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -42,6 +43,7 @@ export function Closures() {
   const [expenses, setExpenses] = useState<any[]>([]);
   const [creditPayments, setCreditPayments] = useState<any[]>([]);
   const [exchanges, setExchanges] = useState<any[]>([]);
+  const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
 
   useEffect(() => {
     loadData();
@@ -60,7 +62,7 @@ export function Closures() {
   }, []);
 
   const loadData = async () => {
-    const [invoicesData, dailyClosuresData, monthlyClosuresData, returnsData, customersData, productsData, expensesData, creditPaymentsData, exchangesData] = await Promise.all([
+    const [invoicesData, dailyClosuresData, monthlyClosuresData, returnsData, customersData, productsData, expensesData, creditPaymentsData, exchangesData, serviceOrdersData] = await Promise.all([
       getInvoices(),
       getDailyClosures(),
       getMonthlyClosures(),
@@ -70,6 +72,7 @@ export function Closures() {
       getExpenses(),
       getCreditPayments(),
       getExchanges(),
+      getServiceOrders(),
     ]);
     setInvoices(invoicesData);
     setDailyClosures(dailyClosuresData);
@@ -80,6 +83,7 @@ export function Closures() {
     setExpenses(expensesData);
     setCreditPayments(creditPaymentsData);
     setExchanges(exchangesData);
+    setServiceOrders(serviceOrdersData);
     
     // DEBUG: Ver qué cierres tenemos guardados
     console.log('[DEBUG Closures] Cierres diarios guardados:', dailyClosuresData.map(c => ({ id: c.id, date: c.date, closed_by: c.closed_by })));
@@ -200,7 +204,7 @@ export function Closures() {
     const totalInvoices = todayInvoices.length;
     const regularInvoices = todayInvoices.filter(inv => inv.type === 'regular').length;
     const wholesaleInvoices = todayInvoices.filter(inv => inv.type === 'wholesale').length;
-    
+
     const creditInvoices = todayInvoices.filter(inv => inv.is_credit);
     const pendingCreditBalance = creditInvoices
       .filter(inv => inv.status === 'pending')
@@ -218,13 +222,22 @@ export function Closures() {
       // Buscar la factura original
       const originalInvoice = invoices.find(inv => inv.id === ret.invoice_id);
       if (!originalInvoice) return false;
-      
+
       // Solo contar la devolución si la factura original es del día que se está cerrando
       const invoiceDate = extractColombiaDate(originalInvoice.date);
       return invoiceDate === today;
     });
 
     const totalReturns = todayReturns.reduce((sum, ret) => sum + ret.total, 0);
+
+    // NUEVO: Filtrar órdenes de servicio pagadas del día
+    const todayServiceOrders = serviceOrders.filter(order => {
+      const orderDate = extractColombiaDate(order.received_date);
+      return orderDate === today && order.payment_status === 'paid' && order.final_price;
+    });
+
+    // NUEVO: Ingresos de servicio técnico
+    const serviceRevenue = todayServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
     
     // FILTRAR ABONOS A CRÉDITO DEL DÍA - usar extractColombiaDate para evitar problemas de zona horaria
     const todayCreditPayments = creditPayments.filter(payment => {
@@ -247,6 +260,8 @@ export function Closures() {
     console.log(`[DEBUG Cierres] Abonos a crédito del día: ${todayCreditPayments.length}`);
     console.log(`[DEBUG Cierres] Total abonos: ${formatCOP(todayCreditPayments.reduce((sum, p) => sum + p.amount, 0))}`);
     console.log(`[DEBUG Cierres] Cambios del día: ${todayExchanges.length}`);
+    console.log(`[DEBUG Cierres] Órdenes de servicio técnico: ${todayServiceOrders.length}`);
+    console.log(`[DEBUG Cierres] Ingresos servicio técnico: ${formatCOP(serviceRevenue)}`);
 
     return {
       totalInvoices,
@@ -257,7 +272,8 @@ export function Closures() {
       pendingCreditBalance,
       grossRevenue,
       totalReturns,
-      netRevenue: grossRevenue - totalReturns,
+      serviceRevenue, // NUEVO: Ingresos de servicio técnico
+      netRevenue: grossRevenue - totalReturns + serviceRevenue, // MODIFICADO: Incluir servicio técnico
       totalProductsSold: todayInvoices
         .filter(inv => inv.status === 'paid')
         .reduce((sum, inv) => {
@@ -306,7 +322,14 @@ export function Closures() {
       return sum;
     }, 0);
 
-    const previousMonthNetRevenue = previousMonthRevenue + previousMonthExchangeImpact;
+    // NUEVO: Calcular ingresos de servicio técnico del mes anterior
+    const previousMonthServiceOrders = serviceOrders.filter(order => {
+      const orderDate = extractColombiaDate(order.received_date);
+      return orderDate.substring(0, 7) === previousMonthStr && order.payment_status === 'paid' && order.final_price;
+    });
+    const previousMonthServiceRevenue = previousMonthServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
+
+    const previousMonthNetRevenue = previousMonthRevenue + previousMonthExchangeImpact + previousMonthServiceRevenue;
 
     const currentMonthInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
@@ -329,6 +352,13 @@ export function Closures() {
       }
       return sum;
     }, 0);
+
+    // NUEVO: Calcular ingresos de servicio técnico del mes actual
+    const currentMonthServiceOrders = serviceOrders.filter(order => {
+      const orderDate = extractColombiaDate(order.received_date);
+      return orderDate.substring(0, 7) === currentMonthStr && order.payment_status === 'paid' && order.final_price;
+    });
+    const currentMonthServiceRevenue = currentMonthServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
 
     // Calcular créditos pendientes del mes actual
     const currentMonthCreditInvoices = invoices.filter(inv => {
@@ -358,9 +388,9 @@ export function Closures() {
     });
     const totalExpenses = currentMonthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
-    // Los ingresos netos incluyen las facturas pagadas + el impacto de cambios
+    // Los ingresos netos incluyen las facturas pagadas + el impacto de cambios + servicio técnico
     // Las facturas 'returned' ya no se cuentan en currentMonthRevenue
-    const netRevenue = currentMonthRevenue + currentMonthExchangeImpact;
+    const netRevenue = currentMonthRevenue + currentMonthExchangeImpact + currentMonthServiceRevenue;
 
     // Calcular costo de productos vendidos en el mes
     let totalProductCost = 0;
@@ -430,6 +460,7 @@ export function Closures() {
       previousMonthNetRevenue,
       totalProductCost,
       realProfit,
+      serviceRevenue: currentMonthServiceRevenue, // NUEVO: Ingresos de servicio técnico
     };
   };
 

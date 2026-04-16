@@ -16,6 +16,7 @@ import {
   type Exchange,
   type Warranty
 } from '../lib/supabase';
+import { getServiceOrders, type ServiceOrder } from '../lib/service-orders';
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
@@ -119,6 +120,7 @@ export function FinancialManagement() {
   const [expenses, setExpenses] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [warranties, setWarranties] = useState<Warranty[]>([]);
+  const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -154,14 +156,15 @@ export function FinancialManagement() {
 
   const loadData = async () => {
     setIsLoading(true);
-    const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData, warrantiesData] = await Promise.all([
+    const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData, warrantiesData, serviceOrdersData] = await Promise.all([
       getInvoices(),
       getReturns(),
       getExchanges(),
       getProducts(),
       getExpenses(),
       getCustomers(),
-      getWarranties()
+      getWarranties(),
+      getServiceOrders()
     ]);
     setInvoices(invoicesData);
     setReturns(returnsData);
@@ -170,6 +173,7 @@ export function FinancialManagement() {
     setExpenses(expensesData);
     setCustomers(customersData);
     setWarranties(warrantiesData);
+    setServiceOrders(serviceOrdersData);
     setIsLoading(false);
   };
 
@@ -205,6 +209,12 @@ export function FinancialManagement() {
         return expDate.startsWith(targetMonth);
       });
 
+      // NUEVO: Filtrar órdenes de servicio pagadas del mes
+      const monthServiceOrders = serviceOrders.filter((order) => {
+        const orderDate = extractColombiaDate(order.received_date);
+        return orderDate.startsWith(targetMonth) && order.payment_status === 'paid' && order.final_price;
+      });
+
       // Incluir todas las facturas pagadas (regulares y crédito) + devoluciones parciales
       // Las facturas con status 'returned' ya están excluidas, no necesitamos restar devoluciones
       const facturasPagas = monthInvoices
@@ -222,8 +232,12 @@ export function FinancialManagement() {
         return sum;
       }, 0);
 
+      // NUEVO: Ingresos de servicio técnico
+      const ingresosServicioTecnico = monthServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
+
       // No restamos totalDevoluciones porque las facturas 'returned' ya no se cuentan en facturasPagas
-      const ingresoNeto = facturasPagas + impactoCambios;
+      // MODIFICADO: Incluir ingresos de servicio técnico
+      const ingresoNeto = facturasPagas + impactoCambios + ingresosServicioTecnico;
 
       const facturasPagasList = monthInvoices.filter((inv) => inv.status === 'paid' || inv.status === 'partial_return');
       let totalCostos = 0;
@@ -472,6 +486,12 @@ export function FinancialManagement() {
       return exDate === date;
     });
 
+    // NUEVO: Filtrar órdenes de servicio pagadas del día
+    const dayServiceOrders = serviceOrders.filter(order => {
+      const orderDate = extractColombiaDate(order.received_date);
+      return orderDate === date && order.payment_status === 'paid' && order.final_price;
+    });
+
     // Calcular ingresos
     const facturasPagas = dayInvoices.reduce((sum, inv) => sum + inv.total, 0);
     const impactoCambios = dayExchanges.reduce((sum, exchange) => {
@@ -482,7 +502,12 @@ export function FinancialManagement() {
       }
       return sum;
     }, 0);
-    const ingresosNetos = facturasPagas + impactoCambios;
+
+    // NUEVO: Ingresos de servicio técnico
+    const ingresosServicioTecnico = dayServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
+
+    // MODIFICADO: Incluir ingresos de servicio técnico
+    const ingresosNetos = facturasPagas + impactoCambios + ingresosServicioTecnico;
 
     // Calcular costos de productos
     let costos = 0;

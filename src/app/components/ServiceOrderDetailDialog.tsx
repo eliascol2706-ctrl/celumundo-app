@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -28,6 +28,7 @@ import {
   Save,
   Plus,
   Trash2,
+  Printer,
 } from 'lucide-react';
 import {
   updateServiceOrder,
@@ -45,8 +46,9 @@ import {
   getPaymentStatusLabel,
 } from '../lib/service-orders';
 import { formatCOP } from '../lib/currency';
-import { getCurrentUser, extractColombiaDateTime } from '../lib/supabase';
+import { getCurrentUser, extractColombiaDateTime, getColombiaTimestampISO } from '../lib/supabase';
 import { toast } from 'sonner';
+import { ThermalServiceReceipt } from './ThermalServiceReceipt';
 
 interface ServiceOrderDetailDialogProps {
   open: boolean;
@@ -90,7 +92,10 @@ export function ServiceOrderDetailDialog({
   
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [isPrintDialogOpen, setIsPrintDialogOpen] = useState(false);
+  const [receiptType, setReceiptType] = useState<'reception' | 'delivery'>('reception');
 
+  const thermalPrintRef = useRef<HTMLDivElement>(null);
   const currentUser = getCurrentUser();
 
   useEffect(() => {
@@ -284,9 +289,9 @@ export function ServiceOrderDetailDialog({
   const handleMarkAsDelivered = async () => {
     if (!confirm('¿Marcar esta orden como entregada?')) return;
 
-    const updated = await updateServiceOrder(order.id, { 
+    const updated = await updateServiceOrder(order.id, {
       status: 'delivered',
-      actual_delivery_date: new Date().toISOString(),
+      actual_delivery_date: getColombiaTimestampISO(), // CORREGIDO: Usar timestamp en hora de Colombia
     });
 
     if (updated) {
@@ -295,6 +300,49 @@ export function ServiceOrderDetailDialog({
       toast.success('Orden marcada como entregada');
       onUpdate();
     }
+  };
+
+  const handlePrintReceipt = (type: 'reception' | 'delivery') => {
+    setReceiptType(type);
+    setIsPrintDialogOpen(true);
+
+    setTimeout(() => {
+      if (!thermalPrintRef.current) return;
+
+      const printFrame = document.createElement('iframe');
+      printFrame.style.position = 'absolute';
+      printFrame.style.width = '0';
+      printFrame.style.height = '0';
+      printFrame.style.border = 'none';
+
+      document.body.appendChild(printFrame);
+
+      const printDocument = printFrame.contentWindow?.document;
+      if (!printDocument) return;
+
+      printDocument.open();
+      printDocument.write(`
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <title>Comprobante de ${type === 'reception' ? 'Recepción' : 'Entrega'}</title>
+          </head>
+          <body>
+            ${thermalPrintRef.current.innerHTML}
+          </body>
+        </html>
+      `);
+      printDocument.close();
+
+      setTimeout(() => {
+        printFrame.contentWindow?.print();
+        setTimeout(() => {
+          document.body.removeChild(printFrame);
+          setIsPrintDialogOpen(false);
+        }, 100);
+      }, 500);
+    }, 300);
   };
 
   const technician = technicians.find(t => t.id === order.technician_id);
@@ -752,16 +800,16 @@ export function ServiceOrderDetailDialog({
               </CardContent>
             </Card>
 
-            {/* Enlace de Seguimiento */}
+            {/* Enlace de Seguimiento e Impresión */}
             {order.tracking_code && (
               <Card>
                 <CardHeader>
                   <CardTitle className="text-base flex items-center gap-2">
                     <LinkIcon className="h-5 w-5 text-blue-600" />
-                    Seguimiento
+                    Seguimiento e Impresión
                   </CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="space-y-3">
                   <Button
                     variant="outline"
                     className="w-full"
@@ -779,9 +827,32 @@ export function ServiceOrderDetailDialog({
                       </>
                     )}
                   </Button>
+
+                  {/* Botones de Impresión */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePrintReceipt('reception')}
+                      className="text-xs"
+                    >
+                      <Printer className="h-3 w-3 mr-1" />
+                      Recepción
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => handlePrintReceipt('delivery')}
+                      className="text-xs"
+                    >
+                      <Printer className="h-3 w-3 mr-1" />
+                      Entrega
+                    </Button>
+                  </div>
+
                   <div className="mt-3 p-2 bg-slate-50 dark:bg-slate-900 rounded border border-slate-200 dark:border-slate-700">
                     <p className="text-xs text-muted-foreground mb-1">Enlace de seguimiento:</p>
-                    <a 
+                    <a
                       href={`/seguimiento/${order.tracking_code}`}
                       target="_blank"
                       rel="noopener noreferrer"
@@ -810,6 +881,27 @@ export function ServiceOrderDetailDialog({
           </div>
         </div>
       </DialogContent>
+
+      {/* Diálogo de Impresión Térmica */}
+      <Dialog open={isPrintDialogOpen} onOpenChange={setIsPrintDialogOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              Comprobante de {receiptType === 'reception' ? 'Recepción' : 'Entrega'}
+            </DialogTitle>
+            <DialogDescription>
+              Preparando impresión...
+            </DialogDescription>
+          </DialogHeader>
+          <div ref={thermalPrintRef}>
+            <ThermalServiceReceipt
+              order={order}
+              technician={technician}
+              receiptType={receiptType}
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   );
 }

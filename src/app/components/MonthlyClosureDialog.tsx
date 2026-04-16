@@ -28,6 +28,7 @@ interface MonthlyClosureDialogProps {
     totalProductCost: number;
     realProfit: number;
     currentMonthRevenue: number;
+    serviceRevenue?: number; // NUEVO: Ingresos de servicio técnico
   };
   onSuccess: () => void;
 }
@@ -245,6 +246,29 @@ export function MonthlyClosureDialog({
             {/* Phase 2: Final Summary */}
             {phase === 2 && (
               <div className="space-y-6">
+                {/* Servicio Técnico Alert */}
+                {(monthlyStats.serviceRevenue || 0) > 0 && (
+                  <Card className="border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30">
+                    <CardContent className="pt-4">
+                      <div className="flex items-center gap-3">
+                        <div className="flex-shrink-0 bg-blue-600 dark:bg-blue-500 text-white rounded-full p-2">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                          </svg>
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                            Servicio Técnico incluido en Ingresos Netos
+                          </h4>
+                          <p className="text-xs text-blue-700 dark:text-blue-300">
+                            Este mes incluye <span className="font-bold">COP {formatCOP(monthlyStats.serviceRevenue || 0)}</span> de ingresos del módulo de Servicio Técnico
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+
                 {/* Final Stats */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <Card>
@@ -338,6 +362,11 @@ export function MonthlyClosureDialog({
                           </div>
                           <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-2">
                             Total de facturas pagadas y parcialmente devueltas
+                            {(monthlyStats.serviceRevenue || 0) > 0 && (
+                              <span className="block text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                + Servicio Técnico
+                              </span>
+                            )}
                           </p>
                         </div>
 
@@ -365,6 +394,9 @@ export function MonthlyClosureDialog({
                           <ul className="list-disc list-inside space-y-1 text-zinc-700 dark:text-zinc-300">
                             <li>Facturas pagadas completamente</li>
                             <li>Facturas con devolución parcial</li>
+                            {(monthlyStats.serviceRevenue || 0) > 0 && (
+                              <li className="text-blue-600 dark:text-blue-400">Servicio Técnico pagado</li>
+                            )}
                           </ul>
                           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2 pt-2 border-t border-emerald-200 dark:border-emerald-800">
                             Las devoluciones completas no se cuentan ya que la factura pasa a estado "Devuelta"

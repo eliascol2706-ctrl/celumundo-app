@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from './ui/select';
 import { addServiceOrder, type Technician, type ServiceOrder } from '../lib/service-orders';
-import { getColombiaDate } from '../lib/supabase';
+import { getColombiaTimestampISO } from '../lib/supabase';
 import { toast } from 'sonner';
 
 interface CreateServiceOrderDialogProps {
@@ -75,7 +75,7 @@ export function CreateServiceOrderDialog({
         estimated_price: estimatedPrice ? parseFloat(estimatedPrice) : undefined,
         payment_status: 'pending',
         paid_amount: 0,
-        received_date: getColombiaDate(),
+        received_date: getColombiaTimestampISO(), // CORREGIDO: Usar timestamp completo
       });
 
       if (order) {
