@@ -25,7 +25,8 @@ import {
   EyeOff,
   RefreshCw,
   Shield,
-  Wallet
+  Wallet,
+  Wrench
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { getCurrentUser, logoutUser, getSession, getProducts, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession, canCreateInvoice } from '../lib/supabase';
@@ -56,6 +57,7 @@ const adminNavigation = [
       { name: 'Cambios', href: '/cambios', icon: RefreshCw },
       { name: 'Clientes', href: '/clientes', icon: Users },
       { name: 'Movimientos', href: '/movimientos', icon: ArrowRightLeft },
+      { name: 'Servicio Técnico', href: '/ordenes-servicio', icon: Wrench, repuestosOnly: true },
     ]
   },
   // Sección 3: Finanzas y Reportes
@@ -369,7 +371,7 @@ export function Layout() {
                       }`}
                     >
                       <div className="space-y-1 mb-4">
-                        {section.items.map((item) => {
+                        {section.items.filter((item: any) => !item.repuestosOnly || session?.company === 'repuestos').map((item) => {
                           const isActive = location.pathname === item.href;
                           return (
                             <Link
@@ -436,7 +438,7 @@ export function Layout() {
                   }`}
                 >
                   <div className="space-y-1 mb-4">
-                    {section.items.map((item) => {
+                    {section.items.filter((item: any) => !item.repuestosOnly || session?.company === 'repuestos').map((item) => {
                       const isActive = location.pathname === item.href;
                       return (
                         <Link

@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router';
-import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download } from 'lucide-react';
+import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -12,6 +12,7 @@ import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { jsPDF } from 'jspdf';
+import { ProductSalesReportDialog } from '../components/ProductSalesReportDialog';
 
 export function InvoicesMenu() {
   const navigate = useNavigate();
@@ -54,6 +55,9 @@ export function InvoicesMenu() {
   // Estados para modal de impresión de factura recién creada
   const [showPrintOptionsModal, setShowPrintOptionsModal] = useState(false);
   const [newlyCreatedInvoice, setNewlyCreatedInvoice] = useState<Invoice | null>(null);
+
+  // Estado para modal de registro de ventas de productos
+  const [showProductSalesReport, setShowProductSalesReport] = useState(false);
 
   useEffect(() => {
     loadStats();
@@ -1040,6 +1044,15 @@ export function InvoicesMenu() {
                 </>
               )}
             </Button>
+
+            <Button
+              onClick={() => setShowProductSalesReport(true)}
+              variant="outline"
+              className="border-green-300 dark:border-green-700 hover:bg-green-50 dark:hover:bg-green-950 text-green-700 dark:text-green-400"
+            >
+              <FileBarChart2 className="w-4 h-4 mr-2" />
+              Registro
+            </Button>
           </div>
         </div>
       </div>
@@ -1964,6 +1977,14 @@ export function InvoicesMenu() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Modal de Registro de Ventas de Productos */}
+      <ProductSalesReportDialog
+        open={showProductSalesReport}
+        onOpenChange={setShowProductSalesReport}
+        invoices={todayInvoices}
+        products={products}
+      />
     </div>
   );
 }

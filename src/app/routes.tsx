@@ -20,6 +20,8 @@ import { CustomerProfile } from './pages/CustomerProfile';
 import Exchanges from './pages/Exchanges';
 import Warranties from './pages/Warranties';
 import { getCurrentUser } from './lib/supabase';
+import ServiceOrders from './pages/ServiceOrders';
+import TrackingPage from './pages/TrackingPage';
 
 // Componente para proteger rutas
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: string[] }) {
@@ -40,6 +42,10 @@ export const router = createBrowserRouter([
   {
     path: '/login',
     Component: Login,
+  },
+  {
+    path: '/seguimiento/:trackingCode',
+    Component: TrackingPage,
   },
   {
     path: '/',
@@ -170,6 +176,14 @@ export const router = createBrowserRouter([
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
             <Exchanges />
+          </ProtectedRoute>
+        )
+      },
+      { 
+        path: 'ordenes-servicio', 
+        element: (
+          <ProtectedRoute allowedRoles={['admin', 'seller']}>
+            <ServiceOrders />
           </ProtectedRoute>
         )
       },
