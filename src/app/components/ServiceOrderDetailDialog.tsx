@@ -286,6 +286,21 @@ export function ServiceOrderDetailDialog({
     }
   };
 
+  const handleCancelOrder = async () => {
+    if (!confirm('¿Estás seguro de cancelar esta orden de servicio técnico? Esta acción no se puede deshacer.')) return;
+
+    const updated = await updateServiceOrder(order.id, {
+      status: 'cancelled',
+    });
+
+    if (updated) {
+      setOrder(updated);
+      await loadTimeline();
+      onUpdate();
+      toast.success('Orden cancelada');
+    }
+  };
+
   const handleMarkAsDelivered = async () => {
     if (!confirm('¿Marcar esta orden como entregada?')) return;
 
@@ -868,15 +883,26 @@ export function ServiceOrderDetailDialog({
               </Card>
             )}
 
-            {/* Marcar como Entregado */}
+            {/* Acciones */}
             {order.status !== 'delivered' && order.status !== 'cancelled' && (
-              <Button
-                onClick={handleMarkAsDelivered}
-                className="w-full bg-green-600 hover:bg-green-700 text-white"
-              >
-                <CheckCircle className="h-4 w-4 mr-2" />
-                Marcar como Entregado
-              </Button>
+              <div className="space-y-2">
+                <Button
+                  onClick={handleMarkAsDelivered}
+                  className="w-full bg-green-600 hover:bg-green-700 text-white"
+                >
+                  <CheckCircle className="h-4 w-4 mr-2" />
+                  Marcar como Entregado
+                </Button>
+
+                <Button
+                  onClick={handleCancelOrder}
+                  variant="destructive"
+                  className="w-full"
+                >
+                  <X className="h-4 w-4 mr-2" />
+                  Cancelar Orden
+                </Button>
+              </div>
             )}
           </div>
         </div>
