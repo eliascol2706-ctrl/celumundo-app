@@ -9,7 +9,7 @@ import { Textarea } from '../components/ui/textarea';
 import { Checkbox } from '../components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { formatCOP } from '../lib/currency';
-import { getWarranties, getProducts, addWarranty, getCurrentUser, getWarrantiesStats, updateWarrantyStatus, type Warranty, type Product } from '../lib/supabase';
+import { getWarranties, getAllProducts, addWarranty, getCurrentUser, getWarrantiesStats, updateWarrantyStatus, type Warranty, type Product } from '../lib/supabase';
 import { toast } from 'sonner';
 
 export default function Warranties() {
@@ -63,7 +63,7 @@ export default function Warranties() {
     try {
       const [warrantiesData, productsData, statsData] = await Promise.all([
         getWarranties(),
-        getProducts(),
+        getAllProducts(),
         getWarrantiesStats()
       ]);
       setWarranties(warrantiesData);

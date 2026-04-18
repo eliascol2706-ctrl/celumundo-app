@@ -15,7 +15,7 @@ import {
 } from "lucide-react";
 import {
   getMovements,
-  getProducts,
+  getAllProducts,
   addMovement,
   getCurrentUser,
   updateProduct,
@@ -139,7 +139,7 @@ export function Movements() {
   };
 
   const loadProducts = async () => {
-    const data = await getProducts();
+    const data = await getAllProducts();
     setProducts(data);
   };
 

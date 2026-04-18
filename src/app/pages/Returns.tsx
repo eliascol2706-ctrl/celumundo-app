@@ -5,7 +5,7 @@ import {
   getReturns,
   addReturn,
   revertReturn,
-  getProducts,
+  getAllProducts,
   updateProduct,
   getCurrentUser,
   getCurrentCompany,
@@ -50,7 +50,7 @@ export function Returns() {
     const [returnsData, invoicesData, productsData] = await Promise.all([
       getReturns(),
       getInvoices(),
-      getProducts(),
+      getAllProducts(),
     ]);
     setReturns(returnsData);
     setInvoices(invoicesData);

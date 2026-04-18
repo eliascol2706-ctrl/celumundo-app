@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useEffect, useState } from 'react';
-import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, type CreditPayment, getCurrentUser, getCurrentCompany } from '../lib/supabase';
+import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, type CreditPayment, getCurrentUser, getCurrentCompany } from '../lib/supabase';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
@@ -87,7 +87,7 @@ export function InvoicesMenu() {
     try {
       const [invoices, products] = await Promise.all([
         getInvoices(),
-        getProducts()
+        getAllProducts()
       ]);
       
       // Obtener fecha actual en zona horaria de Colombia (GMT-5)

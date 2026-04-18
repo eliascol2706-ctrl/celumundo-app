@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BarChart3, TrendingUp, X, Search, RotateCcw } from 'lucide-react';
-import { getInvoices, getProducts, getDailyClosures, getMonthlyClosures, getExpenses, getReturns, calculateNetRevenue, getColombiaDate, getColombiaDateTime, extractColombiaDate, type Invoice, type Return } from '../lib/supabase';
+import { getInvoices, getAllProducts, getDailyClosures, getMonthlyClosures, getExpenses, getReturns, calculateNetRevenue, getColombiaDate, getColombiaDateTime, extractColombiaDate, type Invoice, type Return } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -31,7 +31,7 @@ export function Reports() {
   const loadData = async () => {
     const [invoicesData, productsData, dailyClosuresData, monthlyClosuresData, expensesData, returnsData] = await Promise.all([
       getInvoices(),
-      getProducts(),
+      getAllProducts(),
       getDailyClosures(),
       getMonthlyClosures(),
       getExpenses(),

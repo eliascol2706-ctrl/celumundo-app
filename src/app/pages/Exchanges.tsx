@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Textarea } from '../components/ui/textarea';
 import { formatCOP } from '../lib/currency';
-import { getExchanges, getProducts, getInvoices, addExchange, deleteExchange, finalizeExchange, cancelExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, type Exchange, type Product, type Invoice } from '../lib/supabase';
+import { getExchanges, getAllProducts, getInvoices, addExchange, deleteExchange, finalizeExchange, cancelExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, type Exchange, type Product, type Invoice } from '../lib/supabase';
 import { extractIds } from '../lib/unit-ids-utils';
 import { toast } from 'sonner';
 
@@ -82,7 +82,7 @@ export default function Exchanges() {
     try {
       const [exchangesData, productsData, invoicesData, statsData] = await Promise.all([
         getExchanges(),
-        getProducts(),
+        getAllProducts(),
         getInvoices(),
         getExchangesStats()
       ]);

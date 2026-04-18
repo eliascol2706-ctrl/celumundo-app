@@ -24,7 +24,7 @@ import {
   FileText
 } from 'lucide-react';
 import {
-  getProducts,
+  getAllProducts,
   getDepartments,
   addInvoice,
   updateProduct,
@@ -245,7 +245,7 @@ export function RegularInvoice() {
 
   const loadData = async () => {
     const [productsData, departmentsData] = await Promise.all([
-      getProducts(),
+      getAllProducts(),
       getDepartments()
     ]);
     setProducts(productsData);

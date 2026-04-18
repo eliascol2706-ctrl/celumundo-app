@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Plus, Edit, Trash2, FolderOpen, TrendingUp, Package, ShoppingCart } from 'lucide-react';
-import { getDepartments, addDepartment, updateDepartment, deleteDepartment, getProducts, getInvoices, type Department, type Product, type Invoice } from '../lib/supabase';
+import { getDepartments, addDepartment, updateDepartment, deleteDepartment, getAllProducts, getInvoices, type Department, type Product, type Invoice } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -32,7 +32,7 @@ export function Departments() {
   };
 
   const loadProducts = async () => {
-    const data = await getProducts();
+    const data = await getAllProducts();
     setProducts(data);
   };
 
