@@ -77,6 +77,18 @@ export default function Exchanges() {
     loadData();
   }, []);
 
+  // Limpiar campos de pago cuando la diferencia es 0
+  useEffect(() => {
+    if (originalProduct && newProduct) {
+      const difference = calculatePriceDifference();
+      if (difference === 0) {
+        setPaymentCash(0);
+        setPaymentTransfer(0);
+        setPaymentOther(0);
+      }
+    }
+  }, [originalProduct, newProduct, originalQuantity, newQuantity, originalPrice, newPrice]);
+
   const loadData = async () => {
     setIsLoading(true);
     try {
