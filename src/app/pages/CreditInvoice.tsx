@@ -29,6 +29,7 @@ import {
 import {
   getCustomers,
   getProducts,
+  getAllProducts,
   getDepartments,
   addInvoice,
   updateProduct,
@@ -83,7 +84,7 @@ export function CreditInvoice() {
   const navigate = useNavigate();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [departments, setDepartments] = useState<string[]>([]);
+  const [departments, setDepartments] = useState<Array<{ id: string; name: string }>>([]);
   const [selectedCustomer, setSelectedCustomer] = useState<Customer | null>(null);
   const [items, setItems] = useState<InvoiceItem[]>([]);
   const [paymentTerm, setPaymentTerm] = useState('30');
@@ -259,7 +260,7 @@ export function CreditInvoice() {
   const loadData = async () => {
     const [customersData, productsData, departmentsData] = await Promise.all([
       getCustomers(),
-      getProducts(),
+      getAllProducts(),
       getDepartments()
     ]);
     setCustomers(customersData);

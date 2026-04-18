@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List, X, Printer, Eye, Loader2, FileText } from 'lucide-react';
-import { getProducts, addProduct, updateProduct, deleteProduct, getDepartments, type Product, type Department, supabase } from '../lib/supabase';
+import { getProducts, getAllProducts, searchProducts, addProduct, updateProduct, deleteProduct, getDepartments, type Product, type Department, supabase } from '../lib/supabase';
 import { extractIds } from '../lib/unit-ids-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -29,7 +29,8 @@ export function Products() {
 
   // Estados para paginación
   const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 10;
+  const itemsPerPage = 50;
+  const [totalProducts, setTotalProducts] = useState(0);
 
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -71,17 +72,26 @@ export function Products() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        setIsLoading(true);
-        await Promise.all([loadProducts(), loadDepartments()]);
+        await loadDepartments();
+        // Cargar productos inicialmente
+        await loadProducts();
       } catch (error) {
         console.error('Error loading data:', error);
         toast.error('Error al cargar los datos');
-      } finally {
-        setIsLoading(false);
       }
     };
     loadData();
   }, []);
+
+  // Nuevo useEffect: recargar productos solo cuando cambie la página (después del primer render)
+  const isFirstRender = useRef(true);
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    loadProducts();
+  }, [currentPage]);
 
   const loadDepartments = async () => {
     const data = await getDepartments();
@@ -89,8 +99,24 @@ export function Products() {
   };
 
   const loadProducts = async () => {
-    const data = await getProducts();
-    setProducts(data);
+    try {
+      setIsLoading(true);
+      const result = await searchProducts({
+        code: searchCode,
+        name: searchName,
+        description: searchDescription,
+        category: searchCategory,
+        page: currentPage - 1, // searchProducts usa índice 0
+        pageSize: itemsPerPage
+      });
+      setProducts(result.products);
+      setTotalProducts(result.total);
+    } catch (error) {
+      console.error('Error loading products:', error);
+      toast.error('Error al cargar productos');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const getNextProductCode = () => {
@@ -131,31 +157,33 @@ export function Products() {
     return `${safeBaseCode.slice(0, -1)}-${safeVariantNumber.toString().padStart(4, '0')}A`;
   };
 
-  // Filtrado avanzado de productos
-  const filteredProducts = products.filter(product => {
-    const matchesCode = searchCode === '' || includesIgnoreAccents(product.code, searchCode);
-    const matchesName = searchName === '' || includesIgnoreAccents(product.name, searchName);
-    const matchesDescription = searchDescription === '' || includesIgnoreAccents(product.description, searchDescription);
-    const matchesCategory = searchCategory === 'all' || product.category === searchCategory;
+  // Los productos ya vienen filtrados desde el servidor
+  // No necesitamos filtrado local
 
-    return matchesCode && matchesName && matchesDescription && matchesCategory;
-  });
-
-  // Obtener categorías únicas (filtrar valores vacíos)
-  const uniqueCategories = Array.from(new Set(products.map(p => p.category)))
-    .filter(category => category && category.trim() !== '')
-    .sort();
-
-  // Calcular paginación
-  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const paginatedProducts = filteredProducts.slice(startIndex, endIndex);
-
-  // Resetear a página 1 cuando cambian los filtros
+  // Obtener categorías únicas para el filtro (necesitamos cargar todas las categorías)
+  const [allCategories, setAllCategories] = useState<string[]>([]);
   useEffect(() => {
+    const loadCategories = async () => {
+      const allProducts = await getAllProducts();
+      const categories = Array.from(new Set(allProducts.map(p => p.category)))
+        .filter(category => category && category.trim() !== '')
+        .sort();
+      setAllCategories(categories);
+    };
+    loadCategories();
+  }, []);
+
+  // Calcular paginación del lado del servidor
+  const totalPages = Math.ceil(totalProducts / itemsPerPage);
+
+  // Los productos ya vienen paginados desde el servidor
+  const paginatedProducts = products;
+
+  // Función para ejecutar búsqueda (resetea a página 1 y carga productos)
+  const handleSearch = () => {
     setCurrentPage(1);
-  }, [searchCode, searchName, searchDescription, searchCategory]);
+    loadProducts();
+  };
 
   // Calcular precio desde margen
   const calculatePriceFromMargin = (cost: number, margin: number): number => {
@@ -606,6 +634,7 @@ export function Products() {
                 placeholder="Buscar por código..."
                 value={searchCode}
                 onChange={(e) => setSearchCode(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
               />
             </div>
             <div>
@@ -614,6 +643,7 @@ export function Products() {
                 placeholder="Buscar por nombre..."
                 value={searchName}
                 onChange={(e) => setSearchName(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
               />
             </div>
             <div>
@@ -622,6 +652,7 @@ export function Products() {
                 placeholder="Buscar por descripción..."
                 value={searchDescription}
                 onChange={(e) => setSearchDescription(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
               />
             </div>
             <div>
@@ -631,7 +662,7 @@ export function Products() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Todas las categorías</SelectItem>
-                  {uniqueCategories.map((category) => (
+                  {allCategories.map((category) => (
                     <SelectItem key={category} value={category}>
                       {category}
                     </SelectItem>
@@ -640,13 +671,38 @@ export function Products() {
               </Select>
             </div>
           </div>
+          <div className="mt-4 flex gap-2">
+            <Button
+              onClick={handleSearch}
+              className="flex-1"
+              disabled={isLoading}
+            >
+              <Search className="h-4 w-4 mr-2" />
+              {isLoading ? 'Buscando...' : 'Buscar Productos'}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSearchCode('');
+                setSearchName('');
+                setSearchDescription('');
+                setSearchCategory('all');
+                setCurrentPage(1);
+                loadProducts();
+              }}
+              disabled={isLoading}
+            >
+              <X className="h-4 w-4 mr-2" />
+              Limpiar Filtros
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
       {/* Lista de productos */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle>Lista de Productos ({filteredProducts.length})</CardTitle>
+          <CardTitle>Lista de Productos ({totalProducts})</CardTitle>
           {totalPages > 1 && (
             <div className="flex items-center gap-2">
               <Button

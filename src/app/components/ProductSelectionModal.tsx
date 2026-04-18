@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, X, ChevronLeft, ChevronRight, Package, DollarSign, Layers, Hash } from 'lucide-react';
+import { Search, X, ChevronLeft, ChevronRight, Package, DollarSign, Layers, Hash, Loader2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Input } from './ui/input';
 import { Button } from './ui/button';
@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Badge } from './ui/badge';
 import { formatCOP } from '../lib/currency';
 import { includesIgnoreAccents } from '../lib/string-utils';
+import { searchProductsForInvoice } from '../lib/supabase';
 
 interface Product {
   id: string;
@@ -40,9 +41,35 @@ export function ProductSelectionModal({
   departments,
   onSelectProduct
 }: ProductSelectionModalProps) {
-  const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState(''); // Lo que escribe el usuario
+  const [searchTerm, setSearchTerm] = useState(''); // Término real para filtrar
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchedProducts, setSearchedProducts] = useState<Product[] | null>(null);
+
+  // Función para ejecutar búsqueda
+  const handleSearch = async () => {
+    if (!searchInput.trim()) {
+      // Si no hay término de búsqueda, limpiar resultados
+      setSearchedProducts(null);
+      setSearchTerm('');
+      setCurrentPage(1);
+      return;
+    }
+
+    setIsSearching(true);
+    try {
+      const results = await searchProductsForInvoice(searchInput.trim());
+      setSearchedProducts(results);
+      setSearchTerm(searchInput);
+      setCurrentPage(1);
+    } catch (error) {
+      console.error('Error searching products:', error);
+    } finally {
+      setIsSearching(false);
+    }
+  };
 
   // Reset page when search or filter changes
   useEffect(() => {
@@ -52,30 +79,25 @@ export function ProductSelectionModal({
   // Reset when modal closes
   useEffect(() => {
     if (!open) {
+      setSearchInput('');
       setSearchTerm('');
+      setSearchedProducts(null);
       setSelectedDepartment('all');
       setCurrentPage(1);
     }
   }, [open]);
 
-  // Filter products
-  const filteredProducts = products.filter((product) => {
-    // Filter by department
+  // Use searched products if available, otherwise use all products
+  const baseProducts = searchedProducts !== null ? searchedProducts : products;
+
+  // Filter products (apply department/category filter on client side)
+  const filteredProducts = baseProducts.filter((product) => {
+    // Filter by department (using category field)
     if (selectedDepartment !== 'all') {
       const dept = departments.find(d => d.id === selectedDepartment);
-      if (dept && product.department_name !== dept.name) {
+      if (dept && product.category !== dept.name) {
         return false;
       }
-    }
-
-    // Filter by search term
-    if (searchTerm) {
-      const search = searchTerm.toLowerCase().trim();
-      return (
-        product.code.toLowerCase().includes(search) ||
-        includesIgnoreAccents(product.name, search) ||
-        (product.description && includesIgnoreAccents(product.description, search))
-      );
     }
 
     return true;
@@ -106,41 +128,63 @@ export function ProductSelectionModal({
         </DialogHeader>
 
         {/* Search and Filter Bar */}
-        <div className="flex flex-col sm:flex-row gap-3 pb-4 border-b border-border">
-          {/* Search Input */}
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              type="text"
-              placeholder="Buscar por código, nombre o descripción..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10 pr-10"
-            />
-            {searchTerm && (
-              <button
-                onClick={() => setSearchTerm('')}
-                className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            )}
+        <div className="flex flex-col gap-3 pb-4 border-b border-border">
+          <div className="flex flex-col sm:flex-row gap-3">
+            {/* Search Input */}
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                type="text"
+                placeholder="Buscar por código, nombre o descripción..."
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+                className="pl-10 pr-10"
+              />
+              {searchInput && (
+                <button
+                  onClick={() => {
+                    setSearchInput('');
+                    setSearchTerm('');
+                    setSearchedProducts(null);
+                  }}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+
+            {/* Department Filter */}
+            <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
+              <SelectTrigger className="w-full sm:w-[220px]">
+                <SelectValue placeholder="Todos los departamentos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos los departamentos</SelectItem>
+                {departments.map((dept) => (
+                  <SelectItem key={dept.id} value={dept.id}>
+                    {dept.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Department Filter */}
-          <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
-            <SelectTrigger className="w-full sm:w-[220px]">
-              <SelectValue placeholder="Todos los departamentos" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos los departamentos</SelectItem>
-              {departments.map((dept) => (
-                <SelectItem key={dept.id} value={dept.id}>
-                  {dept.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Botón de búsqueda */}
+          <Button onClick={handleSearch} disabled={isSearching} className="w-full sm:w-auto">
+            {isSearching ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Buscando...
+              </>
+            ) : (
+              <>
+                <Search className="h-4 w-4 mr-2" />
+                Buscar Producto
+              </>
+            )}
+          </Button>
         </div>
 
         {/* Products Grid */}

@@ -1,8 +1,10 @@
 import { useEffect, useState, useRef } from 'react';
 import { Plus, Search, Eye, FileText, Printer, Download, X, Info, Scan, Hash, RotateCcw, CreditCard, Trash2, Receipt, Calendar, Loader2, Check } from 'lucide-react';
-import { 
-  getInvoices, 
-  getProducts, 
+import {
+  getInvoices,
+  getProducts,
+  getAllProducts,
+  searchProductsForInvoice,
   updateProduct,
   getCurrentCompany,
   getCurrentUser,
@@ -112,8 +114,25 @@ export function Invoices() {
   const [isProductInfoDialogOpen, setIsProductInfoDialogOpen] = useState(false);
   
   // Búsqueda y filtrado de productos
-  const [productSearchTerm, setProductSearchTerm] = useState('');
+  const [productSearchInput, setProductSearchInput] = useState(''); // Lo que escribe el usuario
+  const [productSearchTerm, setProductSearchTerm] = useState(''); // Término real para filtrar
   const [productSortOrder, setProductSortOrder] = useState<'az' | 'highest' | 'lowest'>('az');
+  const [isSearchingProducts, setIsSearchingProducts] = useState(false);
+
+  // Función para ejecutar búsqueda del lado del servidor
+  const handleProductSearch = async () => {
+    setIsSearchingProducts(true);
+    try {
+      const results = await searchProductsForInvoice(productSearchInput);
+      setProducts(results);
+      setProductSearchTerm(productSearchInput);
+    } catch (error) {
+      console.error('Error searching products:', error);
+      toast.error('Error al buscar productos');
+    } finally {
+      setIsSearchingProducts(false);
+    }
+  };
   
   // Dialog de selección de productos
   const [isProductSelectDialogOpen, setIsProductSelectDialogOpen] = useState(false);
@@ -342,7 +361,7 @@ export function Invoices() {
       setIsLoading(true);
       const [invoicesData, productsData, customersData] = await Promise.all([
         getInvoices(),
-        getProducts(),
+        getAllProducts(),
         getCustomers(),
       ]);
       setInvoices(invoicesData);
@@ -552,7 +571,7 @@ export function Invoices() {
       setIsCreateDialogOpen(true);
 
       // Recargar productos cada vez que se abre el diálogo para mostrar productos recién creados
-      const productsData = await getProducts();
+      const productsData = await getAllProducts();
       setProducts(productsData);
     } catch (error) {
       console.error('Error opening create dialog:', error);
@@ -581,7 +600,7 @@ export function Invoices() {
 
   const handleOpenProductSelectDialog = async () => {
     // Recargar productos antes de abrir el diálogo de selección
-    const productsData = await getProducts();
+    const productsData = await getAllProducts();
     setProducts(productsData);
     setIsProductSelectDialogOpen(true);
   };
@@ -2268,7 +2287,7 @@ export function Invoices() {
                           size="sm"
                           className="h-6 px-2 text-xs"
                           onClick={async () => {
-                            const productsData = await getProducts();
+                            const productsData = await getAllProducts();
                             setProducts(productsData);
                             toast.success('Productos actualizados');
                           }}
@@ -2703,16 +2722,23 @@ export function Invoices() {
           </DialogHeader>
 
           <div className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  type="text"
-                  placeholder="Buscar por nombre, código o categoría..."
-                  value={productSearchTerm}
-                  onChange={(e) => setProductSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
+            <div className="grid grid-cols-1 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="relative md:col-span-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                  <Input
+                    type="text"
+                    placeholder="Buscar por nombre, código o categoría..."
+                    value={productSearchInput}
+                    onChange={(e) => setProductSearchInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && handleProductSearch()}
+                    className="pl-10"
+                  />
+                </div>
+                <Button onClick={handleProductSearch} className="w-full">
+                  <Search className="h-4 w-4 mr-2" />
+                  Buscar
+                </Button>
               </div>
               <Select
                 value={productSortOrder}

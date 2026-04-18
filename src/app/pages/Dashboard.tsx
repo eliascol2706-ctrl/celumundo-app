@@ -14,7 +14,7 @@ import {
   FileText,
   Receipt
 } from 'lucide-react';
-import { getProducts, getInvoices, getMovements, getExpenses, getReturns, getReturnsStats, getExchanges, getCustomers, calculateNetRevenue, getCurrentCompany, getCurrentUser } from '../lib/supabase';
+import { getProducts, getInvoices, getAllProducts, getAllInvoices, getMovements, getExpenses, getReturns, getReturnsStats, getExchanges, getCustomers, calculateNetRevenue, getCurrentCompany, getCurrentUser } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { formatCOP } from '../lib/currency';
 import { MissingTableAlert } from '../components/MissingTableAlert';
@@ -49,12 +49,15 @@ export function Dashboard() {
   const [lowStockItems, setLowStockItems] = useState<any[]>([]);
   const [recentInvoices, setRecentInvoices] = useState<any[]>([]);
   const [returnsTableMissing, setReturnsTableMissing] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const loadData = async () => {
+      setIsLoading(true);
       try {
-        const products = await getProducts();
-        const invoices = await getInvoices();
+        // Usar getAllProducts() y getAllInvoices() para obtener TODOS los datos sin límite de 1000
+        const products = await getAllProducts();
+        const invoices = await getAllInvoices();
         const movements = await getMovements();
         const expenses = await getExpenses();
 
@@ -134,9 +137,11 @@ export function Dashboard() {
         setRecentInvoices(sortedInvoices.slice(0, 5));
       } catch (error) {
         console.error('Error loading dashboard data:', error);
+      } finally {
+        setIsLoading(false);
       }
     };
-    
+
     loadData();
   }, []);
 
@@ -147,8 +152,18 @@ export function Dashboard() {
         <p className="text-muted-foreground mt-1">Resumen general del sistema</p>
       </div>
 
-      {/* Tarjetas de estadísticas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      {isLoading ? (
+        <div className="flex items-center justify-center py-20">
+          <div className="text-center">
+            <div className="animate-spin h-12 w-12 border-4 border-green-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Cargando datos del dashboard...</p>
+            <p className="text-xs text-muted-foreground mt-1">Esto puede tardar unos segundos con muchos productos</p>
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Tarjetas de estadísticas */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         <Card className="hover:shadow-lg transition-all duration-300 hover:-translate-y-1">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -414,6 +429,8 @@ export function Dashboard() {
       {/* Alerta si la tabla de devoluciones está ausente */}
       {returnsTableMissing && (
         <MissingTableAlert tableName="returns" />
+      )}
+        </>
       )}
     </div>
   );

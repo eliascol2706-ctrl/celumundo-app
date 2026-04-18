@@ -447,17 +447,18 @@ export const deleteDepartment = async (id: string): Promise<boolean> => {
 
 export const getProducts = async (): Promise<Product[]> => {
   const company = getCurrentCompany();
-  
+
   try {
     const { data, error } = await supabase
       .from('products')
       .select('*')
       .eq('company', company)
-      .order('name');
-    
+      .order('name')
+      .limit(1000); // Límite explícito de 1000
+
     if (error) {
       console.error('Error fetching products:', error);
-      
+
       // Si la tabla no existe, dar instrucciones claras
       if (error.code === '42P01' || error.message.includes('relation "products" does not exist')) {
         console.error('❌ ERROR: La base de datos no está configurada.');
@@ -467,16 +468,147 @@ export const getProducts = async (): Promise<Product[]> => {
         console.error('3. Copia el contenido del archivo: /supabase_reset_schema.sql');
         console.error('4. Pega y ejecuta el script (botón Run)');
         console.error('5. Recarga esta página');
-        
+
         throw new Error('Base de datos no configurada. Revisa la consola para instrucciones.');
       }
-      
+
       return [];
     }
     return data || [];
   } catch (error) {
     console.error('Error connecting to Supabase:', error);
     throw error;
+  }
+};
+
+// NUEVA FUNCIÓN: Obtiene TODOS los productos sin límite (paginación automática)
+export const getAllProducts = async (): Promise<Product[]> => {
+  const company = getCurrentCompany();
+  const pageSize = 1000;
+  let allProducts: Product[] = [];
+  let page = 0;
+  let hasMore = true;
+
+  try {
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('company', company)
+        .order('name')
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+
+      if (error) {
+        console.error('Error fetching all products:', error);
+        throw error;
+      }
+
+      if (data && data.length > 0) {
+        allProducts = [...allProducts, ...data];
+        page++;
+
+        // Si obtuvimos menos de 1000, ya no hay más datos
+        if (data.length < pageSize) {
+          hasMore = false;
+        }
+      } else {
+        hasMore = false;
+      }
+    }
+
+    return allProducts;
+  } catch (error) {
+    console.error('Error connecting to Supabase:', error);
+    throw error;
+  }
+};
+
+// NUEVA FUNCIÓN: Búsqueda de productos con filtros y paginación del lado del servidor
+export const searchProducts = async (filters: {
+  code?: string;
+  name?: string;
+  description?: string;
+  category?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<{ products: Product[]; total: number }> => {
+  const company = getCurrentCompany();
+  const page = filters.page || 0;
+  const pageSize = filters.pageSize || 50;
+
+  try {
+    let query = supabase
+      .from('products')
+      .select('*', { count: 'exact' })
+      .eq('company', company);
+
+    // Aplicar filtros
+    if (filters.code) {
+      query = query.ilike('code', `%${filters.code}%`);
+    }
+    if (filters.name) {
+      query = query.ilike('name', `%${filters.name}%`);
+    }
+    if (filters.description) {
+      query = query.ilike('description', `%${filters.description}%`);
+    }
+    if (filters.category && filters.category !== 'all') {
+      query = query.eq('category', filters.category);
+    }
+
+    // Ordenar y paginar
+    query = query
+      .order('name')
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    const { data, error, count } = await query;
+
+    if (error) {
+      console.error('Error searching products:', error);
+      return { products: [], total: 0 };
+    }
+
+    return {
+      products: data || [],
+      total: count || 0
+    };
+  } catch (error) {
+    console.error('Error searching products:', error);
+    return { products: [], total: 0 };
+  }
+};
+
+// NUEVA FUNCIÓN: Búsqueda de productos para selectores de facturas (sin límite estricto)
+export const searchProductsForInvoice = async (searchTerm: string): Promise<Product[]> => {
+  const company = getCurrentCompany();
+
+  try {
+    let query = supabase
+      .from('products')
+      .select('*')
+      .eq('company', company);
+
+    // Si hay término de búsqueda, aplicar filtros
+    if (searchTerm && searchTerm.trim() !== '') {
+      const term = searchTerm.trim();
+      // Buscar en código, nombre, descripción o categoría
+      query = query.or(`code.ilike.%${term}%,name.ilike.%${term}%,description.ilike.%${term}%,category.ilike.%${term}%`);
+    }
+
+    // Ordenar por nombre y limitar a 500 resultados (más que suficiente para un selector)
+    query = query.order('name').limit(500);
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error searching products for invoice:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error searching products for invoice:', error);
+    return [];
   }
 };
 
@@ -995,13 +1127,55 @@ export const getInvoices = async (): Promise<Invoice[]> => {
     .from('invoices')
     .select('*')
     .eq('company', company)
-    .order('date', { ascending: false });
-  
+    .order('date', { ascending: false })
+    .limit(1000); // Límite explícito de 1000
+
   if (error) {
     console.error('Error fetching invoices:', error);
     return [];
   }
   return data || [];
+};
+
+// NUEVA FUNCIÓN: Obtiene TODAS las facturas sin límite (paginación automática)
+export const getAllInvoices = async (): Promise<Invoice[]> => {
+  const company = getCurrentCompany();
+  const pageSize = 1000;
+  let allInvoices: Invoice[] = [];
+  let page = 0;
+  let hasMore = true;
+
+  try {
+    while (hasMore) {
+      const { data, error } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('company', company)
+        .order('date', { ascending: false })
+        .range(page * pageSize, (page + 1) * pageSize - 1);
+
+      if (error) {
+        console.error('Error fetching all invoices:', error);
+        return allInvoices; // Retornar lo que hemos obtenido hasta ahora
+      }
+
+      if (data && data.length > 0) {
+        allInvoices = [...allInvoices, ...data];
+        page++;
+
+        if (data.length < pageSize) {
+          hasMore = false;
+        }
+      } else {
+        hasMore = false;
+      }
+    }
+
+    return allInvoices;
+  } catch (error) {
+    console.error('Error connecting to Supabase:', error);
+    return allInvoices;
+  }
 };
 
 export const addInvoice = async (invoice: Omit<Invoice, 'id' | 'number' | 'company' | 'created_at' | 'updated_at'>): Promise<Invoice | null> => {

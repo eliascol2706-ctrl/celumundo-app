@@ -256,6 +256,9 @@ export function ThermalServiceReceipt({ order, technician, receiptType }: Therma
         <div style={{ fontWeight: 'bold' }}>Servicio Técnico Especializado</div>
         <div style={{ marginTop: '5px', fontWeight: 'bold' }}>¡Gracias por confiar en nosotros!</div>
       </div>
+
+      {/* Espaciado final para que la tirilla salga completa */}
+      <div style={{ height: '50mm', width: '100%' }}></div>
     </div>
   );
 }
