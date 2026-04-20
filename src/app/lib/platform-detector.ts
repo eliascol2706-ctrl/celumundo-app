@@ -4,8 +4,8 @@ export type Platform = 'electron' | 'web';
 
 // Detectar plataforma actual
 export const detectPlatform = (): Platform => {
-  // Verificar si window.electron está disponible (solo en Electron)
-  if (typeof window !== 'undefined' && window.electron?.printer) {
+  // Verificar si window.electron.isElectron está disponible (solo en Electron)
+  if (typeof window !== 'undefined' && window.electron?.isElectron) {
     return 'electron';
   }
   return 'web';

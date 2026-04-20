@@ -37,9 +37,10 @@ import { Button } from '../components/ui/button';
 import { Label } from '../components/ui/label';
 import { formatCOP } from '../lib/currency';
 import { includesIgnoreAccents } from '../lib/string-utils';
-import { getPrinterConfig, savePrinterConfig, getAvailablePrinters } from '../lib/printer-config';
+import { getPrinterConfig, savePrinterConfig, getAvailablePrinters, getLabelPrinterSettings, saveLabelPrinterSettings, type LabelPrinterSettings, defaultLabelSettings } from '../lib/printer-config';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { isPrintingAvailable } from '../lib/platform-detector';
+import { LabelPrinterConfigDialog } from './LabelPrinterConfigDialog';
 
 const adminNavigation = [
   // Sección 1: Gestión de Inventario
@@ -156,6 +157,10 @@ export function Layout() {
   const [pdfPrinter, setPdfPrinter] = useState("");
   const [availablePrinters, setAvailablePrinters] = useState<string[]>([]);
 
+  // Estados para configuración de impresora de etiquetas
+  const [labelPrinterConfigDialogOpen, setLabelPrinterConfigDialogOpen] = useState(false);
+  const [labelPrinterSettings, setLabelPrinterSettings] = useState<LabelPrinterSettings>(defaultLabelSettings);
+
   // Cargar productos cuando se abre el diálogo
   useEffect(() => {
     if (productSearchDialogOpen && currentUser?.role === 'seller') {
@@ -204,6 +209,21 @@ export function Layout() {
     // Cargar impresoras disponibles
     const printers = await getAvailablePrinters();
     setAvailablePrinters(printers);
+
+    // Cargar configuración de impresora de etiquetas
+    const labelSettings = await getLabelPrinterSettings();
+    setLabelPrinterSettings(labelSettings);
+  };
+
+  const handleSaveLabelPrinterSettings = async (settings: LabelPrinterSettings) => {
+    try {
+      await saveLabelPrinterSettings(settings);
+      setLabelPrinterSettings(settings);
+      alert('Configuración de impresora de etiquetas guardada correctamente');
+    } catch (error) {
+      console.error('Error al guardar configuración:', error);
+      alert('Error al guardar la configuración de impresora de etiquetas');
+    }
   };
 
   const handleSaveSettings = async () => {
@@ -297,17 +317,24 @@ export function Layout() {
       }
 
       // Guardar configuración de impresoras
-      await savePrinterConfig({
-        thermal: thermalPrinter || '',
-        labels: labelPrinter || '',
-        pdf: pdfPrinter || '',
-      });
+      try {
+        await savePrinterConfig({
+          thermal: thermalPrinter || '',
+          labels: labelPrinter || '',
+          pdf: pdfPrinter || '',
+        });
+      } catch (printerError) {
+        console.error('❌ Error al guardar impresoras:', printerError);
+        alert('⚠️ Las credenciales se guardaron pero hubo un error al guardar la configuración de impresoras.\n\nSolución:\n1. Abre el archivo CREAR_TABLAS_IMPRESORAS_SIMPLE.sql\n2. Copia todo el contenido\n3. Pégalo en Supabase SQL Editor\n4. Presiona Run');
+        setIsSavingSettings(false);
+        return;
+      }
 
       alert('✅ Configuración guardada exitosamente');
       setSettingsDialogOpen(false);
     } catch (error) {
-      console.error('Error saving settings:', error);
-      alert('Error al guardar la configuración');
+      console.error('❌ Error saving settings:', error);
+      alert(`Error al guardar la configuración: ${error instanceof Error ? error.message : 'Error desconocido'}`);
     } finally {
       setIsSavingSettings(false);
     }
@@ -1034,7 +1061,17 @@ export function Layout() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="labelPrinter">Impresora de Etiquetas</Label>
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="labelPrinter">Impresora de Etiquetas</Label>
+                      <button
+                        onClick={() => setLabelPrinterConfigDialogOpen(true)}
+                        disabled={!isPrintingAvailable()}
+                        className="p-1.5 rounded-md hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        title="Configuración de impresora de etiquetas"
+                      >
+                        <Settings className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                      </button>
+                    </div>
                     <Select value={labelPrinter || undefined} onValueChange={setLabelPrinter} disabled={isSavingSettings || !isPrintingAvailable()}>
                       <SelectTrigger id="labelPrinter" className="bg-white dark:bg-zinc-900">
                         <SelectValue placeholder="Sin configurar" />
@@ -1129,6 +1166,14 @@ export function Layout() {
           </DialogContent>
         </Dialog>
       )}
+
+      {/* Diálogo de Configuración de Impresora de Etiquetas */}
+      <LabelPrinterConfigDialog
+        open={labelPrinterConfigDialogOpen}
+        onOpenChange={setLabelPrinterConfigDialogOpen}
+        settings={labelPrinterSettings}
+        onSave={handleSaveLabelPrinterSettings}
+      />
     </div>
   );
 }

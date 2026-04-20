@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router';
-import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2 } from 'lucide-react';
+import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -15,6 +15,7 @@ import { ProductSalesReportDialog } from '../components/ProductSalesReportDialog
 import { printThermalInvoice as printThermalDirect } from '../lib/thermal-printer';
 import { printPDFInvoice } from '../lib/pdf-printer';
 import { isPrintingAvailable } from '../lib/platform-detector';
+import { revertInvoice, canRevertInvoice, getRevertTimeRemaining } from '../lib/revert-invoice';
 
 export function InvoicesMenu() {
   const navigate = useNavigate();
@@ -528,6 +529,27 @@ export function InvoicesMenu() {
     }
   };
 
+  const handleRevertInvoice = async (invoice: Invoice) => {
+    const timeRemaining = getRevertTimeRemaining(invoice.created_at || '');
+
+    if (!confirm(
+      `¿Está seguro de revertir la factura #${invoice.number}?\n\n` +
+      `Esto eliminará la factura y restaurará el inventario.\n` +
+      `Tiempo restante para revertir: ${timeRemaining} minutos`
+    )) {
+      return;
+    }
+
+    const result = await revertInvoice(invoice.id);
+
+    if (result.success) {
+      toast.success(result.message);
+      loadStats();
+    } else {
+      toast.error(result.message);
+    }
+  };
+
   const handlePreviewInvoice = (invoice: Invoice) => {
     setSelectedInvoice(invoice);
     setShowPreviewModal(true);
@@ -988,6 +1010,17 @@ export function InvoicesMenu() {
                               >
                                 <Printer className="w-4 h-4" />
                               </Button>
+                              {invoice.status !== 'pending_confirmation' && canRevertInvoice(invoice.created_at || '') && (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleRevertInvoice(invoice)}
+                                  className="text-orange-600 dark:text-orange-400 hover:text-orange-700 dark:hover:text-orange-300 h-8 w-8 p-0"
+                                  title={`Revertir (${getRevertTimeRemaining(invoice.created_at || '')} min restantes)`}
+                                >
+                                  <Undo2 className="w-4 h-4" />
+                                </Button>
+                              )}
                             </div>
                           </td>
                         </tr>

@@ -351,6 +351,7 @@ export function CreditInvoice() {
       // Crear factura a crédito
       const invoiceData = {
         type: 'credit' as const,
+        is_credit: true,
         customer_id: selectedCustomer.id,
         customer_name: selectedCustomer.name,
         customer_document: selectedCustomer.document,
@@ -368,6 +369,7 @@ export function CreditInvoice() {
         subtotal: calculateSubtotal(),
         tax: 0,
         total: calculateTotal(),
+        credit_balance: calculateTotal(),
         status: 'pending' as const,
         payment_method: null,
         payment_cash: 0,
