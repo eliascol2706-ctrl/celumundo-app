@@ -26,6 +26,7 @@ import {
   Download,
   FileText
 } from 'lucide-react';
+import { isElectron, onGlobalShortcut, removeGlobalShortcutListener } from '../lib/electron-utils';
 import {
   getCustomers,
   getProducts,
@@ -199,12 +200,6 @@ export function CreditInvoice() {
         console.log('✅ Producto encontrado:', product ? product.name : '❌ NO ENCONTRADO');
 
         if (product) {
-          // Verificar stock SOLO para productos con IDs únicas
-          if (product.use_unit_ids && product.stock <= 0) {
-            toast.error(`${product.name} requiere IDs únicas y no tiene stock disponible`);
-            return;
-          }
-
           // Verificar si ya está agregado
           if (items.some(item => item.productId === product.id)) {
             toast.error('Este producto ya está agregado');
@@ -256,6 +251,301 @@ export function CreditInvoice() {
       }
     };
   }, [barcodeBuffer, products, items]);
+
+  // === Funciones helper (declaradas antes de los useEffects que las usan) ===
+  const addItem = () => {
+    // Abrir modal de selección de productos
+    // Preparar nuevo item
+    const newIndex = items.length;
+    setSelectedProductIndex(newIndex);
+    setShowProductSearch(true);
+  };
+
+  const removeItem = (index: number) => {
+    setItems(items.filter((_, i) => i !== index));
+  };
+
+  const updateItem = (index: number, field: keyof InvoiceItem, value: any) => {
+    const newItems = [...items];
+    newItems[index] = { ...newItems[index], [field]: value };
+
+    if (field === 'quantity' || field === 'price') {
+      newItems[index].total = newItems[index].quantity * newItems[index].price;
+    }
+
+    setItems(newItems);
+  };
+
+  const handleSubmit = async () => {
+    // Validaciones
+    if (!selectedCustomer) {
+      toast.error('Seleccione un cliente');
+      return;
+    }
+
+    if (items.length === 0) {
+      toast.error('Agregue al menos un producto');
+      return;
+    }
+
+    if (items.some((item) => !item.productId || item.quantity <= 0)) {
+      toast.error('Complete todos los productos');
+      return;
+    }
+
+    // Validar que productos con IDs tengan IDs seleccionadas
+    for (const item of items) {
+      if (item.useUnitIds && (!item.unitIds || item.unitIds.length === 0)) {
+        toast.error(`Debes seleccionar las IDs para ${item.productName}. Haz clic en "Seleccionar IDs" en la lista de productos.`);
+        return;
+      }
+      if (item.useUnitIds && item.unitIds && item.unitIds.length !== item.quantity) {
+        toast.error(`${item.productName}: Debes seleccionar ${item.quantity} IDs pero solo has seleccionado ${item.unitIds.length}`);
+        return;
+      }
+    }
+
+    // Verificar si el cliente está bloqueado
+    if (selectedCustomer.blocked) {
+      setShowWarningModal(true);
+      return;
+    }
+
+    // Verificar facturas vencidas
+    if (creditAnalysis.overdueDays > 0) {
+      setShowWarningModal(true);
+      return;
+    }
+
+    // Verificar crédito disponible
+    if (!creditAnalysis.hasEnoughCredit) {
+      toast.error('El cliente no tiene crédito suficiente para esta venta');
+      return;
+    }
+
+    // Verificar si se pueden crear facturas (no hay cierre)
+    setIsValidating(true);
+    const validation = await canCreateInvoice();
+    setIsValidating(false);
+
+    if (!validation.canCreate) {
+      const toastMessage = validation.message || 'No se puede crear factura en este momento';
+      const toastDuration = validation.requiresMonthlyClose ? 10000 : 8000;
+
+      toast.error(toastMessage, {
+        duration: toastDuration,
+        action: {
+          label: validation.requiresMonthlyClose ? '🔒 Realizar Cierre Mensual' : 'Ir a Cierres',
+          onClick: () => navigate('/cierres')
+        }
+      });
+      return;
+    }
+
+    setIsSubmitting(true);
+
+    try {
+      // Calcular fecha de vencimiento
+      const dueDate = calculatePaymentTerm();
+
+      // Crear factura a crédito
+      const invoiceData = {
+        type: 'credit' as const,
+        customer_id: selectedCustomer.id,
+        customer_name: selectedCustomer.name,
+        customer_document: selectedCustomer.document,
+        items: items.map((item) => ({
+          productId: item.productId,
+          productName: item.productName,
+          productCode: item.productCode,
+          quantity: item.quantity,
+          price: item.price,
+          total: item.total,
+          useUnitIds: item.useUnitIds,
+          unitIds: item.unitIds,
+          unitIdNotes: item.unitIdNotes
+        })),
+        subtotal: calculateSubtotal(),
+        tax: 0,
+        total: calculateTotal(),
+        status: 'pending' as const,
+        payment_method: null,
+        payment_cash: 0,
+        payment_transfer: 0,
+        payment_other: 0,
+        payment_note: '',
+        due_date: dueDate,
+        attended_by: getCurrentUser()?.username || 'Usuario'
+      };
+
+      const invoice = await addInvoice(invoiceData);
+
+      if (!invoice) {
+        toast.error('Error al crear la factura');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Actualizar inventario
+      for (const item of items) {
+        const product = products.find((p) => p.id === item.productId);
+        if (product) {
+          const newStock = product.stock - item.quantity;
+          let newRegisteredIds = product.registered_ids;
+
+          // Para facturas a crédito siempre INHABILITAR las IDs
+          if (item.useUnitIds && item.unitIds && item.unitIds.length > 0) {
+            const { disableIds } = await import('../lib/unit-ids-utils');
+            newRegisteredIds = disableIds(product.registered_ids, item.unitIds, invoice.id);
+          }
+
+          await updateProduct(item.productId, {
+            stock: newStock,
+            registered_ids: newRegisteredIds
+          });
+        }
+      }
+
+      toast.success('Factura a crédito creada exitosamente');
+
+      // Guardar la factura en localStorage para mostrar modal en InvoicesMenu
+      localStorage.setItem('lastCreatedInvoice', JSON.stringify(invoice));
+
+      // Redirigir a facturación
+      navigate('/facturacion');
+    } catch (error) {
+      console.error('Error creating credit invoice:', error);
+      toast.error('Error al crear la factura a crédito');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  // Atajos de teclado para agilizar facturación a crédito
+  useEffect(() => {
+    // Función unificada para manejar atajos
+    const processShortcut = (key: string) => {
+      console.log('⌨️ [Credit] Atajo recibido:', key);
+
+      // F1: Agregar producto
+      if (key === 'F1') {
+        console.log('✅ F1 - Agregar producto');
+        addItem();
+        return;
+      }
+
+      // F2: Modificar precio del último producto
+      if (key === 'F2') {
+        console.log('✅ F2 - Editar precio', 'Items:', items.length);
+        if (items.length > 0) {
+          const lastIndex = items.length - 1;
+          const lastItem = items[lastIndex];
+          console.log('Último producto:', lastItem);
+
+          const newPrice = window.prompt(`Nuevo precio para ${lastItem.productName}:`, lastItem.price.toString());
+          console.log('Precio ingresado:', newPrice);
+
+          if (newPrice !== null && newPrice.trim() !== '') {
+            const parsedPrice = parseFloat(newPrice);
+            if (!isNaN(parsedPrice) && parsedPrice > 0) {
+              updateItem(lastIndex, 'price', parsedPrice);
+              toast.success(`Precio actualizado a ${formatCOP(parsedPrice)}`);
+            } else {
+              toast.error('Precio inválido');
+            }
+          }
+        } else {
+          toast.error('No hay productos para editar');
+        }
+        return;
+      }
+
+      // F3: Modificar cantidad del último producto
+      if (key === 'F3') {
+        console.log('✅ F3 - Editar cantidad', 'Items:', items.length);
+        if (items.length > 0) {
+          const lastIndex = items.length - 1;
+          const lastItem = items[lastIndex];
+          console.log('Último producto:', lastItem);
+
+          const newQty = window.prompt(`Nueva cantidad para ${lastItem.productName}:`, lastItem.quantity.toString());
+          console.log('Cantidad ingresada:', newQty);
+
+          if (newQty !== null && newQty.trim() !== '') {
+            const parsedQty = parseInt(newQty);
+            if (!isNaN(parsedQty) && parsedQty > 0) {
+              updateItem(lastIndex, 'quantity', parsedQty);
+              toast.success(`Cantidad actualizada a ${parsedQty}`);
+            } else {
+              toast.error('Cantidad inválida');
+            }
+          }
+        } else {
+          toast.error('No hay productos para editar');
+        }
+        return;
+      }
+
+      // F4: Remover último producto
+      if (key === 'F4') {
+        console.log('✅ F4 - Quitar producto');
+        if (items.length > 0) {
+          const lastIndex = items.length - 1;
+          removeItem(lastIndex);
+          toast.success('Producto removido');
+        }
+        return;
+      }
+
+      // Enter: Finalizar factura
+      if (key === 'Enter') {
+        console.log('✅ Enter - Finalizar factura');
+        if (items.length > 0 && selectedCustomer && !isSubmitting) {
+          handleSubmit();
+        }
+        return;
+      }
+    };
+
+    // Handler para eventos de teclado del navegador
+    const handleKeyboardShortcuts = (e: KeyboardEvent) => {
+      const isTyping = document.activeElement?.tagName === 'INPUT' ||
+                      document.activeElement?.tagName === 'TEXTAREA';
+
+      // Para teclas F, siempre procesarlas
+      if (e.key.startsWith('F') && /^F([1-9]|1[0-2])$/.test(e.key)) {
+        e.preventDefault();
+        processShortcut(e.key);
+        return;
+      }
+
+      // Para Enter, solo si no está escribiendo
+      if (e.key === 'Enter' && !isTyping) {
+        e.preventDefault();
+        processShortcut(e.key);
+        return;
+      }
+    };
+
+    // Registrar listener de teclado normal
+    document.addEventListener('keydown', handleKeyboardShortcuts);
+
+    // Si estamos en Electron, también registrar listener global
+    if (isElectron()) {
+      console.log('🖥️ [Credit] Electron detectado - Registrando atajos globales');
+      onGlobalShortcut((key) => {
+        console.log('🌐 [Credit] Atajo global de Electron:', key);
+        processShortcut(key);
+      });
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyboardShortcuts);
+      if (isElectron()) {
+        removeGlobalShortcutListener();
+      }
+    };
+  }, [items, selectedCustomer, isSubmitting, handleSubmit, addItem, updateItem, removeItem]);
 
   const loadData = async () => {
     const [customersData, productsData, departmentsData] = await Promise.all([
@@ -334,14 +624,6 @@ export function CreditInvoice() {
     return calculateSubtotal();
   };
 
-  const addItem = () => {
-    // Abrir modal de selección de productos
-    // Preparar nuevo item
-    const newIndex = items.length;
-    setSelectedProductIndex(newIndex);
-    setShowProductSearch(true);
-  };
-
   const addProductToList = (product: any) => {
     // Verificar si el producto usa IDs y tiene IDs disponibles
     if (product.use_unit_ids) {
@@ -375,21 +657,6 @@ export function CreditInvoice() {
       setSelectedUnitIds([]);
       setUnitIdDialogOpen(true);
     }
-  };
-
-  const removeItem = (index: number) => {
-    setItems(items.filter((_, i) => i !== index));
-  };
-
-  const updateItem = (index: number, field: keyof InvoiceItem, value: any) => {
-    const newItems = [...items];
-    newItems[index] = { ...newItems[index], [field]: value };
-
-    if (field === 'quantity' || field === 'price') {
-      newItems[index].total = newItems[index].quantity * newItems[index].price;
-    }
-
-    setItems(newItems);
   };
 
   const selectProduct = (index: number, product: Product) => {
@@ -467,181 +734,6 @@ export function CreditInvoice() {
     toast.success('IDs seleccionadas correctamente');
   };
 
-  const handleSubmit = async () => {
-    // Validaciones
-    if (!selectedCustomer) {
-      toast.error('Seleccione un cliente');
-      return;
-    }
-
-    if (items.length === 0) {
-      toast.error('Agregue al menos un producto');
-      return;
-    }
-
-    if (items.some((item) => !item.productId || item.quantity <= 0)) {
-      toast.error('Complete todos los productos');
-      return;
-    }
-
-    // Validar que productos con IDs tengan IDs seleccionadas
-    for (const item of items) {
-      if (item.useUnitIds && (!item.unitIds || item.unitIds.length === 0)) {
-        toast.error(`Debes seleccionar las IDs para ${item.productName}. Haz clic en "Seleccionar IDs" en la lista de productos.`);
-        return;
-      }
-      if (item.useUnitIds && item.unitIds && item.unitIds.length !== item.quantity) {
-        toast.error(`${item.productName}: Debes seleccionar ${item.quantity} IDs pero solo has seleccionado ${item.unitIds.length}`);
-        return;
-      }
-    }
-
-    // Verificar si el cliente está bloqueado
-    if (selectedCustomer.blocked) {
-      setShowWarningModal(true);
-      return;
-    }
-
-    // Verificar facturas vencidas
-    if (creditAnalysis.overdueDays > 0) {
-      setShowWarningModal(true);
-      return;
-    }
-
-    // Verificar crédito disponible
-    if (!creditAnalysis.hasEnoughCredit) {
-      toast.error('El cliente no tiene crédito suficiente para esta venta');
-      return;
-    }
-
-    // Verificar si se pueden crear facturas (no hay cierre)
-    setIsValidating(true);
-    const validation = await canCreateInvoice();
-    setIsValidating(false);
-
-    if (!validation.canCreate) {
-      const toastMessage = validation.message || 'No se puede crear factura en este momento';
-      const toastDuration = validation.requiresMonthlyClose ? 10000 : 8000;
-      
-      toast.error(toastMessage, {
-        duration: toastDuration,
-        action: {
-          label: validation.requiresMonthlyClose ? '🔒 Realizar Cierre Mensual' : 'Ir a Cierres',
-          onClick: () => navigate('/cierres')
-        }
-      });
-      return;
-    }
-
-    // Verificar stock
-    for (const item of items) {
-      const product = products.find((p) => p.id === item.productId);
-      if (product && product.stock < item.quantity) {
-        toast.error(`Stock insuficiente para ${product.name}`);
-        return;
-      }
-    }
-
-    setIsSubmitting(true);
-
-    try {
-      // Crear factura
-      const invoiceData = {
-        type: 'wholesale' as const,
-        customer_name: selectedCustomer.name,
-        customer_document: selectedCustomer.document,
-        items: items.map((item) => ({
-          productId: item.productId,
-          productName: item.productName,
-          productCode: item.productCode,
-          quantity: item.quantity,
-          price: item.price,
-          total: item.total,
-          useUnitIds: item.useUnitIds,
-          unitIds: item.unitIds
-        })),
-        subtotal: calculateSubtotal(),
-        tax: 0,
-        total: calculateTotal(),
-        is_credit: true,
-        credit_balance: calculateTotal(),
-        due_date: dueDate,
-        status: 'pending' as const,
-        attended_by: getCurrentUser()?.username || 'Usuario'
-      };
-
-      const invoice = await addInvoice(invoiceData);
-
-      if (!invoice) {
-        toast.error('Error al crear la factura');
-        setIsSubmitting(false);
-        return;
-      }
-
-      // Actualizar inventario
-      for (const item of items) {
-        const product = products.find((p) => p.id === item.productId);
-        if (product) {
-          const newStock = product.stock - item.quantity;
-
-          // Si usa IDs unitarios, remover los IDs vendidos
-          let newRegisteredIds = product.registered_ids;
-          if (item.useUnitIds && item.unitIds && item.unitIds.length > 0) {
-            newRegisteredIds = product.registered_ids.filter(
-              (id) => !item.unitIds!.includes(id)
-            );
-          }
-
-          await updateProduct(item.productId, {
-            stock: newStock,
-            registered_ids: newRegisteredIds
-          });
-
-          // Registrar movimiento
-          await addMovement({
-            type: 'exit',
-            product_id: item.productId,
-            product_name: item.productName,
-            quantity: item.quantity,
-            reason: `Venta a crédito - Factura ${invoice.number}`,
-            reference: invoice.number,
-            user_name: getCurrentUser()?.username || 'Usuario',
-            unit_ids: item.useUnitIds ? item.unitIds : []
-          });
-        }
-      }
-
-      // Actualizar totales del cliente
-      await updateCustomer(selectedCustomer.id, {
-        total_credit: selectedCustomer.total_credit + calculateTotal()
-      });
-
-      // Registrar en historial
-      await addCreditHistory({
-        customer_document: selectedCustomer.document,
-        event_type: 'invoice',
-        description: `Factura ${invoice.number} creada - ${formatCOP(calculateTotal())}`,
-        amount: calculateTotal(),
-        reference_id: invoice.id,
-        registered_by: getCurrentUser()?.username || 'Sistema'
-      });
-
-      toast.success('Factura a crédito creada exitosamente');
-
-      // Guardar la factura en localStorage para mostrar modal en InvoicesMenu
-      localStorage.setItem('lastCreatedInvoice', JSON.stringify(invoice));
-
-      // Redirigir inmediatamente a facturación
-      navigate('/facturacion');
-    } catch (error) {
-      console.error('Error creating invoice:', error);
-      toast.error('Error al crear la factura');
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-
   const getRiskBadge = () => {
     if (!selectedCustomer) return null;
 
@@ -711,6 +803,19 @@ export function CreditInvoice() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Columna Principal */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Atajos de Teclado - Compacto */}
+            <div className="px-3 py-2 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <div className="flex items-center gap-2 flex-wrap text-[10px]">
+                <Info className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span className="text-blue-900 dark:text-blue-100 font-medium">Atajos:</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F1</kbd> Agregar</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F2</kbd> Precio</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F3</kbd> Cantidad</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F4</kbd> Quitar</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">Enter</kbd> Finalizar</span>
+              </div>
+            </div>
+
             {/* Sección Cliente */}
             <Card className={`border-2 ${
               selectedCustomer
@@ -1075,6 +1180,20 @@ export function CreditInvoice() {
                       )}
                     </>
                   )}
+                </CardContent>
+              </Card>
+
+              {/* Indicador de Atajos de Teclado */}
+              <Card className="border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/30">
+                <CardContent className="p-4">
+                  <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-2">⌨️ Atajos de Teclado:</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-blue-600 dark:text-blue-300">
+                    <span><kbd className="px-1 py-0.5 bg-white dark:bg-blue-900 rounded border border-blue-300 dark:border-blue-700 font-mono">F1</kbd> Agregar producto</span>
+                    <span><kbd className="px-1 py-0.5 bg-white dark:bg-blue-900 rounded border border-blue-300 dark:border-blue-700 font-mono">F2</kbd> Editar precio último</span>
+                    <span><kbd className="px-1 py-0.5 bg-white dark:bg-blue-900 rounded border border-blue-300 dark:border-blue-700 font-mono">F3</kbd> Editar cantidad último</span>
+                    <span><kbd className="px-1 py-0.5 bg-white dark:bg-blue-900 rounded border border-blue-300 dark:border-blue-700 font-mono">F4</kbd> Quitar último producto</span>
+                    <span className="col-span-2"><kbd className="px-1 py-0.5 bg-white dark:bg-blue-900 rounded border border-blue-300 dark:border-blue-700 font-mono">Enter</kbd> Finalizar factura</span>
+                  </div>
                 </CardContent>
               </Card>
 

@@ -47,6 +47,7 @@ export function ProductSelectionModal({
   const [currentPage, setCurrentPage] = useState(1);
   const [isSearching, setIsSearching] = useState(false);
   const [searchedProducts, setSearchedProducts] = useState<Product[] | null>(null);
+  const [selectedIndex, setSelectedIndex] = useState(0); // Índice del producto seleccionado con flechas
 
   // Función para ejecutar búsqueda
   const handleSearch = async () => {
@@ -76,17 +77,6 @@ export function ProductSelectionModal({
     setCurrentPage(1);
   }, [searchTerm, selectedDepartment]);
 
-  // Reset when modal closes
-  useEffect(() => {
-    if (!open) {
-      setSearchInput('');
-      setSearchTerm('');
-      setSearchedProducts(null);
-      setSelectedDepartment('all');
-      setCurrentPage(1);
-    }
-  }, [open]);
-
   // Use searched products if available, otherwise use all products
   const baseProducts = searchedProducts !== null ? searchedProducts : products;
 
@@ -113,6 +103,67 @@ export function ProductSelectionModal({
     onSelectProduct(product);
     onOpenChange(false);
   };
+
+  // Reset when modal closes
+  useEffect(() => {
+    if (!open) {
+      setSearchInput('');
+      setSearchTerm('');
+      setSearchedProducts(null);
+      setSelectedDepartment('all');
+      setCurrentPage(1);
+      setSelectedIndex(0);
+    } else {
+      // Auto-seleccionar primer producto al abrir
+      setSelectedIndex(0);
+    }
+  }, [open]);
+
+  // Reset selectedIndex cuando cambia la página o los productos
+  useEffect(() => {
+    setSelectedIndex(0);
+  }, [currentPage, searchTerm, selectedDepartment]);
+
+  // Navegación con teclado
+  useEffect(() => {
+    if (!open) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Solo actuar si no hay un input enfocado (excepto el de búsqueda)
+      const activeElement = document.activeElement;
+      const isInputFocused = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA';
+
+      // Flecha Arriba
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setSelectedIndex((prev) => Math.max(0, prev - 1));
+      }
+
+      // Flecha Abajo
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setSelectedIndex((prev) => Math.min(currentProducts.length - 1, prev + 1));
+      }
+
+      // Enter - Seleccionar producto resaltado
+      if (e.key === 'Enter' && currentProducts.length > 0 && !isInputFocused) {
+        e.preventDefault();
+        const selectedProduct = currentProducts[selectedIndex];
+        if (selectedProduct) {
+          handleSelectProduct(selectedProduct);
+        }
+      }
+
+      // Escape - Cerrar modal
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        onOpenChange(false);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [open, selectedIndex, currentProducts]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -201,11 +252,15 @@ export function ProductSelectionModal({
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {currentProducts.map((product) => (
+              {currentProducts.map((product, index) => (
                 <button
                   key={product.id}
                   onClick={() => handleSelectProduct(product)}
-                  className="group relative bg-card border border-border rounded-lg p-4 hover:border-emerald-500 hover:shadow-lg transition-all duration-200 text-left"
+                  className={`group relative bg-card border rounded-lg p-4 hover:shadow-lg transition-all duration-200 text-left ${
+                    index === selectedIndex
+                      ? 'border-emerald-500 shadow-lg ring-2 ring-emerald-500 ring-opacity-50 bg-emerald-50 dark:bg-emerald-950/30'
+                      : 'border-border hover:border-emerald-500'
+                  }`}
                 >
                   {/* Header */}
                   <div className="flex items-start justify-between mb-3">
@@ -307,6 +362,15 @@ export function ProductSelectionModal({
                     </div>
                   </div>
 
+                  {/* Selected indicator */}
+                  {index === selectedIndex && (
+                    <div className="absolute top-2 right-2">
+                      <Badge className="bg-emerald-600 text-white text-[10px] px-2 py-0.5">
+                        ↵ Enter
+                      </Badge>
+                    </div>
+                  )}
+
                   {/* Hover indicator */}
                   <div className="absolute inset-0 border-2 border-emerald-500 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
                 </button>
@@ -345,6 +409,27 @@ export function ProductSelectionModal({
               >
                 <ChevronRight className="h-4 w-4" />
               </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Keyboard hints */}
+        {currentProducts.length > 0 && (
+          <div className="border-t border-border pt-3 mt-2">
+            <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <kbd className="px-2 py-1 bg-muted rounded text-[10px] font-mono">↑</kbd>
+                <kbd className="px-2 py-1 bg-muted rounded text-[10px] font-mono">↓</kbd>
+                Navegar
+              </span>
+              <span className="flex items-center gap-1">
+                <kbd className="px-2 py-1 bg-muted rounded text-[10px] font-mono">Enter</kbd>
+                Seleccionar
+              </span>
+              <span className="flex items-center gap-1">
+                <kbd className="px-2 py-1 bg-muted rounded text-[10px] font-mono">Esc</kbd>
+                Cerrar
+              </span>
             </div>
           </div>
         )}

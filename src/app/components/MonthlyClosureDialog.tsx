@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, ChevronLeft, ChevronRight, Loader2, CheckCircle } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Loader2, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -28,21 +28,24 @@ interface MonthlyClosureDialogProps {
     totalProductCost: number;
     realProfit: number;
     currentMonthRevenue: number;
-    serviceRevenue?: number; // NUEVO: Ingresos de servicio técnico
+    serviceRevenue?: number; // Ingresos de servicio técnico
+    totalCreditPayments?: number; // NUEVO: Total de abonos de créditos del mes
+    profitFromCredit?: number; // NUEVO: Ganancias de facturas a crédito del mes
   };
   onSuccess: () => void;
 }
 
-export function MonthlyClosureDialog({ 
-  open, 
-  onOpenChange, 
+export function MonthlyClosureDialog({
+  open,
+  onOpenChange,
   monthlyStats,
-  onSuccess 
+  onSuccess
 }: MonthlyClosureDialogProps) {
   const [phase, setPhase] = useState<Phase>(1);
   const [closedByName, setClosedByName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [showJustification, setShowJustification] = useState(false);
 
   const currentUser = getCurrentUser();
 
@@ -74,13 +77,26 @@ export function MonthlyClosureDialog({
         const currentMonth = new Date().toISOString().substring(0, 7);
         const currentYear = new Date().getFullYear();
 
+        // Calcular profit_generated y profit_collected sumando los cierres diarios
+        const profitGenerated = monthlyStats.closures.reduce((sum, closure) => {
+          return sum + (closure.profit_generated || 0);
+        }, 0);
+
+        const profitCollected = monthlyStats.closures.reduce((sum, closure) => {
+          return sum + (closure.profit_collected || 0);
+        }, 0);
+
         await addMonthlyClosure({
           month: currentMonth,
           year: currentYear,
-          total_revenue: monthlyStats.netRevenue, // Ingresos netos (facturas pagadas + parcialmente devueltas)
+          total_revenue: monthlyStats.netRevenue + (monthlyStats.totalCreditPayments || 0), // Ingresos netos (facturas + abonos)
           total_invoices: monthlyStats.totalInvoices,
           daily_closures_count: monthlyStats.closures.length,
-          real_profit: monthlyStats.realProfit, // Ganancias reales (ventas - costos - gastos)
+          real_profit: monthlyStats.realProfit, // DEPRECATED - mantener por compatibilidad
+          profit_generated: profitGenerated, // Ganancia de todas las ventas del mes
+          profit_collected: profitCollected, // Ganancia de facturas pagadas al 100%
+          total_credit_payments: monthlyStats.totalCreditPayments || 0, // Abonos de créditos del mes
+          profit_from_credit: monthlyStats.profitFromCredit || 0, // Ganancias de facturas a crédito del mes
           closed_by: closedByName.trim(),
           closed_at: new Date().toISOString(),
         });
@@ -270,80 +286,133 @@ export function MonthlyClosureDialog({
                 )}
 
                 {/* Final Stats */}
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Ingresos Totales del Mes
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-3xl font-bold text-green-600 dark:text-green-400">
-                        COP {formatCOP(monthlyStats.totalRevenue)}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Suma de todos los cierres diarios
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Facturas Totales
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-3xl font-bold">{monthlyStats.totalInvoices}</div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        {monthlyStats.closures.length} cierres diarios
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Crédito Pendiente
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-                        COP {formatCOP(monthlyStats.totalPendingCredit)}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Saldo pendiente total
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Ganancias Reales
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className={`text-2xl font-bold ${
-                        monthlyStats.realProfit >= 0
-                          ? 'text-blue-600 dark:text-blue-400'
-                          : 'text-red-600 dark:text-red-400'
-                      }`}>
-                        COP {formatCOP(monthlyStats.realProfit)}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Ventas - Costos - Gastos
-                      </p>
-                      <div className="mt-2 space-y-1">
-                        <p className="text-xs text-zinc-600 dark:text-zinc-400">
-                          Costo productos: COP {formatCOP(monthlyStats.totalProductCost)}
+                <div className="space-y-6">
+                  {/* Primera fila: Métricas principales */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    <Card className="border-green-200 dark:border-green-800">
+                      <CardHeader className="pb-4">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                          <span className="text-lg">💰</span>
+                          Ingresos Totales del Mes
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-4xl font-bold text-green-600 dark:text-green-400 mb-2">
+                          {formatCOP(monthlyStats.totalRevenue)}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Suma de todos los cierres diarios
                         </p>
-                        <p className="text-xs text-red-600 dark:text-red-400">
-                          Gastos: COP {formatCOP(monthlyStats.totalExpenses)}
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-blue-200 dark:border-blue-800">
+                      <CardHeader className="pb-4">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                          <span className="text-lg">📋</span>
+                          Facturas Totales
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-4xl font-bold text-blue-600 dark:text-blue-400 mb-2">
+                          {monthlyStats.totalInvoices}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          {monthlyStats.closures.length} cierres diarios
                         </p>
-                      </div>
-                    </CardContent>
-                  </Card>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-orange-200 dark:border-orange-800">
+                      <CardHeader className="pb-4">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                          <span className="text-lg">⏳</span>
+                          Crédito Pendiente
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-3xl font-bold text-orange-600 dark:text-orange-400 mb-2">
+                          {formatCOP(monthlyStats.totalPendingCredit)}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Saldo pendiente total
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Segunda fila: Ganancias y pagos */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+                    <Card className="border-indigo-200 dark:border-indigo-800">
+                      <CardHeader className="pb-4">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                          <span className="text-lg">💎</span>
+                          Ganancias Reales
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className={`text-3xl font-bold mb-3 ${
+                          monthlyStats.realProfit >= 0
+                            ? 'text-indigo-600 dark:text-indigo-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          {formatCOP(monthlyStats.realProfit)}
+                        </div>
+                        <div className="space-y-2 pt-3 border-t border-indigo-200 dark:border-indigo-800">
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Costo productos:</span>
+                            <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                              {formatCOP(monthlyStats.totalProductCost)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-xs">
+                            <span className="text-muted-foreground">Gastos:</span>
+                            <span className="font-medium text-red-600 dark:text-red-400">
+                              {formatCOP(monthlyStats.totalExpenses)}
+                            </span>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-purple-200 dark:border-purple-800">
+                      <CardHeader className="pb-4">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                          <span className="text-lg">💵</span>
+                          Abonos de Créditos
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-3xl font-bold text-purple-600 dark:text-purple-400 mb-2">
+                          {formatCOP(monthlyStats.totalCreditPayments || 0)}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Pagos recibidos del mes
+                        </p>
+                      </CardContent>
+                    </Card>
+
+                    <Card className="border-cyan-200 dark:border-cyan-800">
+                      <CardHeader className="pb-4">
+                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
+                          <span className="text-lg">📊</span>
+                          Ganancias de Créditos
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className={`text-3xl font-bold mb-2 ${
+                          (monthlyStats.profitFromCredit || 0) >= 0
+                            ? 'text-cyan-600 dark:text-cyan-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          {formatCOP(monthlyStats.profitFromCredit || 0)}
+                        </div>
+                        <p className="text-sm text-muted-foreground">
+                          Utilidad de facturas a crédito
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </div>
                 </div>
 
                 {/* Ingresos Netos Card - Full Width */}
@@ -358,25 +427,32 @@ export function MonthlyClosureDialog({
                       <div className="flex-1 space-y-6">
                         <div>
                           <div className="text-4xl font-bold text-emerald-600 dark:text-emerald-400">
-                            COP {formatCOP(monthlyStats.netRevenue)}
+                            COP {formatCOP(monthlyStats.netRevenue + (monthlyStats.totalCreditPayments || 0))}
                           </div>
                           <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-2">
-                            Total de facturas pagadas y parcialmente devueltas
-                            {(monthlyStats.serviceRevenue || 0) > 0 && (
-                              <span className="block text-xs text-blue-600 dark:text-blue-400 mt-1">
-                                + Servicio Técnico
-                              </span>
-                            )}
+                            Facturas pagadas + Abonos de créditos
                           </p>
+                          <div className="mt-2 space-y-1">
+                            {(monthlyStats.serviceRevenue || 0) > 0 && (
+                              <p className="text-xs text-blue-600 dark:text-blue-400">
+                                • Servicio Técnico: COP {formatCOP(monthlyStats.serviceRevenue || 0)}
+                              </p>
+                            )}
+                            {(monthlyStats.totalCreditPayments || 0) > 0 && (
+                              <p className="text-xs text-purple-600 dark:text-purple-400">
+                                • Abonos de Créditos: COP {formatCOP(monthlyStats.totalCreditPayments || 0)}
+                              </p>
+                            )}
+                          </div>
                         </div>
 
                         <div className="pt-4 border-t border-emerald-300 dark:border-emerald-700">
                           <div className={`text-3xl font-bold ${
-                            (monthlyStats.netRevenue - monthlyStats.totalExpenses) >= 0
+                            ((monthlyStats.netRevenue + (monthlyStats.totalCreditPayments || 0)) - monthlyStats.totalExpenses) >= 0
                               ? 'text-blue-600 dark:text-blue-400'
                               : 'text-red-600 dark:text-red-400'
                           }`}>
-                            COP {formatCOP(monthlyStats.netRevenue - monthlyStats.totalExpenses)}
+                            COP {formatCOP((monthlyStats.netRevenue + (monthlyStats.totalCreditPayments || 0)) - monthlyStats.totalExpenses)}
                           </div>
                           <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-2">
                             Ingresos netos restando gastos del mes
@@ -394,6 +470,7 @@ export function MonthlyClosureDialog({
                           <ul className="list-disc list-inside space-y-1 text-zinc-700 dark:text-zinc-300">
                             <li>Facturas pagadas completamente</li>
                             <li>Facturas con devolución parcial</li>
+                            <li className="text-purple-600 dark:text-purple-400">Abonos de créditos recibidos</li>
                             {(monthlyStats.serviceRevenue || 0) > 0 && (
                               <li className="text-blue-600 dark:text-blue-400">Servicio Técnico pagado</li>
                             )}
@@ -410,14 +487,25 @@ export function MonthlyClosureDialog({
                 {/* Explicación de Diferencia entre Ingresos Totales e Ingresos Netos */}
                 <Card className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 border-amber-300 dark:border-amber-800">
                   <CardHeader>
-                    <CardTitle className="text-base font-semibold text-amber-900 dark:text-amber-100 flex items-center gap-2">
-                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                      </svg>
-                      Justificación: ¿Por qué difieren los Ingresos del Mes y los Ingresos Netos?
-                    </CardTitle>
+                    <button
+                      onClick={() => setShowJustification(!showJustification)}
+                      className="w-full flex items-center justify-between text-left hover:opacity-80 transition-opacity"
+                    >
+                      <CardTitle className="text-base font-semibold text-amber-900 dark:text-amber-100 flex items-center gap-2">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Justificación: ¿Por qué difieren los Ingresos del Mes y los Ingresos Netos?
+                      </CardTitle>
+                      {showJustification ? (
+                        <ChevronUp className="h-5 w-5 text-amber-700 dark:text-amber-300" />
+                      ) : (
+                        <ChevronDown className="h-5 w-5 text-amber-700 dark:text-amber-300" />
+                      )}
+                    </button>
                   </CardHeader>
-                  <CardContent>
+                  {showJustification && (
+                    <CardContent>
                     <div className="space-y-4">
                       {/* Resumen de la diferencia */}
                       <div className="bg-white/70 dark:bg-zinc-900/70 p-4 rounded-lg border border-amber-200 dark:border-amber-800">
@@ -511,6 +599,7 @@ export function MonthlyClosureDialog({
                       </div>
                     </div>
                   </CardContent>
+                  )}
                 </Card>
 
                 {/* Nota explicativa */}

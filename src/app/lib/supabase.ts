@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 
-import { projectId, publicAnonKey } from '/utils/supabase/info';
+import { projectId, publicAnonKey } from '../../../utils/supabase/info.tsx';
 
 // Cliente de Supabase
 const supabaseUrl = `https://${projectId}.supabase.co`;
@@ -163,6 +163,8 @@ export interface DailyClosure {
   total_cash: number;
   total_transfer: number;
   total: number;
+  profit_generated?: number; // Ganancia de todas las ventas del día (regulares + crédito)
+  profit_collected?: number; // Ganancia de ventas pagadas al 100% ese día
   closed_by: string;
   closed_at: string;
   created_at?: string;
@@ -176,7 +178,9 @@ export interface MonthlyClosure {
   total_revenue: number; // Ingresos netos del mes (facturas pagadas y parcialmente devueltas)
   total_invoices: number;
   daily_closures_count: number;
-  real_profit?: number; // Ganancias reales (ventas - costo productos - gastos)
+  real_profit?: number; // Ganancias reales (ventas - costo productos - gastos) - DEPRECATED
+  profit_generated?: number; // Ganancia de todas las ventas del mes (regulares + crédito)
+  profit_collected?: number; // Ganancia de facturas pagadas al 100% en este mes
   closed_by: string;
   closed_at: string;
   created_at?: string;
@@ -2487,6 +2491,42 @@ export const getCreditPaymentsByInvoice = async (invoiceId: string): Promise<Cre
   return data || [];
 };
 
+/**
+ * Calcula la ganancia de una factura basándose en sus items
+ * Ganancia = Total de venta - Costo total de productos
+ */
+export const calculateInvoiceProfit = async (invoiceId: string): Promise<number> => {
+  // Obtener la factura con sus items
+  const { data: invoice } = await supabase
+    .from('invoices')
+    .select('items, total')
+    .eq('id', invoiceId)
+    .single();
+
+  if (!invoice || !invoice.items) {
+    return 0;
+  }
+
+  let totalCost = 0;
+
+  // Calcular costo total
+  for (const item of invoice.items) {
+    const { data: product } = await supabase
+      .from('products')
+      .select('current_cost')
+      .eq('id', item.productId)
+      .single();
+
+    if (product) {
+      totalCost += product.current_cost * item.quantity;
+    }
+  }
+
+  // Ganancia = Total - Costo
+  const profit = invoice.total - totalCost;
+  return profit;
+};
+
 export const addCreditPayment = async (payment: Omit<CreditPayment, 'id' | 'company' | 'created_at'>): Promise<CreditPayment | null> => {
   const company = getCurrentCompany();
 
@@ -2520,12 +2560,45 @@ export const addCreditPayment = async (payment: Omit<CreditPayment, 'id' | 'comp
   
   if (invoice) {
     const newBalance = (invoice.credit_balance || invoice.total) - payment.amount;
-    const newStatus = newBalance <= 0 ? 'paid' : 'pending';
-    
-    await updateInvoice(payment.invoice_id, { 
+    const wasUnpaid = invoice.credit_balance > 0 || (invoice.credit_balance === undefined && invoice.total > 0);
+    const isNowPaid = newBalance <= 0;
+    const newStatus = isNowPaid ? 'paid' : 'pending';
+
+    await updateInvoice(payment.invoice_id, {
       credit_balance: newBalance,
       status: newStatus
     });
+
+    // Si la factura acaba de ser completamente pagada, sumar ganancia al cierre mensual actual
+    if (wasUnpaid && isNowPaid) {
+      const profit = await calculateInvoiceProfit(payment.invoice_id);
+
+      // Obtener o crear cierre del mes actual
+      const now = new Date(paymentDate);
+      const monthStr = String(now.getMonth() + 1).padStart(2, '0');
+      const year = now.getFullYear();
+      const monthKey = `${year}-${monthStr}`;
+
+      // Buscar cierre mensual existente
+      const { data: existingClosure } = await supabase
+        .from('monthly_closures')
+        .select('*')
+        .eq('company', company)
+        .eq('month', monthKey)
+        .eq('year', year)
+        .single();
+
+      if (existingClosure) {
+        // Actualizar cierre existente sumando la ganancia cobrada
+        await supabase
+          .from('monthly_closures')
+          .update({
+            profit_collected: (existingClosure.profit_collected || 0) + profit
+          })
+          .eq('id', existingClosure.id);
+      }
+      // Si no existe cierre mensual aún, la ganancia se sumará cuando se cree el cierre
+    }
   }
   
   // Actualizar totales del cliente

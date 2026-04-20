@@ -59,6 +59,7 @@ import { formatCOP } from "../lib/currency";
 import { jsPDF } from "jspdf";
 import JsBarcode from "jsbarcode";
 import { includesIgnoreAccents } from "../lib/string-utils";
+import { printLabels } from "../lib/label-printer";
 
 interface MovementItem {
   productId: string;

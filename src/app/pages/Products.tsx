@@ -14,6 +14,8 @@ import { copyToClipboard } from '../lib/clipboard';
 import { includesIgnoreAccents } from '../lib/string-utils';
 import { jsPDF } from 'jspdf';
 import { OrderDialog } from '../components/OrderDialog';
+import { isPrintingAvailable } from '../lib/platform-detector';
+import { getPrinterConfig, printDirect } from '../lib/printer-config';
 
 export function Products() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -119,23 +121,26 @@ export function Products() {
     }
   };
 
-  const getNextProductCode = () => {
-    if (products.length === 0) {
+  const getNextProductCode = async () => {
+    // Obtener TODOS los productos de la base de datos para encontrar el código más alto
+    const allProducts = await getAllProducts();
+
+    if (allProducts.length === 0) {
       return { base: 'A10001A', variant: 1 };
     }
-    
+
     // Extraer todos los códigos base para encontrar el máximo
-    const baseCodes = products.map(p => {
+    const baseCodes = allProducts.map(p => {
       const match = p.code.match(/A(\d+)A/);
       return match ? parseInt(match[1]) : 10000;
     });
-    
+
     const maxBaseNumber = Math.max(...baseCodes, 10000);
-    
+
     // Si estamos creando un producto nuevo, usar el siguiente número base
     const nextBaseNumber = maxBaseNumber >= 10000 ? maxBaseNumber + 1 : 10001;
     const baseCode = `A${nextBaseNumber.toString().padStart(5, '0')}A`;
-    
+
     return { base: baseCode, variant: 1 };
   };
 
@@ -278,135 +283,199 @@ export function Products() {
   };
 
   // Generar PDF para impresión
-  const handlePrintToPDF = () => {
-    const productsToShow = getProductsForPrint();
-
-    const doc = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'letter'
-    });
-
-    // Encabezado
-    doc.setFontSize(18);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Reporte de Productos', 105, 15, { align: 'center' });
-
-    doc.setFontSize(10);
-    doc.setFont('helvetica', 'normal');
-    const date = new Date().toLocaleDateString('es-CO', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    });
-    doc.text(`Fecha: ${date}`, 105, 22, { align: 'center' });
-
-    // Filtros aplicados
-    doc.setFontSize(9);
-    let filterText = '';
-    if (printOptions.nameFilter) {
-      filterText += `Nombre: "${printOptions.nameFilter}" | `;
+  const handlePrintToPDF = async () => {
+    // Validar plataforma
+    if (!isPrintingAvailable()) {
+      toast.error('La impresión solo está disponible en la aplicación de escritorio');
+      return;
     }
-    if (printOptions.categoryFilter !== 'all') {
-      filterText += `Categoría: ${printOptions.categoryFilter} | `;
-    }
-    filterText += `Stock: ${printOptions.stockOrder === 'asc' ? '↑' : '↓'} | `;
-    filterText += `${printOptions.includeZeroStock ? 'Con' : 'Sin'} stock 0`;
-    doc.text(filterText, 105, 28, { align: 'center' });
 
-    // Tabla de productos
-    let y = 38;
-    const pageHeight = 279; // Altura de página carta en mm
-    const lineHeight = 7;
-    const marginBottom = 20;
+    try {
+      const config = await getPrinterConfig();
 
-    // Encabezados de tabla
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'bold');
-    doc.text('Código', 10, y);
-    doc.text('Nombre', 35, y);
-    doc.text('Categoría', 110, y);
-    doc.text('Stock', 155, y);
-    doc.text('Precio Final', 175, y);
-
-    // Línea separadora
-    doc.setLineWidth(0.3);
-    doc.line(10, y + 2, 200, y + 2);
-
-    y += lineHeight;
-
-    doc.setFont('helvetica', 'normal');
-
-    productsToShow.forEach((product) => {
-      // Verificar si necesitamos nueva página
-      if (y > pageHeight - marginBottom) {
-        doc.addPage();
-        y = 20;
-
-        // Re-dibujar encabezados en nueva página
-        doc.setFont('helvetica', 'bold');
-        doc.text('Código', 10, y);
-        doc.text('Nombre', 35, y);
-        doc.text('Categoría', 110, y);
-        doc.text('Stock', 155, y);
-        doc.text('Precio Final', 175, y);
-        doc.line(10, y + 2, 200, y + 2);
-        y += lineHeight;
-        doc.setFont('helvetica', 'normal');
+      if (!config.pdf) {
+        toast.error('No se ha configurado una impresora PDF. Ve a Configuración para configurarla.');
+        return;
       }
 
-      // Contenido
-      doc.setFontSize(7);
-      doc.text(product.code.substring(0, 15), 10, y);
-      doc.text(product.name.substring(0, 35), 35, y);
-      doc.text(product.category.substring(0, 20), 110, y);
+      const productsToShow = getProductsForPrint();
 
-      // Stock con color según nivel
-      const stockText = product.stock.toString();
-      doc.text(stockText, 155, y);
+      if (productsToShow.length === 0) {
+        toast.error('No hay productos para imprimir');
+        return;
+      }
 
-      doc.text(formatCOP(product.final_price), 175, y);
+      const date = new Date().toLocaleDateString('es-CO', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      });
 
-      y += lineHeight;
-    });
+      // Generar filtros aplicados
+      let filterText = '';
+      if (printOptions.nameFilter) {
+        filterText += `Nombre: "${printOptions.nameFilter}" | `;
+      }
+      if (printOptions.categoryFilter !== 'all') {
+        filterText += `Categoría: ${printOptions.categoryFilter} | `;
+      }
+      filterText += `Stock: ${printOptions.stockOrder === 'asc' ? '↑ Menor a Mayor' : '↓ Mayor a Menor'} | `;
+      filterText += `${printOptions.includeZeroStock ? 'Con' : 'Sin'} stock 0`;
 
-    // Footer
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'italic');
-    const totalProducts = productsToShow.length;
-    doc.text(`Total de productos: ${totalProducts}`, 105, pageHeight - 10, { align: 'center' });
+      // Generar filas de productos
+      const productsHTML = productsToShow.map((product) => `
+        <tr>
+          <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${product.code}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${product.name}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${product.category}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #e0e0e0; text-align: center; font-weight: bold; color: ${product.stock <= 0 ? '#ef4444' : product.stock <= (product.min_stock || 0) ? '#f59e0b' : '#22c55e'};">
+            ${product.stock}
+          </td>
+          <td style="padding: 8px; border-bottom: 1px solid #e0e0e0; text-align: right; font-weight: 500;">
+            COP ${formatCOP(product.final_price)}
+          </td>
+        </tr>
+      `).join('');
 
-    // Abrir ventana de impresión
-    doc.autoPrint();
-    const pdfBlob = doc.output('blob');
-    const pdfUrl = URL.createObjectURL(pdfBlob);
-    const printWindow = window.open(pdfUrl, '_blank');
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
+              @page {
+                size: A4;
+                margin: 15mm;
+              }
+              * {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              body {
+                font-family: 'Arial', 'Helvetica', sans-serif;
+                margin: 0;
+                padding: 0;
+                color: #333;
+              }
+              .container {
+                max-width: 800px;
+                margin: 0 auto;
+              }
+              .header {
+                text-align: center;
+                margin-bottom: 30px;
+                padding-bottom: 20px;
+                border-bottom: 3px solid #1976d2;
+              }
+              .title {
+                font-size: 24pt;
+                font-weight: bold;
+                color: #1976d2;
+                margin-bottom: 10px;
+              }
+              .subtitle {
+                font-size: 11pt;
+                color: #666;
+                margin-bottom: 5px;
+              }
+              .filters {
+                font-size: 9pt;
+                color: #666;
+                font-style: italic;
+              }
+              table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-bottom: 20px;
+              }
+              thead {
+                background-color: #1976d2;
+                color: white;
+              }
+              th {
+                padding: 10px;
+                text-align: left;
+                font-size: 10pt;
+              }
+              td {
+                font-size: 9pt;
+              }
+              .footer {
+                margin-top: 40px;
+                padding-top: 20px;
+                border-top: 2px solid #ddd;
+                text-align: center;
+                color: #666;
+                font-size: 10pt;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <!-- Header -->
+              <div class="header">
+                <div class="title">REPORTE DE PRODUCTOS</div>
+                <div class="subtitle">Fecha: ${date}</div>
+                <div class="filters">Filtros: ${filterText}</div>
+              </div>
 
-    if (printWindow) {
-      printWindow.onload = () => {
-        printWindow.print();
-      };
+              <!-- Table -->
+              <table>
+                <thead>
+                  <tr>
+                    <th>Código</th>
+                    <th>Nombre</th>
+                    <th>Categoría</th>
+                    <th style="text-align: center;">Stock</th>
+                    <th style="text-align: right;">Precio Final</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${productsHTML}
+                </tbody>
+              </table>
+
+              <!-- Footer -->
+              <div class="footer">
+                <p><strong>Total de productos: ${productsToShow.length}</strong></p>
+                <p>CELUMUNDO VIP - Sistema de Gestión de Inventarios</p>
+                <p>www.celumundovip.com</p>
+                <p>${new Date().toLocaleString('es-ES')}</p>
+              </div>
+            </div>
+          </body>
+        </html>
+      `;
+
+      const success = await printDirect(config.pdf, html, 'pdf');
+
+      if (!success) {
+        throw new Error('Error al enviar el documento a la impresora');
+      }
+
+      toast.success('Documento enviado a la impresora');
+    } catch (error: any) {
+      console.error('Error al imprimir:', error);
+      toast.error(error.message || 'Error al imprimir el reporte');
     }
-
-    toast.success('Abriendo ventana de impresión...');
   };
 
-  const handleOpenDialog = (product?: Product) => {
+  const handleOpenDialog = async (product?: Product) => {
     if (product) {
       setEditingProduct(product);
-      
+
       // Calcular márgenes si no existen
       const currentCost = product.current_cost || 0;
-      const margin1 = product.margin1 !== undefined ? product.margin1 : 
+      const margin1 = product.margin1 !== undefined ? product.margin1 :
         (currentCost > 0 ? calculateMarginFromPrice(currentCost, product.price1) : 0);
-      const margin2 = product.margin2 !== undefined ? product.margin2 : 
+      const margin2 = product.margin2 !== undefined ? product.margin2 :
         (currentCost > 0 ? calculateMarginFromPrice(currentCost, product.price2) : 0);
-      const marginFinal = product.margin_final !== undefined ? product.margin_final : 
+      const marginFinal = product.margin_final !== undefined ? product.margin_final :
         (currentCost > 0 ? calculateMarginFromPrice(currentCost, product.final_price) : 0);
-      
+
       // Usar full_code si existe, si no generar desde code y variant_number
       const displayCode = product.full_code || generateFullCode(product.code, product.variant_number);
-      
+
       setFormData({
         code: displayCode,
         name: product.name,
@@ -426,7 +495,7 @@ export function Products() {
       });
     } else {
       setEditingProduct(null);
-      const { base } = getNextProductCode();
+      const { base } = await getNextProductCode();
       // Al crear nuevo, solo mostrar el código base sin extensión de variante
       setFormData({
         code: base,
@@ -602,7 +671,8 @@ export function Products() {
           <Button
             variant="outline"
             onClick={() => setIsOrderDialogOpen(true)}
-            className="border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950 w-full sm:w-auto text-sm"
+            disabled={!isPrintingAvailable()}
+            className="border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950 w-full sm:w-auto text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <FileText className="h-4 w-4 mr-2" />
             <span className="hidden sm:inline">Realizar Pedido</span>
@@ -611,7 +681,8 @@ export function Products() {
           <Button
             variant="outline"
             onClick={() => setIsPrintOptionsOpen(true)}
-            className="border-green-600 text-green-600 hover:bg-green-50 dark:hover:bg-green-950 w-full sm:w-auto text-sm"
+            disabled={!isPrintingAvailable()}
+            className="border-green-600 text-green-600 hover:bg-green-50 dark:hover:bg-green-950 w-full sm:w-auto text-sm disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <Printer className="h-4 w-4 mr-2" />
             <span className="hidden sm:inline">Imprimir Productos</span>
@@ -623,6 +694,23 @@ export function Products() {
           </Button>
         </div>
       </div>
+
+      {/* Advertencia cuando está en web */}
+      {!isPrintingAvailable() && (
+        <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+          <div className="flex items-start gap-2">
+            <div className="text-red-600 dark:text-red-400 mt-0.5">⚠️</div>
+            <div className="flex-1">
+              <p className="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+                Impresión No Disponible
+              </p>
+              <p className="text-xs text-red-800 dark:text-red-200">
+                Las funciones de impresión solo están disponibles en la aplicación de escritorio.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Buscador Avanzado */}
       <Card>
@@ -1249,6 +1337,23 @@ export function Products() {
             </DialogDescription>
           </DialogHeader>
 
+          {/* Advertencia cuando está en web */}
+          {!isPrintingAvailable() && (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <div className="text-red-600 dark:text-red-400 mt-0.5">⚠️</div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+                    Impresión No Disponible
+                  </p>
+                  <p className="text-xs text-red-800 dark:text-red-200">
+                    La impresión solo está disponible en la aplicación de escritorio.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-4 sm:space-y-6 py-2 sm:py-4">
             {/* Filtrar por Nombre */}
             <div className="space-y-2 sm:space-y-3">
@@ -1399,8 +1504,8 @@ export function Products() {
                 setIsPrintOptionsOpen(false);
                 handlePrintToPDF();
               }}
-              className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white text-sm"
-              disabled={getProductsForPrint().length === 0}
+              className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={getProductsForPrint().length === 0 || !isPrintingAvailable()}
             >
               <Printer className="h-4 w-4 mr-2" />
               Imprimir PDF
@@ -1421,6 +1526,23 @@ export function Products() {
               Revisa los productos a imprimir
             </DialogDescription>
           </DialogHeader>
+
+          {/* Advertencia cuando está en web */}
+          {!isPrintingAvailable() && (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <div className="text-red-600 dark:text-red-400 mt-0.5">⚠️</div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+                    Impresión No Disponible
+                  </p>
+                  <p className="text-xs text-red-800 dark:text-red-200">
+                    La impresión solo está disponible en la aplicación de escritorio.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="flex-1 overflow-y-auto -mx-3 sm:mx-0">
             {/* Información de filtros */}
@@ -1517,7 +1639,8 @@ export function Products() {
                 setIsPrintPreviewOpen(false);
                 handlePrintToPDF();
               }}
-              className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white text-sm"
+              disabled={!isPrintingAvailable()}
+              className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <Printer className="h-4 w-4 mr-2" />
               Imprimir PDF

@@ -9,6 +9,8 @@ import { toast } from 'sonner';
 import { jsPDF } from 'jspdf';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { Input } from './ui/input';
+import { isPrintingAvailable } from '../lib/platform-detector';
+import { getPrinterConfig, printDirect } from '../lib/printer-config';
 
 interface ProductSalesReportDialogProps {
   open: boolean;
@@ -191,13 +193,218 @@ export function ProductSalesReportDialog({
     }
   };
 
-  const generatePDF = (download: boolean = false) => {
+  const generatePDF = async (download: boolean = false) => {
     // Usar filteredProducts para el PDF
     if (filteredProducts.length === 0) {
       toast.error('No hay productos para generar el reporte');
       return;
     }
 
+    // Validar plataforma para impresión
+    if (!download && !isPrintingAvailable()) {
+      toast.error('La impresión solo está disponible en la aplicación de escritorio');
+      return;
+    }
+
+    // Si es impresión directa, usar printDirect
+    if (!download) {
+      try {
+        const config = await getPrinterConfig();
+
+        if (!config.pdf) {
+          toast.error('No se ha configurado una impresora PDF. Ve a Configuración para configurarla.');
+          return;
+        }
+
+        // Generar filtros aplicados
+        let filterText = '';
+        const filters = [];
+        if (categoryFilter !== 'all') filters.push(`Categoría: ${categoryFilter}`);
+        if (searchTerm) filters.push(`Búsqueda: "${searchTerm}"`);
+        if (filters.length > 0) {
+          filterText = `<div class="filters">Filtros: ${filters.join(' | ')}</div>`;
+        }
+
+        // Generar filas de productos
+        const productsHTML = filteredProducts.map((product, index) => {
+          const idsHTML = product.unitIds.length > 0
+            ? `<div style="font-size: 8pt; color: #666; margin-top: 4px; padding-left: 10px;">
+                <strong>IDs:</strong> ${product.unitIds.join(', ')}
+              </div>`
+            : '';
+
+          return `
+            <tr style="${index % 2 === 0 ? 'background-color: #fafafa;' : ''}">
+              <td style="padding: 10px; border-bottom: 1px solid #e0e0e0;">
+                <div style="font-weight: 500;">${product.productName}</div>
+                ${product.category ? `<div style="font-size: 9pt; color: #666; margin-top: 2px;">${product.category}</div>` : ''}
+                ${idsHTML}
+              </td>
+              <td style="padding: 10px; border-bottom: 1px solid #e0e0e0; text-align: center; font-weight: 500;">
+                ${product.quantitySold}
+              </td>
+              <td style="padding: 10px; border-bottom: 1px solid #e0e0e0; text-align: right;">
+                COP ${formatCOP(product.averagePrice)}
+              </td>
+              <td style="padding: 10px; border-bottom: 1px solid #e0e0e0; text-align: right; font-weight: bold; color: #16a34a;">
+                COP ${formatCOP(product.totalRevenue)}
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+        const html = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <style>
+                @page {
+                  size: A4;
+                  margin: 15mm;
+                }
+                * {
+                  -webkit-print-color-adjust: exact;
+                  print-color-adjust: exact;
+                }
+                body {
+                  font-family: 'Arial', 'Helvetica', sans-serif;
+                  margin: 0;
+                  padding: 0;
+                  color: #333;
+                }
+                .header {
+                  text-align: center;
+                  margin-bottom: 30px;
+                  padding-bottom: 20px;
+                  border-bottom: 3px solid #1976d2;
+                }
+                .title {
+                  font-size: 20pt;
+                  font-weight: bold;
+                  color: #1976d2;
+                  margin-bottom: 10px;
+                }
+                .subtitle {
+                  font-size: 12pt;
+                  color: #666;
+                  margin-bottom: 5px;
+                }
+                .generated {
+                  font-size: 9pt;
+                  color: #999;
+                }
+                .filters {
+                  font-size: 9pt;
+                  color: #666;
+                  font-style: italic;
+                  margin-top: 5px;
+                }
+                .totals {
+                  background-color: #f0f0f0;
+                  padding: 15px;
+                  margin-bottom: 20px;
+                  border-radius: 4px;
+                }
+                .totals-row {
+                  display: flex;
+                  justify-content: space-between;
+                  margin-bottom: 5px;
+                  font-size: 11pt;
+                  font-weight: bold;
+                }
+                table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  margin-bottom: 20px;
+                }
+                thead {
+                  background-color: #16a34a;
+                  color: white;
+                }
+                th {
+                  padding: 12px 10px;
+                  text-align: left;
+                  font-size: 10pt;
+                }
+                td {
+                  font-size: 10pt;
+                }
+                .footer {
+                  margin-top: 40px;
+                  padding-top: 20px;
+                  border-top: 2px solid #ddd;
+                  text-align: center;
+                  color: #666;
+                  font-size: 9pt;
+                }
+              </style>
+            </head>
+            <body>
+              <!-- Header -->
+              <div class="header">
+                <div class="title">REGISTRO DE VENTAS DE PRODUCTOS</div>
+                <div class="subtitle">${getPeriodLabel()}</div>
+                <div class="generated">Generado: ${new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' })}</div>
+                ${filterText}
+              </div>
+
+              <!-- Totals -->
+              <div class="totals">
+                <div class="totals-row">
+                  <span>Total Productos Diferentes:</span>
+                  <span>${filteredTotals.totalProducts}</span>
+                </div>
+                <div class="totals-row">
+                  <span>Total Unidades Vendidas:</span>
+                  <span>${filteredTotals.totalQuantity}</span>
+                </div>
+                <div class="totals-row">
+                  <span>Total Ingresos:</span>
+                  <span>COP ${formatCOP(filteredTotals.totalRevenue)}</span>
+                </div>
+              </div>
+
+              <!-- Table -->
+              <table>
+                <thead>
+                  <tr>
+                    <th>Producto</th>
+                    <th style="text-align: center;">Cantidad</th>
+                    <th style="text-align: right;">Precio Promedio</th>
+                    <th style="text-align: right;">Total Ventas</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${productsHTML}
+                </tbody>
+              </table>
+
+              <!-- Footer -->
+              <div class="footer">
+                <p><strong>CELUMUNDO VIP - Sistema de Gestión de Inventarios</strong></p>
+                <p>www.celumundovip.com</p>
+                <p>${new Date().toLocaleString('es-ES')}</p>
+              </div>
+            </body>
+          </html>
+        `;
+
+        const success = await printDirect(config.pdf, html, 'pdf');
+
+        if (!success) {
+          throw new Error('Error al enviar el documento a la impresora');
+        }
+
+        toast.success('Documento enviado a la impresora');
+      } catch (error: any) {
+        console.error('Error al imprimir:', error);
+        toast.error(error.message || 'Error al imprimir el reporte');
+      }
+      return;
+    }
+
+    // Si es descarga, usar jsPDF
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
     const pageHeight = doc.internal.pageSize.getHeight();
@@ -502,6 +709,23 @@ export function ProductSalesReportDialog({
             </Card>
           </div>
 
+          {/* Advertencia cuando está en web */}
+          {!isPrintingAvailable() && (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <div className="text-red-600 dark:text-red-400 mt-0.5">⚠️</div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+                    Impresión No Disponible
+                  </p>
+                  <p className="text-xs text-red-800 dark:text-red-200">
+                    La impresión directa solo está disponible en la aplicación de escritorio. Puedes descargar el PDF desde el navegador.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Tabla de productos */}
           <Card>
             <CardHeader>
@@ -521,7 +745,7 @@ export function ProductSalesReportDialog({
                     onClick={() => generatePDF(false)}
                     variant="default"
                     size="sm"
-                    disabled={filteredProducts.length === 0}
+                    disabled={filteredProducts.length === 0 || !isPrintingAvailable()}
                   >
                     <Printer className="h-4 w-4 mr-2" />
                     Imprimir PDF

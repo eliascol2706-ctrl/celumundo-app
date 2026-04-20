@@ -77,13 +77,62 @@ export function DailyClosureDialog({
     return totalCost;
   };
 
+  // Calcular ganancia POR CRÉDITO: Solo facturas a crédito del día
+  const calculateProfitGenerated = () => {
+    let totalRevenue = 0;
+    let totalCost = 0;
+
+    dailyStats.invoices.forEach(invoice => {
+      // Solo facturas a crédito (excluir pending_confirmation y regulares)
+      if (invoice.is_credit && invoice.status !== 'pending_confirmation') {
+        totalRevenue += invoice.total || 0;
+
+        invoice.items.forEach((item: any) => {
+          const product = products.find(p => p.id === item.productId);
+          if (product) {
+            totalCost += product.current_cost * item.quantity;
+          }
+        });
+      }
+    });
+
+    return totalRevenue - totalCost;
+  };
+
+  // Calcular ganancia COBRADA: Solo ventas pagadas al 100%
+  const calculateProfitCollected = () => {
+    let totalRevenue = 0;
+    let totalCost = 0;
+
+    dailyStats.invoices.forEach(invoice => {
+      // Solo facturas completamente pagadas
+      // EXCLUIR: créditos pendientes Y facturas pendientes de confirmación
+      if (invoice.status === 'paid') {
+        totalRevenue += invoice.total || 0;
+
+        invoice.items.forEach((item: any) => {
+          const product = products.find(p => p.id === item.productId);
+          if (product) {
+            totalCost += product.current_cost * item.quantity;
+          }
+        });
+      }
+    });
+
+    return totalRevenue - totalCost;
+  };
+
   const totalCost = calculateTotalCost();
 
   // Calcular totales de efectivo y transferencias de las facturas del día
   const calculatePaymentTotals = () => {
     let totalCash = 0;
-    let totalTransfer = 0;
+    let totalTransfer = 0; // Solo de facturas
     let totalOthers = 0;
+    let totalTransferRegular = 0; // Transferencias bancarias normales (solo facturas)
+    let totalNequi = 0; // Solo de facturas
+    let totalDaviplata = 0; // Solo de facturas
+    let totalOtherMethods = 0; // Otros métodos de pago (solo facturas)
 
     console.log('[DEBUG Cierre] ========================================');
     console.log('[DEBUG Cierre] Iniciando cálculo de totales de pago');
@@ -110,10 +159,33 @@ export function DailyClosureDialog({
           const other = invoice.payment_other || 0;
 
           totalCash += cash;
-          totalTransfer += transfer;
-          totalOthers += other;
+          totalTransfer += transfer; // Transferencias bancarias normales
+          totalTransferRegular += transfer;
 
-          console.log(`  ✅ Sumado - Efectivo: ${cash}, Transferencia: ${transfer}, Otros: ${other}`);
+          // payment_other puede ser Nequi, Daviplata u otros - detectar según payment_method
+          if (other > 0) {
+            const paymentLower = paymentStr.toLowerCase();
+
+            if (paymentLower.includes('nequi') && !paymentLower.includes('daviplata')) {
+              totalTransfer += other;
+              totalNequi += other;
+              console.log(`  ✅ Nequi (payment_other): ${other}`);
+            } else if (paymentLower.includes('daviplata') && !paymentLower.includes('nequi')) {
+              totalTransfer += other;
+              totalDaviplata += other;
+              console.log(`  ✅ Daviplata (payment_other): ${other}`);
+            } else if (paymentLower.includes('nequi') && paymentLower.includes('daviplata')) {
+              totalTransfer += other;
+              totalOtherMethods += other;
+              console.log(`  ✅ Nequi-Daviplata (payment_other): ${other}`);
+            } else {
+              totalTransfer += other;
+              totalOtherMethods += other;
+              console.log(`  ✅ Otros (payment_other): ${other}`);
+            }
+          }
+
+          console.log(`  ✅ Sumado - Efectivo: ${cash}, Transferencia bancaria: ${transfer}, Payment_other: ${other}`);
         } else {
           // Fallback: parsear desde el payment_method string
           console.log(`  [parseando desde payment_method string]`);
@@ -139,6 +211,7 @@ export function DailyClosureDialog({
               const transferValue = parseFloat(transferMatch[1].replace(/\./g, '').replace(/,/g, ''));
               if (!isNaN(transferValue)) {
                 totalTransfer += transferValue;
+                totalTransferRegular += transferValue;
                 console.log(`  ✅ Transferencia: ${transferValue}`);
               }
             }
@@ -149,6 +222,7 @@ export function DailyClosureDialog({
               const nequiValue = parseFloat(nequiMatch[1].replace(/\./g, '').replace(/,/g, ''));
               if (!isNaN(nequiValue)) {
                 totalTransfer += nequiValue;
+                totalNequi += nequiValue;
                 console.log(`  ✅ Nequi: ${nequiValue} (sumado a transferencias)`);
               }
             }
@@ -159,6 +233,7 @@ export function DailyClosureDialog({
               const daviplataValue = parseFloat(daviplataMatch[1].replace(/\./g, '').replace(/,/g, ''));
               if (!isNaN(daviplataValue)) {
                 totalTransfer += daviplataValue;
+                totalDaviplata += daviplataValue;
                 console.log(`  ✅ Daviplata: ${daviplataValue} (sumado a transferencias)`);
               }
             }
@@ -169,6 +244,7 @@ export function DailyClosureDialog({
               const otherValue = parseFloat(otherMatch[1].replace(/\./g, '').replace(/,/g, ''));
               if (!isNaN(otherValue)) {
                 totalTransfer += otherValue;
+                totalOtherMethods += otherValue;
                 console.log(`  ✅ Otros: ${otherValue} (sumado a transferencias)`);
               }
             }
@@ -180,11 +256,25 @@ export function DailyClosureDialog({
             if (paymentLower === 'efectivo') {
               totalCash += invoiceTotal;
               console.log(`  ✅ Efectivo (simple): ${invoiceTotal}`);
-            } else if (paymentLower === 'transferencia' || paymentLower === 'nequi' || paymentLower === 'daviplata' || paymentLower === 'nequi-daviplata') {
+            } else if (paymentLower === 'transferencia') {
               totalTransfer += invoiceTotal;
-              console.log(`  ✅ Transferencia/Nequi/Daviplata/Nequi-Daviplata (simple): ${invoiceTotal}`);
+              totalTransferRegular += invoiceTotal;
+              console.log(`  ✅ Transferencia (simple): ${invoiceTotal}`);
+            } else if (paymentLower === 'nequi') {
+              totalTransfer += invoiceTotal;
+              totalNequi += invoiceTotal;
+              console.log(`  ✅ Nequi (simple): ${invoiceTotal}`);
+            } else if (paymentLower === 'daviplata') {
+              totalTransfer += invoiceTotal;
+              totalDaviplata += invoiceTotal;
+              console.log(`  ✅ Daviplata (simple): ${invoiceTotal}`);
+            } else if (paymentLower === 'nequi-daviplata') {
+              totalTransfer += invoiceTotal;
+              totalOtherMethods += invoiceTotal;
+              console.log(`  ✅ Nequi-Daviplata (simple): ${invoiceTotal}`);
             } else if (paymentLower === 'otros') {
               totalTransfer += invoiceTotal;
+              totalOtherMethods += invoiceTotal;
               console.log(`  ✅ Otros (simple): ${invoiceTotal} (sumado a transferencias)`);
             } else {
               console.log(`  ⚠️ Método de pago desconocido: \"${paymentStr}\"`);
@@ -196,7 +286,8 @@ export function DailyClosureDialog({
 
     console.log(`[DEBUG Cierre] Totales de facturas - Efectivo: ${totalCash}, Transferencias: ${totalTransfer}, Otros: ${totalOthers}`);
 
-    // SUMAR ABONOS A CRÉDITO DEL DÍA
+    // SUMAR ABONOS A CRÉDITO DEL DÍA (separados - NO se suman a transferencias, solo a efectivo y total general)
+    let totalAbonos = 0;
     if (dailyStats.creditPayments && dailyStats.creditPayments.length > 0) {
       console.log(`[DEBUG Cierre] Sumando ${dailyStats.creditPayments.length} abonos a crédito del día`);
 
@@ -204,12 +295,20 @@ export function DailyClosureDialog({
         const paymentMethod = payment.payment_method?.toLowerCase() || '';
         const amount = payment.amount || 0;
 
+        totalAbonos += amount;
+
         if (paymentMethod.includes('efectivo')) {
           totalCash += amount;
           console.log(`[DEBUG Cierre] Abono efectivo: ${amount}`);
-        } else if (paymentMethod.includes('transferencia') || paymentMethod.includes('nequi') || paymentMethod.includes('daviplata')) {
-          totalTransfer += amount;
-          console.log(`[DEBUG Cierre] Abono transferencia/nequi/daviplata: ${amount}`);
+        } else if (paymentMethod.includes('transferencia')) {
+          // NO sumar a totalTransfer ni sus desglose - los abonos se muestran separados
+          console.log(`[DEBUG Cierre] Abono transferencia: ${amount} (solo en card de abonos)`);
+        } else if (paymentMethod.includes('nequi')) {
+          // NO sumar a totalTransfer ni totalNequi
+          console.log(`[DEBUG Cierre] Abono nequi: ${amount} (solo en card de abonos)`);
+        } else if (paymentMethod.includes('daviplata')) {
+          // NO sumar a totalTransfer ni totalDaviplata
+          console.log(`[DEBUG Cierre] Abono daviplata: ${amount} (solo en card de abonos)`);
         } else if (paymentMethod.includes('otros')) {
           totalOthers += amount;
           console.log(`[DEBUG Cierre] Abono otros (no se cuenta): ${amount}`);
@@ -247,19 +346,27 @@ export function DailyClosureDialog({
     }
 
     console.log('[DEBUG Cierre] ====== RESUMEN FINAL DE TOTALES ======');
-    console.log(`[DEBUG Cierre] Total Efectivo: ${totalCash}`);
-    console.log(`[DEBUG Cierre] Total Transferencias (incluye Nequi y Daviplata): ${totalTransfer}`);
+    console.log(`[DEBUG Cierre] Total Efectivo (incluye abonos en efectivo): ${totalCash}`);
+    console.log(`[DEBUG Cierre] Total Transferencias (SOLO facturas, SIN abonos): ${totalTransfer}`);
     console.log(`[DEBUG Cierre] Total Otros: ${totalOthers}`);
+    console.log(`[DEBUG Cierre] Total Abonos: ${totalAbonos}`);
     console.log(`[DEBUG Cierre] Servicio Técnico: ${serviceRevenue}`);
-    console.log(`[DEBUG Cierre] TOTAL INGRESOS: ${totalCash + totalTransfer + totalOthers + serviceRevenue}`);
+    console.log(`[DEBUG Cierre] TOTAL INGRESOS: ${totalCash + totalTransfer + totalOthers + totalAbonos + serviceRevenue}`);
     console.log('[DEBUG Cierre] =====================================');
 
     return {
       totalCash,
       totalTransfer,
       totalOthers,
+      totalAbonos,
+      transferBreakdown: {
+        transferencia: totalTransferRegular,
+        nequi: totalNequi,
+        daviplata: totalDaviplata,
+        otros: totalOtherMethods
+      },
       serviceRevenue,
-      total: totalCash + totalTransfer + totalOthers + serviceRevenue
+      total: totalCash + totalTransfer + totalOthers + totalAbonos + serviceRevenue
     };
   };
 
@@ -301,7 +408,8 @@ export function DailyClosureDialog({
         const totalCashValue = paymentTotals.totalCash;
         const totalTransferValue = paymentTotals.totalTransfer;
         const total = paymentTotals.total;
-        const totalProfit = total - totalCost; // Calcular ganancias
+        const profitGenerated = calculateProfitGenerated();
+        const profitCollected = calculateProfitCollected();
 
         await addDailyClosure({
           date: dayToClose,
@@ -311,7 +419,8 @@ export function DailyClosureDialog({
           total_cash: totalCashValue,
           total_transfer: totalTransferValue,
           total,
-          total_profit: totalProfit, // NUEVO: Almacenar ganancias
+          profit_generated: profitGenerated, // Ganancia por crédito (facturas a crédito del día)
+          profit_collected: profitCollected, // Ganancias del día (ventas pagadas)
           closed_by: closedByName.trim(),
           closed_at: new Date().toISOString(),
         });
@@ -402,7 +511,7 @@ export function DailyClosureDialog({
                 )}
 
                 {/* Top Stats */}
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <Card>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -424,13 +533,56 @@ export function DailyClosureDialog({
                   <Card>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
+                        💰 Ganancias del Día
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className={`text-2xl font-bold ${
+                        calculateProfitCollected() >= 0
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}>
+                        COP {formatCOP(calculateProfitCollected())}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Utilidad de ventas pagadas
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
+                        📊 Ganancias por Crédito
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className={`text-2xl font-bold ${
+                        calculateProfitGenerated() >= 0
+                          ? 'text-blue-600 dark:text-blue-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}>
+                        COP {formatCOP(calculateProfitGenerated())}
+                      </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Facturas a crédito del día
+                      </p>
+                    </CardContent>
+                  </Card>
+
+                  <Card>
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium text-muted-foreground">
                         Efectivo
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
                         {formatCOP(paymentTotals.totalCash)}
                       </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        💵 Caja física
+                      </p>
                     </CardContent>
                   </Card>
 
@@ -441,47 +593,50 @@ export function DailyClosureDialog({
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
                         {formatCOP(paymentTotals.totalTransfer)}
                       </div>
+                      <div className="text-xs text-muted-foreground mt-2 space-y-0.5">
+                        {paymentTotals.transferBreakdown.transferencia > 0 && (
+                          <div className="flex justify-between">
+                            <span>🏦 Transferencia:</span>
+                            <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.transferencia)}</span>
+                          </div>
+                        )}
+                        {paymentTotals.transferBreakdown.nequi > 0 && (
+                          <div className="flex justify-between">
+                            <span>💜 Nequi:</span>
+                            <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.nequi)}</span>
+                          </div>
+                        )}
+                        {paymentTotals.transferBreakdown.daviplata > 0 && (
+                          <div className="flex justify-between">
+                            <span>🔴 Daviplata:</span>
+                            <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.daviplata)}</span>
+                          </div>
+                        )}
+                        {paymentTotals.transferBreakdown.otros > 0 && (
+                          <div className="flex justify-between">
+                            <span>📱 Otros:</span>
+                            <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.otros)}</span>
+                          </div>
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
 
                   <Card>
                     <CardHeader className="pb-3">
                       <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Otros
+                        Abonos de Créditos
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="text-2xl font-bold text-green-600 dark:text-green-400">
-                        {formatCOP(paymentTotals.totalOthers)}
+                      <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                        {formatCOP(paymentTotals.totalAbonos || 0)}
                       </div>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Otros métodos de pago
-                      </p>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Ganancias
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className={`text-2xl font-bold ${
-                        (paymentTotals.total - totalCost) >= 0
-                          ? 'text-blue-600 dark:text-blue-400'
-                          : 'text-red-600 dark:text-red-400'
-                      }`}>
-                        COP {formatCOP(paymentTotals.total - totalCost)}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Ingresos - Costos
-                      </p>
-                      <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                        Costos: COP {formatCOP(totalCost)}
+                        💳 Pagos a crédito del día
                       </p>
                     </CardContent>
                   </Card>

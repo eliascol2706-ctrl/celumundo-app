@@ -11,6 +11,8 @@ import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatCOP } from '../lib/currency';
 import { getInvoices, extractColombiaDate, getColombiaDate, type Product } from '../lib/supabase';
+import { isPrintingAvailable } from '../lib/platform-detector';
+import { getPrinterConfig, printDirect } from '../lib/printer-config';
 
 interface OrderDialogProps {
   open: boolean;
@@ -185,39 +187,227 @@ export function OrderDialog({ open, onOpenChange, products }: OrderDialogProps) 
   };
 
   // Generar PDF del pedido
-  const generatePDF = (action: 'download' | 'print') => {
+  const generatePDF = async (action: 'download' | 'print') => {
     if (orderItems.length === 0) {
       toast.error('No hay productos en el pedido');
       return;
     }
 
+    // Validar plataforma para impresión
+    if (action === 'print' && !isPrintingAvailable()) {
+      toast.error('La impresión solo está disponible en la aplicación de escritorio');
+      return;
+    }
+
+    // Si es impresión directa, usar printDirect con impresora PDF
+    if (action === 'print') {
+      try {
+        const config = await getPrinterConfig();
+
+        if (!config.pdf) {
+          toast.error('No se ha configurado una impresora PDF. Ve a Configuración para configurarla.');
+          return;
+        }
+
+        const currentDate = new Date().toLocaleDateString('es-CO', {
+          timeZone: 'America/Bogota',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+
+        const totalCost = orderItems.reduce((sum, item) =>
+          sum + ((item.product.current_cost || 0) * item.finalQuantity), 0
+        );
+
+        const totalQuantity = orderItems.reduce((sum, item) => sum + item.finalQuantity, 0);
+
+        // Generar filas de productos
+        const productsHTML = orderItems.map(item => `
+          <tr>
+            <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${item.product.code || '-'}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e0e0e0;">${item.product.name}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e0e0e0; text-align: center;">${item.product.category || '-'}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e0e0e0; text-align: center;">${item.product.stock || 0}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e0e0e0; text-align: center;">${item.product.min_stock || 0}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e0e0e0; text-align: center; font-weight: bold; color: #22c55e;">${item.finalQuantity}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e0e0e0; text-align: right;">COP ${formatCOP(item.product.current_cost || 0)}</td>
+            <td style="padding: 8px; border-bottom: 1px solid #e0e0e0; text-align: right; font-weight: bold;">COP ${formatCOP((item.product.current_cost || 0) * item.finalQuantity)}</td>
+          </tr>
+        `).join('');
+
+        const html = `
+          <!DOCTYPE html>
+          <html>
+            <head>
+              <meta charset="utf-8">
+              <style>
+                @page {
+                  size: A4;
+                  margin: 15mm;
+                }
+                * {
+                  -webkit-print-color-adjust: exact;
+                  print-color-adjust: exact;
+                }
+                body {
+                  font-family: 'Arial', 'Helvetica', sans-serif;
+                  margin: 0;
+                  padding: 0;
+                  color: #333;
+                }
+                .header {
+                  background-color: #22c55e;
+                  color: white;
+                  padding: 20px;
+                  text-align: center;
+                  margin-bottom: 30px;
+                }
+                .title {
+                  font-size: 28pt;
+                  font-weight: bold;
+                  margin-bottom: 10px;
+                }
+                .subtitle {
+                  font-size: 14pt;
+                }
+                .info {
+                  margin-bottom: 20px;
+                  padding: 15px;
+                  background-color: #f5f5f5;
+                  border-radius: 4px;
+                }
+                .info-item {
+                  margin-bottom: 5px;
+                  font-size: 11pt;
+                }
+                table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  margin-bottom: 20px;
+                }
+                thead {
+                  background-color: #22c55e;
+                  color: white;
+                }
+                th {
+                  padding: 10px;
+                  text-align: left;
+                  font-size: 10pt;
+                }
+                td {
+                  font-size: 9pt;
+                }
+                .total-section {
+                  background-color: #22c55e;
+                  color: white;
+                  padding: 15px;
+                  text-align: right;
+                  font-size: 14pt;
+                  font-weight: bold;
+                  margin-top: 20px;
+                }
+                .footer {
+                  margin-top: 40px;
+                  padding-top: 20px;
+                  border-top: 2px solid #ddd;
+                  text-align: center;
+                  color: #666;
+                  font-size: 9pt;
+                }
+              </style>
+            </head>
+            <body>
+              <!-- Header -->
+              <div class="header">
+                <div class="title">ORDEN DE PEDIDO</div>
+                <div class="subtitle">CELUMUNDO VIP</div>
+              </div>
+
+              <!-- Info -->
+              <div class="info">
+                <div class="info-item"><strong>Fecha:</strong> ${currentDate}</div>
+                <div class="info-item"><strong>Total de productos:</strong> ${orderItems.length}</div>
+                <div class="info-item"><strong>Cantidad total:</strong> ${totalQuantity} unidades</div>
+              </div>
+
+              <!-- Table -->
+              <table>
+                <thead>
+                  <tr>
+                    <th>Código</th>
+                    <th>Producto</th>
+                    <th style="text-align: center;">Categoría</th>
+                    <th style="text-align: center;">Stock</th>
+                    <th style="text-align: center;">Mín.</th>
+                    <th style="text-align: center;">Cantidad</th>
+                    <th style="text-align: right;">Costo Unit.</th>
+                    <th style="text-align: right;">Costo Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${productsHTML}
+                </tbody>
+              </table>
+
+              <!-- Total -->
+              <div class="total-section">
+                TOTAL ESTIMADO: COP ${formatCOP(totalCost)}
+              </div>
+
+              <!-- Footer -->
+              <div class="footer">
+                <p>Este documento es una orden de pedido generada por CELUMUNDO VIP</p>
+                <p>Verifique las cantidades antes de realizar el pedido final</p>
+                <p>${new Date().toLocaleString('es-ES')}</p>
+              </div>
+            </body>
+          </html>
+        `;
+
+        const success = await printDirect(config.pdf, html, 'pdf');
+
+        if (!success) {
+          throw new Error('Error al enviar el documento a la impresora');
+        }
+
+        toast.success('Documento enviado a la impresora');
+        setShowPdfPreview(false);
+      } catch (error: any) {
+        console.error('Error al imprimir:', error);
+        toast.error(error.message || 'Error al imprimir el pedido');
+      }
+      return;
+    }
+
+    // Si es descarga, usar jsPDF
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
-    
+
     // Header
     doc.setFillColor(34, 197, 94); // Verde corporativo
     doc.rect(0, 0, pageWidth, 40, 'F');
-    
+
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(24);
     doc.text('ORDEN DE PEDIDO', pageWidth / 2, 20, { align: 'center' });
-    
+
     doc.setFontSize(12);
     doc.text('CELUMUNDO VIP', pageWidth / 2, 30, { align: 'center' });
-    
+
     // Info del pedido
     doc.setTextColor(0, 0, 0);
     doc.setFontSize(10);
-    const currentDate = new Date().toLocaleDateString('es-CO', { 
+    const currentDate = new Date().toLocaleDateString('es-CO', {
       timeZone: 'America/Bogota',
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric'
     });
     doc.text(`Fecha: ${currentDate}`, 14, 50);
     doc.text(`Total de productos: ${orderItems.length}`, 14, 56);
     doc.text(`Cantidad total: ${orderItems.reduce((sum, item) => sum + item.finalQuantity, 0)} unidades`, 14, 62);
-    
+
     // Tabla de productos
     const tableData = orderItems.map(item => [
       item.product.code || '-',
@@ -229,7 +419,7 @@ export function OrderDialog({ open, onOpenChange, products }: OrderDialogProps) 
       formatCOP(item.product.current_cost || 0),
       formatCOP((item.product.current_cost || 0) * item.finalQuantity),
     ]);
-    
+
     autoTable(doc, {
       startY: 70,
       head: [['Código', 'Producto', 'Categoría', 'Stock', 'Mín.', 'Cantidad', 'Costo Unit.', 'Costo Total']],
@@ -259,35 +449,29 @@ export function OrderDialog({ open, onOpenChange, products }: OrderDialogProps) 
         fillColor: [249, 250, 251],
       },
     });
-    
+
     // Total estimado
     const finalY = (doc as any).lastAutoTable.finalY || 70;
-    const totalCost = orderItems.reduce((sum, item) => 
+    const totalCost = orderItems.reduce((sum, item) =>
       sum + ((item.product.current_cost || 0) * item.finalQuantity), 0
     );
-    
+
     doc.setFillColor(34, 197, 94);
     doc.rect(pageWidth - 80, finalY + 10, 66, 10, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(12);
     doc.text('TOTAL ESTIMADO:', pageWidth - 75, finalY + 17);
     doc.text(`$${formatCOP(totalCost)}`, pageWidth - 15, finalY + 17, { align: 'right' });
-    
+
     // Footer
     doc.setTextColor(100, 100, 100);
     doc.setFontSize(8);
     doc.text('Este documento es una orden de pedido generada por CELUMUNDO VIP', pageWidth / 2, finalY + 30, { align: 'center' });
     doc.text('Verifique las cantidades antes de realizar el pedido final', pageWidth / 2, finalY + 35, { align: 'center' });
-    
-    if (action === 'download') {
-      doc.save(`Pedido_${new Date().toISOString().split('T')[0]}.pdf`);
-      toast.success('PDF descargado exitosamente');
-    } else {
-      doc.autoPrint();
-      window.open(doc.output('bloburl'), '_blank');
-      toast.success('Abriendo vista de impresión');
-    }
-    
+
+    doc.save(`Pedido_${new Date().toISOString().split('T')[0]}.pdf`);
+    toast.success('PDF descargado exitosamente');
+
     setShowPdfPreview(false);
   };
 
@@ -568,6 +752,23 @@ export function OrderDialog({ open, onOpenChange, products }: OrderDialogProps) 
             <DialogTitle>Generar Documento de Pedido</DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-4">
+            {/* Advertencia cuando está en web */}
+            {!isPrintingAvailable() && (
+              <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                <div className="flex items-start gap-2">
+                  <div className="text-red-600 dark:text-red-400 mt-0.5">⚠️</div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+                      Impresión No Disponible
+                    </p>
+                    <p className="text-xs text-red-800 dark:text-red-200">
+                      Usa la aplicación de escritorio para imprimir. Puedes descargar el PDF desde el navegador.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <p className="text-sm text-muted-foreground">
               El documento incluirá {orderItems.length} producto{orderItems.length !== 1 ? 's' : ''} con un total de{' '}
               {orderItems.reduce((sum, item) => sum + item.finalQuantity, 0)} unidades.
@@ -583,7 +784,8 @@ export function OrderDialog({ open, onOpenChange, products }: OrderDialogProps) 
               </Button>
               <Button
                 onClick={() => generatePDF('print')}
-                className="w-full bg-green-600 hover:bg-green-700"
+                disabled={!isPrintingAvailable()}
+                className="w-full bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <Printer className="h-4 w-4 mr-2" />
                 Imprimir

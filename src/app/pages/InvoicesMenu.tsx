@@ -11,8 +11,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { jsPDF } from 'jspdf';
 import { ProductSalesReportDialog } from '../components/ProductSalesReportDialog';
+import { printThermalInvoice as printThermalDirect } from '../lib/thermal-printer';
+import { printPDFInvoice } from '../lib/pdf-printer';
+import { isPrintingAvailable } from '../lib/platform-detector';
 
 export function InvoicesMenu() {
   const navigate = useNavigate();
@@ -317,549 +319,84 @@ export function InvoicesMenu() {
     setShowPaymentMethodModal(true);
   };
 
-  const printThermalInvoice = async (invoice: Invoice, payments: CreditPayment[] = []) => {
-    const companyName = getCurrentCompany() === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
-
-    // Crear contenido HTML para la impresión térmica
-    const thermalHTML = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>Factura ${invoice.number}</title>
-          <style>
-            @page {
-              size: 80mm auto;
-              margin: 0;
-            }
-
-            * {
-              margin: 0;
-              padding: 0;
-              box-sizing: border-box;
-            }
-
-            body {
-              width: 80mm;
-              font-family: 'Courier New', Courier, monospace;
-              font-size: 12pt;
-              padding: 4mm 3mm 6mm 3mm;
-              background: white;
-              color: black;
-              line-height: 1.3;
-            }
-
-            .header {
-              text-align: center;
-              margin-bottom: 5mm;
-              border-bottom: 2px dashed black;
-              padding-bottom: 4mm;
-            }
-
-            .company-name {
-              font-size: 18pt;
-              font-weight: bold;
-              margin-bottom: 2mm;
-              letter-spacing: 1px;
-            }
-
-            .invoice-title {
-              font-size: 14pt;
-              font-weight: bold;
-              margin-bottom: 2mm;
-            }
-
-            .invoice-number {
-              font-size: 13pt;
-              font-weight: bold;
-            }
-
-            .info-section {
-              margin-bottom: 5mm;
-              font-size: 11pt;
-              border-bottom: 1px dashed black;
-              padding-bottom: 4mm;
-            }
-
-            .info-line {
-              margin-bottom: 2mm;
-            }
-
-            .label {
-              font-weight: bold;
-            }
-
-            .products-section {
-              margin-bottom: 5mm;
-              border-bottom: 2px dashed black;
-              padding-bottom: 4mm;
-            }
-
-            .products-title {
-              font-size: 13pt;
-              font-weight: bold;
-              text-align: center;
-              margin-bottom: 3mm;
-            }
-
-            .product-item {
-              margin-bottom: 4mm;
-              font-size: 11pt;
-            }
-
-            .product-name {
-              font-weight: bold;
-              margin-bottom: 1.5mm;
-              font-size: 12pt;
-            }
-
-            .product-details {
-              margin-bottom: 1.5mm;
-            }
-
-            .product-ids {
-              font-size: 10pt;
-              margin-top: 2mm;
-              padding: 2mm;
-              background: #f5f5f5;
-              border: 1px solid #ddd;
-            }
-
-            .total-section {
-              margin-bottom: 5mm;
-              font-size: 12pt;
-            }
-
-            .total-line {
-              font-size: 15pt;
-              font-weight: bold;
-              border-top: 3px double black;
-              padding-top: 3mm;
-              margin-top: 2mm;
-              display: flex;
-              justify-content: space-between;
-            }
-
-            .payment-section {
-              margin-bottom: 5mm;
-              font-size: 11pt;
-              border-bottom: 1px dashed black;
-              padding-bottom: 4mm;
-            }
-
-            .payment-title {
-              font-weight: bold;
-              margin-bottom: 2mm;
-              font-size: 12pt;
-            }
-
-            .payment-item {
-              margin-bottom: 1.5mm;
-            }
-
-            .credit-section {
-              margin-bottom: 5mm;
-              font-size: 11pt;
-              border-bottom: 1px dashed black;
-              padding-bottom: 4mm;
-            }
-
-            .credit-title {
-              font-weight: bold;
-              text-align: center;
-              margin-bottom: 3mm;
-              font-size: 13pt;
-            }
-
-            .footer {
-              text-align: center;
-              font-size: 11pt;
-              margin-top: 5mm;
-              padding-top: 3mm;
-              padding-bottom: 5mm;
-            }
-
-            .thank-you {
-              font-weight: bold;
-              margin-top: 3mm;
-              margin-bottom: 3mm;
-              font-size: 14pt;
-            }
-
-            .flex-between {
-              display: flex;
-              justify-content: space-between;
-            }
-          </style>
-        </head>
-        <body>
-          <!-- Header -->
-          <div class="header">
-            <div class="company-name">${companyName}</div>
-            <div class="invoice-title">FACTURA DE VENTA</div>
-            <div class="invoice-number">No. ${invoice.number}</div>
-          </div>
-
-          <!-- Info -->
-          <div class="info-section">
-            <div class="info-line">
-              <span class="label">Cliente: </span>
-              <span>${invoice.customer_name || 'Consumidor Final'}</span>
-            </div>
-            ${invoice.customer_document ? `
-            <div class="info-line">
-              <span class="label">Documento: </span>
-              <span>${invoice.customer_document}</span>
-            </div>
-            ` : ''}
-            <div class="info-line">
-              <span class="label">Fecha: </span>
-              <span>${new Date(invoice.date).toLocaleString('es-CO', {
-                timeZone: 'America/Bogota',
-                day: '2-digit',
-                month: '2-digit',
-                year: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit'
-              })}</span>
-            </div>
-            <div class="info-line">
-              <span class="label">Tipo: </span>
-              <span>${invoice.type === 'wholesale' ? 'Al Mayor' : 'Regular'}</span>
-            </div>
-            ${invoice.attended_by ? `
-            <div class="info-line">
-              <span class="label">Atendido: </span>
-              <span>${invoice.attended_by}</span>
-            </div>
-            ` : ''}
-          </div>
-
-          <!-- Products -->
-          <div class="products-section">
-            <div class="products-title">PRODUCTOS</div>
-            ${invoice.items.map((item: any) => `
-              <div class="product-item">
-                <div class="product-name">${item.productName}</div>
-                <div class="product-details">
-                  ${item.quantity} x ${formatCOP(item.price)} = ${formatCOP(item.total)}
-                </div>
-                ${item.unitIds && item.unitIds.length > 0 ? `
-                  <div class="product-ids">
-                    <div style="font-weight: bold; margin-bottom: 1mm;">IDs:</div>
-                    <div>${item.unitIds.join(', ')}</div>
-                  </div>
-                ` : ''}
-              </div>
-            `).join('')}
-          </div>
-
-          <!-- Total -->
-          <div class="total-section">
-            <div class="total-line">
-              <span>TOTAL:</span>
-              <span>${formatCOP(invoice.total)}</span>
-            </div>
-          </div>
-
-          <!-- Payment Method -->
-          ${invoice.payment_method ? `
-          <div class="payment-section">
-            <div class="payment-title">Método de Pago:</div>
-            ${(invoice.payment_cash > 0 || invoice.payment_transfer > 0 || invoice.payment_other > 0) ? `
-              ${invoice.payment_cash > 0 ? `<div class="payment-item">• Efectivo: ${formatCOP(invoice.payment_cash)}</div>` : ''}
-              ${invoice.payment_transfer > 0 ? `<div class="payment-item">• Transferencia: ${formatCOP(invoice.payment_transfer)}</div>` : ''}
-              ${invoice.payment_other > 0 ? `<div class="payment-item">• Otros: ${formatCOP(invoice.payment_other)}</div>` : ''}
-            ` : `
-              <div>${invoice.payment_method}</div>
-            `}
-          </div>
-          ` : ''}
-
-          <!-- Credit Section -->
-          ${invoice.is_credit ? `
-          <div class="credit-section">
-            <div class="credit-title">FACTURA A CRÉDITO</div>
-
-            ${payments && payments.length > 0 ? `
-              <div style="font-weight: bold; margin-bottom: 2mm; font-size: 12pt;">Abonos:</div>
-              ${payments.map((payment: any) => `
-                <div style="margin-bottom: 3mm; padding-bottom: 2mm; border-bottom: 1px dotted #ccc;">
-                  <div class="flex-between">
-                    <span>${new Date(payment.date).toLocaleDateString('es-CO', { timeZone: 'America/Bogota' })}</span>
-                    <span>${formatCOP(payment.amount)}</span>
-                  </div>
-                  <div style="font-size: 10pt; margin-top: 1mm;">
-                    ${payment.payment_method === 'cash' ? 'Efectivo' : payment.payment_method === 'transfer' ? 'Transferencia' : 'Otro'}
-                  </div>
-                </div>
-              `).join('')}
-              <div style="font-weight: bold; margin-top: 3mm; font-size: 12pt;">
-                <div class="flex-between">
-                  <span>Total Abonado:</span>
-                  <span>${formatCOP(payments.reduce((sum: number, p: any) => sum + p.amount, 0))}</span>
-                </div>
-              </div>
-            ` : ''}
-
-            <div style="font-weight: bold; margin-top: 3mm; font-size: 12pt;">
-              <div class="flex-between">
-                <span>Saldo Pendiente:</span>
-                <span>${formatCOP(invoice.credit_balance || invoice.total)}</span>
-              </div>
-            </div>
-            <div style="margin-top: 2mm; font-size: 10pt;">
-              Estado: ${invoice.status === 'paid' ? 'PAGADO' : 'PENDIENTE'}
-            </div>
-          </div>
-          ` : ''}
-
-          <!-- Footer -->
-          <div class="footer">
-            <div>================================</div>
-            <div class="thank-you">¡GRACIAS POR SU COMPRA!</div>
-            <div style="margin-top: 3mm; margin-bottom: 2mm; font-size: 12pt; font-weight: bold;">
-              ${companyName}
-            </div>
-            <div style="margin-bottom: 2mm; font-size: 11pt;">
-              www.celumundovip.com
-            </div>
-            <div style="font-size: 10pt; margin-top: 2mm; margin-bottom: 3mm;">
-              ${new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota' })}
-            </div>
-          </div>
-
-          <!-- Espacio adicional para que la factura salga completa de la impresora -->
-          <div style="height: 50mm;"></div>
-        </body>
-      </html>
-    `;
-
-    // Crear iframe oculto
-    const printFrame = document.createElement('iframe');
-    printFrame.style.position = 'absolute';
-    printFrame.style.width = '0';
-    printFrame.style.height = '0';
-    printFrame.style.border = 'none';
-    printFrame.style.visibility = 'hidden';
-
-    document.body.appendChild(printFrame);
-
-    const printDocument = printFrame.contentWindow?.document;
-    if (!printDocument) {
-      toast.error('Error al preparar la impresión');
-      document.body.removeChild(printFrame);
-      return;
-    }
-
-    printDocument.open();
-    printDocument.write(thermalHTML);
-    printDocument.close();
-
-    // Esperar a que se cargue el contenido y luego imprimir
-    setTimeout(() => {
-      printFrame.contentWindow?.focus();
-      printFrame.contentWindow?.print();
-
-      // Remover el iframe después de imprimir
-      setTimeout(() => {
-        document.body.removeChild(printFrame);
-      }, 1000);
-    }, 500);
-  };
+  // DEPRECATED: Old printing functions removed - using direct printing services now
+  // See thermal-printer.ts, pdf-printer.ts for new implementations
 
   const handlePrintThermalDirect = async () => {
     if (!newlyCreatedInvoice) return;
 
-    // Si la factura es a crédito, cargar los pagos
-    let payments: CreditPayment[] = [];
-    if (newlyCreatedInvoice.is_credit) {
-      payments = await getCreditPaymentsByInvoice(newlyCreatedInvoice.id);
-    }
+    try {
+      setShowPrintOptionsModal(false);
 
-    setShowPrintOptionsModal(false);
-    await printThermalInvoice(newlyCreatedInvoice, payments);
-  };
-
-  const generatePDFInvoice = (invoice: Invoice, download: boolean = false) => {
-    const doc = new jsPDF();
-    const companyName = getCurrentCompany() === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
-    const pageWidth = doc.internal.pageSize.getWidth();
-    const pageHeight = doc.internal.pageSize.getHeight();
-
-    // Header
-    doc.setFontSize(20);
-    doc.setFont('helvetica', 'bold');
-    doc.text(companyName, pageWidth / 2, 20, { align: 'center' });
-
-    doc.setFontSize(12);
-    doc.setFont('helvetica', 'normal');
-    doc.text(`Factura ${invoice.number}`, pageWidth / 2, 30, { align: 'center' });
-
-    // Info
-    let y = 45;
-    doc.setFontSize(10);
-    doc.text(`Fecha: ${new Date(invoice.date).toLocaleString('es-CO', {
-      timeZone: 'America/Bogota',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit'
-    })}`, 20, y);
-    y += 6;
-
-    if (invoice.customer_name) {
-      doc.text(`Cliente: ${invoice.customer_name}`, 20, y);
-      y += 6;
-    }
-
-    if (invoice.customer_document) {
-      doc.text(`Documento: ${invoice.customer_document}`, 20, y);
-      y += 6;
-    }
-
-    if (invoice.attended_by) {
-      doc.text(`Atendido por: ${invoice.attended_by}`, 20, y);
-      y += 6;
-    }
-
-    doc.text(`Tipo: ${invoice.type === 'wholesale' ? 'Al Mayor' : 'Regular'}`, 20, y);
-    y += 6;
-
-    if (invoice.is_credit) {
-      doc.setTextColor(0, 100, 200);
-      doc.setFont('helvetica', 'bold');
-      doc.text('FACTURA A CRÉDITO', 20, y);
-      doc.setTextColor(0, 0, 0);
-      doc.setFont('helvetica', 'normal');
-      y += 6;
-    }
-
-    y += 5;
-
-    // Items Header
-    doc.setFont('helvetica', 'bold');
-    doc.text('Cant.', 20, y);
-    doc.text('Producto', 40, y);
-    doc.text('Precio', 130, y);
-    doc.text('Total', 170, y);
-    y += 2;
-    doc.line(20, y, 190, y);
-    y += 6;
-
-    // Items
-    doc.setFont('helvetica', 'normal');
-    invoice.items.forEach((item) => {
-      if (y > pageHeight - 40) {
-        doc.addPage();
-        y = 20;
+      // Cargar pagos si es factura a crédito
+      let payments: CreditPayment[] = [];
+      if (newlyCreatedInvoice.is_credit) {
+        payments = await getCreditPaymentsByInvoice(newlyCreatedInvoice.id);
       }
 
-      doc.text(item.quantity.toString(), 20, y);
-      const productName = item.productName.length > 40 ? item.productName.substring(0, 40) + '...' : item.productName;
-      doc.text(productName, 40, y);
-      doc.text(formatCOP(item.price), 130, y);
-      doc.text(formatCOP(item.total), 170, y);
-      y += 6;
+      // Imprimir usando el nuevo servicio directo
+      await printThermalDirect({
+        invoice: newlyCreatedInvoice,
+        creditPayments: payments,
+        products: products,
+      });
 
-      // Si tiene IDs únicos, mostrarlos
-      if (item.unitIds && item.unitIds.length > 0) {
-        doc.setFontSize(8);
-        doc.setTextColor(100, 100, 100);
-        const idsText = 'IDs: ' + item.unitIds.join(', ');
-        const maxWidth = 70;
-        const lines = doc.splitTextToSize(idsText, maxWidth);
-        lines.forEach((line: string) => {
-          if (y > pageHeight - 40) {
-            doc.addPage();
-            y = 20;
-          }
-          doc.text(line, 40, y);
-          y += 4;
-        });
-        doc.setFontSize(10);
-        doc.setTextColor(0, 0, 0);
-        y += 2;
-      }
-    });
-
-    y += 5;
-    doc.line(20, y, 190, y);
-    y += 8;
-
-    // Total
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(14);
-    doc.text(`TOTAL: ${formatCOP(invoice.total)}`, pageWidth - 20, y, { align: 'right' });
-
-    // Métodos de pago
-    if (invoice.payment_method) {
-      y += 10;
-      doc.setFontSize(12);
-      doc.text('Método de Pago:', 20, y);
-      y += 6;
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-
-      if (invoice.payment_cash > 0 || invoice.payment_transfer > 0 || invoice.payment_other > 0) {
-        if (invoice.payment_cash > 0) {
-          doc.text(`• Efectivo: ${formatCOP(invoice.payment_cash)}`, 20, y);
-          y += 6;
-        }
-        if (invoice.payment_transfer > 0) {
-          doc.text(`• Transferencia: ${formatCOP(invoice.payment_transfer)}`, 20, y);
-          y += 6;
-        }
-        if (invoice.payment_other > 0) {
-          doc.text(`• Otros: ${formatCOP(invoice.payment_other)}`, 20, y);
-          y += 6;
-        }
-      } else {
-        doc.text(invoice.payment_method, 20, y);
-        y += 6;
-      }
-    }
-
-    // Información de crédito
-    if (invoice.is_credit && invoice.credit_balance !== undefined) {
-      y += 5;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(12);
-      doc.setTextColor(200, 100, 0);
-      doc.text(`Saldo Pendiente: ${formatCOP(invoice.credit_balance)}`, 20, y);
-      doc.setTextColor(0, 0, 0);
-    }
-
-    // Footer
-    y = pageHeight - 20;
-    doc.setFontSize(8);
-    doc.setFont('helvetica', 'normal');
-    doc.text(companyName, pageWidth / 2, y, { align: 'center' });
-    doc.text('www.celumundovip.com', pageWidth / 2, y + 4, { align: 'center' });
-
-    if (download) {
-      // Descargar el PDF
-      doc.save(`Factura_${invoice.number}.pdf`);
-      toast.success('PDF descargado exitosamente');
-    } else {
-      // Abrir para imprimir
-      doc.autoPrint();
-      window.open(doc.output('bloburl'), '_blank');
-      toast.success('Abriendo vista de impresión PDF');
+      toast.success('Factura impresa exitosamente');
+    } catch (error: any) {
+      toast.error(error.message || 'Error al imprimir factura');
     }
   };
 
-  const handlePrintPDF = () => {
+
+  const handlePrintPDF = async () => {
     if (!newlyCreatedInvoice) return;
-    setShowPrintOptionsModal(false);
-    generatePDFInvoice(newlyCreatedInvoice, false);
+
+    try {
+      setShowPrintOptionsModal(false);
+
+      // Cargar pagos si es factura a crédito
+      let payments: CreditPayment[] = [];
+      if (newlyCreatedInvoice.is_credit) {
+        payments = await getCreditPaymentsByInvoice(newlyCreatedInvoice.id);
+      }
+
+      // Imprimir usando el nuevo servicio directo
+      await printPDFInvoice({
+        invoice: newlyCreatedInvoice,
+        creditPayments: payments,
+        products: products,
+      });
+
+      toast.success('Documento PDF impreso exitosamente');
+    } catch (error: any) {
+      toast.error(error.message || 'Error al imprimir PDF');
+    }
   };
 
-  const handleDownloadPDF = () => {
+  const handleDownloadPDF = async () => {
     if (!newlyCreatedInvoice) return;
-    setShowPrintOptionsModal(false);
-    generatePDFInvoice(newlyCreatedInvoice, true);
+
+    try {
+      setShowPrintOptionsModal(false);
+
+      // Cargar pagos si es factura a crédito
+      let payments: CreditPayment[] = [];
+      if (newlyCreatedInvoice.is_credit) {
+        payments = await getCreditPaymentsByInvoice(newlyCreatedInvoice.id);
+      }
+
+      // Nota: Por ahora usa el mismo servicio de impresión
+      // En el futuro se podría crear un servicio separado para descargar
+      await printPDFInvoice({
+        invoice: newlyCreatedInvoice,
+        creditPayments: payments,
+        products: products,
+      });
+
+      toast.success('Documento PDF impreso exitosamente');
+    } catch (error: any) {
+      toast.error(error.message || 'Error al imprimir PDF');
+    }
   };
 
   const handleConfirmPaymentMethod = async () => {
@@ -1872,9 +1409,26 @@ export function InvoicesMenu() {
               </div>
             </div>
 
+            {/* Advertencia cuando está en web */}
+            {!isPrintingAvailable() && (
+              <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                <div className="flex items-start gap-2">
+                  <div className="text-red-600 dark:text-red-400 mt-0.5">⚠️</div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+                      Impresión No Disponible
+                    </p>
+                    <p className="text-xs text-red-800 dark:text-red-200">
+                      Usa la aplicación de escritorio para imprimir facturas
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
             <div>
               <Label className="text-zinc-700 dark:text-zinc-300">Método de Impresión</Label>
-              <Select value={printMethod} onValueChange={setPrintMethod}>
+              <Select value={printMethod} onValueChange={setPrintMethod} disabled={!isPrintingAvailable()}>
                 <SelectTrigger className="bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700">
                   <SelectValue placeholder="Seleccione un método" />
                 </SelectTrigger>
@@ -1899,21 +1453,41 @@ export function InvoicesMenu() {
             </Button>
             <Button
               onClick={async () => {
-                if (printMethod === 'pdf') {
-                  generatePDFInvoice(selectedInvoice!, false);
-                  setShowPrintSelectionModal(false);
-                } else if (printMethod === 'thermal') {
-                  // Cargar pagos de crédito si aplica
-                  let payments: CreditPayment[] = [];
-                  if (selectedInvoice!.is_credit) {
-                    payments = await getCreditPaymentsByInvoice(selectedInvoice!.id);
-                  }
+                try {
+                  if (printMethod === 'pdf') {
+                    // Cargar pagos de crédito si aplica
+                    let payments: CreditPayment[] = [];
+                    if (selectedInvoice!.is_credit) {
+                      payments = await getCreditPaymentsByInvoice(selectedInvoice!.id);
+                    }
 
+                    await printPDFInvoice({
+                      invoice: selectedInvoice!,
+                      creditPayments: payments,
+                      products: products,
+                    });
+                    toast.success('Factura PDF impresa exitosamente');
+                  } else if (printMethod === 'thermal') {
+                    // Cargar pagos de crédito si aplica
+                    let payments: CreditPayment[] = [];
+                    if (selectedInvoice!.is_credit) {
+                      payments = await getCreditPaymentsByInvoice(selectedInvoice!.id);
+                    }
+
+                    await printThermalDirect({
+                      invoice: selectedInvoice!,
+                      creditPayments: payments,
+                      products: products,
+                    });
+                    toast.success('Factura térmica impresa exitosamente');
+                  }
                   setShowPrintSelectionModal(false);
-                  await printThermalInvoice(selectedInvoice!, payments);
+                } catch (error: any) {
+                  toast.error(error.message || 'Error al imprimir');
                 }
               }}
-              className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white"
+              disabled={!isPrintingAvailable()}
+              className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white disabled:opacity-50 disabled:cursor-not-allowed"
             >
               <CheckCircle className="w-4 h-4 mr-2" />
               Imprimir
@@ -1937,11 +1511,29 @@ export function InvoicesMenu() {
             </DialogDescription>
           </DialogHeader>
 
+          {/* Advertencia cuando está en web */}
+          {!isPrintingAvailable() && (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <div className="text-red-600 dark:text-red-400 mt-0.5">⚠️</div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+                    Impresión No Disponible
+                  </p>
+                  <p className="text-xs text-red-800 dark:text-red-200">
+                    Usa la aplicación de escritorio para imprimir facturas
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-3 py-4">
             {/* Botón Imprimir PDF (A4) */}
             <Button
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handlePrintPDF}
+              disabled={!isPrintingAvailable()}
             >
               <Printer className="h-4 w-4 mr-2" />
               Imprimir PDF (Formato A4)
@@ -1949,8 +1541,9 @@ export function InvoicesMenu() {
 
             {/* Botón Descargar PDF */}
             <Button
-              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handleDownloadPDF}
+              disabled={!isPrintingAvailable()}
             >
               <Download className="h-4 w-4 mr-2" />
               Descargar PDF
@@ -1958,8 +1551,9 @@ export function InvoicesMenu() {
 
             {/* Botón Imprimir Tirilla */}
             <Button
-              className="w-full bg-purple-600 hover:bg-purple-700 text-white"
+              className="w-full bg-purple-600 hover:bg-purple-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
               onClick={handlePrintThermalDirect}
+              disabled={!isPrintingAvailable()}
             >
               <Printer className="h-4 w-4 mr-2" />
               Imprimir Tirilla (Térmica 80mm)

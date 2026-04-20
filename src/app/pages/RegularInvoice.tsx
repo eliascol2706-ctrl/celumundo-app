@@ -41,6 +41,7 @@ import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
 import { ProductSelectionModal } from '../components/ProductSelectionModal';
 import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
+import { isElectron, onGlobalShortcut, removeGlobalShortcutListener } from '../lib/electron-utils';
 
 interface InvoiceItem {
   productId: string;
@@ -184,12 +185,6 @@ export function RegularInvoice() {
         console.log('✅ Producto encontrado:', product ? product.name : '❌ NO ENCONTRADO');
 
         if (product) {
-          // Verificar stock SOLO para productos con IDs únicas
-          if (product.use_unit_ids && product.stock <= 0) {
-            toast.error(`${product.name} requiere IDs únicas y no tiene stock disponible`);
-            return;
-          }
-
           // Verificar si ya está agregado
           if (items.some(item => item.productId === product.id)) {
             toast.error('Este producto ya está agregado');
@@ -243,6 +238,7 @@ export function RegularInvoice() {
     };
   }, [barcodeBuffer, products, items]);
 
+  // === Funciones helper (declaradas antes de los useEffects que las usan) ===
   const loadData = async () => {
     const [productsData, departmentsData] = await Promise.all([
       getAllProducts(),
@@ -269,47 +265,6 @@ export function RegularInvoice() {
     setShowProductSearch(true);
   };
 
-  const addProductToList = async (product: any) => {
-    // Verificar si el producto usa IDs y tiene IDs disponibles
-    if (product.use_unit_ids) {
-      const { getAvailableIds } = await import('../lib/unit-ids-utils');
-      const availableIds = getAvailableIds(product.registered_ids || []);
-      if (availableIds.length === 0) {
-        toast.error(`${product.name} no tiene IDs registradas disponibles`);
-        return;
-      }
-    }
-
-    // Filtrar solo IDs disponibles (no inhabilitadas)
-    const { getAvailableIds } = await import('../lib/unit-ids-utils');
-    const availableIds = product.use_unit_ids
-      ? getAvailableIds(product.registered_ids || [])
-      : product.registered_ids || [];
-
-    const newItem: InvoiceItem = {
-      productId: product.id,
-      productName: product.name,
-      productCode: product.code,
-      quantity: 1,
-      price: product.final_price,
-      total: product.final_price,
-      useUnitIds: product.use_unit_ids,
-      unitIds: [],
-      availableIds: availableIds,
-      unitIdNotes: {}
-    };
-
-    setItems([...items, newItem]);
-    setShowProductSearch(false);
-
-    // Si usa IDs, abrir selector
-    if (product.use_unit_ids) {
-      setCurrentItemIndex(items.length);
-      setSelectedUnitIds([]);
-      setUnitIdDialogOpen(true);
-    }
-  };
-
   const removeItem = (index: number) => {
     setItems(items.filter((_, i) => i !== index));
   };
@@ -323,91 +278,6 @@ export function RegularInvoice() {
     }
 
     setItems(newItems);
-  };
-
-  const selectProduct = async (index: number, product: Product) => {
-    // Filtrar solo IDs disponibles (no inhabilitadas)
-    const { getAvailableIds } = await import('../lib/unit-ids-utils');
-    const availableIds = product.use_unit_ids
-      ? getAvailableIds(product.registered_ids || [])
-      : product.registered_ids || [];
-
-    updateItem(index, 'productId', product.id);
-    updateItem(index, 'productName', product.name);
-    updateItem(index, 'productCode', product.code);
-    updateItem(index, 'price', product.final_price);
-    updateItem(index, 'total', product.final_price * items[index].quantity);
-    updateItem(index, 'useUnitIds', product.use_unit_ids);
-    updateItem(index, 'availableIds', availableIds);
-    setShowProductSearch(false);
-  };
-
-  const handleStatusSelection = (status: InvoiceStatus) => {
-    setInvoiceStatus(status);
-    setShowStatusModal(false);
-    
-    // Si selecciona "Paga", mostrar modal de método de pago
-    // Si selecciona "En Confirmación", no mostrar modal de método de pago
-    if (status === 'paid') {
-      setShowPaymentMethodModal(true);
-    }
-  };
-
-  // Funciones para manejo de IDs únicas
-  const handleOpenUnitIdSelector = (index: number) => {
-    setCurrentItemIndex(index);
-    setSelectedUnitIds([...(items[index].unitIds || [])]);
-    
-    // Cargar notas existentes o crear objeto vacío con notas del producto
-    const existingNotes = items[index].unitIdNotes || {};
-    const productNotesMap: { [id: string]: string } = {};
-    
-    // Pre-cargar las notas del producto si existen
-    if (items[index].availableIds) {
-      items[index].availableIds!.forEach((item) => {
-        productNotesMap[item.id] = item.note || '';
-      });
-    }
-    
-    // Combinar notas existentes con las del producto
-    setUnitIdNotes({ ...productNotesMap, ...existingNotes });
-    setUnitIdDialogOpen(true);
-  };
-
-  const toggleUnitId = (unitId: string) => {
-    if (currentItemIndex === null) return;
-    const item = items[currentItemIndex];
-    
-    if (selectedUnitIds.includes(unitId)) {
-      setSelectedUnitIds(selectedUnitIds.filter(id => id !== unitId));
-    } else {
-      if (selectedUnitIds.length >= item.quantity) {
-        toast.error(`Solo puedes seleccionar ${item.quantity} IDs`);
-        return;
-      }
-      setSelectedUnitIds([...selectedUnitIds, unitId]);
-    }
-  };
-
-  const handleSaveUnitIds = () => {
-    if (currentItemIndex === null) return;
-    
-    const item = items[currentItemIndex];
-    
-    if (selectedUnitIds.length !== item.quantity) {
-      toast.error(`Debes seleccionar exactamente ${item.quantity} IDs`);
-      return;
-    }
-    
-    const updated = [...items];
-    updated[currentItemIndex].unitIds = selectedUnitIds;
-    updated[currentItemIndex].unitIdNotes = unitIdNotes;
-    setItems(updated);
-    setUnitIdDialogOpen(false);
-    setCurrentItemIndex(null);
-    setSelectedUnitIds([]);
-    setUnitIdNotes({});
-    toast.success('IDs seleccionadas correctamente');
   };
 
   const handleSubmit = async () => {
@@ -442,7 +312,7 @@ export function RegularInvoice() {
     if (!validation.canCreate) {
       const toastMessage = validation.message || 'No se puede crear factura en este momento';
       const toastDuration = validation.requiresMonthlyClose ? 10000 : 8000;
-      
+
       toast.error(toastMessage, {
         duration: toastDuration,
         action: {
@@ -451,15 +321,6 @@ export function RegularInvoice() {
         }
       });
       return;
-    }
-
-    // Verificar stock
-    for (const item of items) {
-      const product = products.find((p) => p.id === item.productId);
-      if (product && product.stock < item.quantity) {
-        toast.error(`Stock insuficiente para ${product.name}`);
-        return;
-      }
     }
 
     // Validar pagos si está paga
@@ -477,7 +338,6 @@ export function RegularInvoice() {
     setShowPreview(true);
   };
 
-  // Nueva función para confirmar y crear la factura
   const handleConfirmCreate = async () => {
     setIsSubmitting(true);
 
@@ -598,6 +458,298 @@ export function RegularInvoice() {
     }
   };
 
+  // Atajos de teclado para agilizar facturación
+  useEffect(() => {
+    // Función unificada para manejar atajos
+    const processShortcut = (key: string) => {
+      console.log('⌨️ [Regular] Atajo recibido:', key);
+
+      // F1: Agregar producto
+      if (key === 'F1') {
+        console.log('✅ F1 - Agregar producto');
+        addItem();
+        return;
+      }
+
+      // F2: Modificar precio del último producto
+      if (key === 'F2') {
+        console.log('✅ F2 - Editar precio', 'Items:', items.length);
+        if (items.length > 0) {
+          const lastIndex = items.length - 1;
+          const lastItem = items[lastIndex];
+          console.log('Último producto:', lastItem);
+
+          const newPrice = window.prompt(`Nuevo precio para ${lastItem.productName}:`, lastItem.price.toString());
+          console.log('Precio ingresado:', newPrice);
+
+          if (newPrice !== null && newPrice.trim() !== '') {
+            const parsedPrice = parseFloat(newPrice);
+            if (!isNaN(parsedPrice) && parsedPrice > 0) {
+              updateItem(lastIndex, 'price', parsedPrice);
+              toast.success(`Precio actualizado a ${formatCOP(parsedPrice)}`);
+            } else {
+              toast.error('Precio inválido');
+            }
+          }
+        } else {
+          toast.error('No hay productos para editar');
+        }
+        return;
+      }
+
+      // F3: Modificar cantidad del último producto
+      if (key === 'F3') {
+        console.log('✅ F3 - Editar cantidad', 'Items:', items.length);
+        if (items.length > 0) {
+          const lastIndex = items.length - 1;
+          const lastItem = items[lastIndex];
+          console.log('Último producto:', lastItem);
+
+          const newQty = window.prompt(`Nueva cantidad para ${lastItem.productName}:`, lastItem.quantity.toString());
+          console.log('Cantidad ingresada:', newQty);
+
+          if (newQty !== null && newQty.trim() !== '') {
+            const parsedQty = parseInt(newQty);
+            if (!isNaN(parsedQty) && parsedQty > 0) {
+              updateItem(lastIndex, 'quantity', parsedQty);
+              toast.success(`Cantidad actualizada a ${parsedQty}`);
+            } else {
+              toast.error('Cantidad inválida');
+            }
+          }
+        } else {
+          toast.error('No hay productos para editar');
+        }
+        return;
+      }
+
+      // F4: Remover último producto
+      if (key === 'F4') {
+        console.log('✅ F4 - Quitar producto');
+        if (items.length > 0) {
+          const lastIndex = items.length - 1;
+          removeItem(lastIndex);
+          toast.success('Producto removido');
+        }
+        return;
+      }
+
+      // F5: Método de pago - Efectivo
+      if (key === 'F5') {
+        console.log('✅ F5 - Efectivo');
+        setPaymentMethod('cash');
+        toast.success('Método: Efectivo');
+        return;
+      }
+
+      // F6: Método de pago - Transferencia
+      if (key === 'F6') {
+        console.log('✅ F6 - Transferencia');
+        setPaymentMethod('transfer');
+        toast.success('Método: Transferencia');
+        return;
+      }
+
+      // F7: Método de pago - Nequi
+      if (key === 'F7') {
+        console.log('✅ F7 - Nequi');
+        setPaymentMethod('nequi');
+        toast.success('Método: Nequi');
+        return;
+      }
+
+      // F8: Método de pago - Daviplata
+      if (key === 'F8') {
+        console.log('✅ F8 - Daviplata');
+        setPaymentMethod('daviplata');
+        toast.success('Método: Daviplata');
+        return;
+      }
+
+      // F9: Método de pago - Mixto
+      if (key === 'F9') {
+        console.log('✅ F9 - Mixto');
+        setPaymentMethod('mixed');
+        toast.success('Método: Mixto');
+        return;
+      }
+
+      // Enter: Finalizar factura
+      if (key === 'Enter') {
+        console.log('✅ Enter - Finalizar factura');
+        if (items.length > 0 && !isSubmitting) {
+          handleSubmit();
+        }
+        return;
+      }
+    };
+
+    // Handler para eventos de teclado del navegador
+    const handleKeyboardShortcuts = (e: KeyboardEvent) => {
+      const isTyping = document.activeElement?.tagName === 'INPUT' ||
+                      document.activeElement?.tagName === 'TEXTAREA';
+
+      // Para teclas F, siempre procesarlas
+      if (e.key.startsWith('F') && /^F([1-9]|1[0-2])$/.test(e.key)) {
+        e.preventDefault();
+        processShortcut(e.key);
+        return;
+      }
+
+      // Para Enter, solo si no está escribiendo
+      if (e.key === 'Enter' && !isTyping) {
+        e.preventDefault();
+        processShortcut(e.key);
+        return;
+      }
+    };
+
+    // Registrar listener de teclado normal
+    document.addEventListener('keydown', handleKeyboardShortcuts);
+
+    // Si estamos en Electron, también registrar listener global
+    if (isElectron()) {
+      console.log('🖥️ [Regular] Electron detectado - Registrando atajos globales');
+      onGlobalShortcut((key) => {
+        console.log('🌐 [Regular] Atajo global de Electron:', key);
+        processShortcut(key);
+      });
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyboardShortcuts);
+      if (isElectron()) {
+        removeGlobalShortcutListener();
+      }
+    };
+  }, [items, isSubmitting, addItem, removeItem, updateItem, handleSubmit, setPaymentMethod]);
+
+  const addProductToList = async (product: any) => {
+    // Verificar si el producto usa IDs y tiene IDs disponibles
+    if (product.use_unit_ids) {
+      const { getAvailableIds } = await import('../lib/unit-ids-utils');
+      const availableIds = getAvailableIds(product.registered_ids || []);
+      if (availableIds.length === 0) {
+        toast.error(`${product.name} no tiene IDs registradas disponibles`);
+        return;
+      }
+    }
+
+    // Filtrar solo IDs disponibles (no inhabilitadas)
+    const { getAvailableIds } = await import('../lib/unit-ids-utils');
+    const availableIds = product.use_unit_ids
+      ? getAvailableIds(product.registered_ids || [])
+      : product.registered_ids || [];
+
+    const newItem: InvoiceItem = {
+      productId: product.id,
+      productName: product.name,
+      productCode: product.code,
+      quantity: 1,
+      price: product.final_price,
+      total: product.final_price,
+      useUnitIds: product.use_unit_ids,
+      unitIds: [],
+      availableIds: availableIds,
+      unitIdNotes: {}
+    };
+
+    setItems([...items, newItem]);
+    setShowProductSearch(false);
+
+    // Si usa IDs, abrir selector
+    if (product.use_unit_ids) {
+      setCurrentItemIndex(items.length);
+      setSelectedUnitIds([]);
+      setUnitIdDialogOpen(true);
+    }
+  };
+
+  const selectProduct = async (index: number, product: Product) => {
+    // Filtrar solo IDs disponibles (no inhabilitadas)
+    const { getAvailableIds } = await import('../lib/unit-ids-utils');
+    const availableIds = product.use_unit_ids
+      ? getAvailableIds(product.registered_ids || [])
+      : product.registered_ids || [];
+
+    updateItem(index, 'productId', product.id);
+    updateItem(index, 'productName', product.name);
+    updateItem(index, 'productCode', product.code);
+    updateItem(index, 'price', product.final_price);
+    updateItem(index, 'total', product.final_price * items[index].quantity);
+    updateItem(index, 'useUnitIds', product.use_unit_ids);
+    updateItem(index, 'availableIds', availableIds);
+    setShowProductSearch(false);
+  };
+
+  const handleStatusSelection = (status: InvoiceStatus) => {
+    setInvoiceStatus(status);
+    setShowStatusModal(false);
+    
+    // Si selecciona "Paga", mostrar modal de método de pago
+    // Si selecciona "En Confirmación", no mostrar modal de método de pago
+    if (status === 'paid') {
+      setShowPaymentMethodModal(true);
+    }
+  };
+
+  // Funciones para manejo de IDs únicas
+  const handleOpenUnitIdSelector = (index: number) => {
+    setCurrentItemIndex(index);
+    setSelectedUnitIds([...(items[index].unitIds || [])]);
+    
+    // Cargar notas existentes o crear objeto vacío con notas del producto
+    const existingNotes = items[index].unitIdNotes || {};
+    const productNotesMap: { [id: string]: string } = {};
+    
+    // Pre-cargar las notas del producto si existen
+    if (items[index].availableIds) {
+      items[index].availableIds!.forEach((item) => {
+        productNotesMap[item.id] = item.note || '';
+      });
+    }
+    
+    // Combinar notas existentes con las del producto
+    setUnitIdNotes({ ...productNotesMap, ...existingNotes });
+    setUnitIdDialogOpen(true);
+  };
+
+  const toggleUnitId = (unitId: string) => {
+    if (currentItemIndex === null) return;
+    const item = items[currentItemIndex];
+    
+    if (selectedUnitIds.includes(unitId)) {
+      setSelectedUnitIds(selectedUnitIds.filter(id => id !== unitId));
+    } else {
+      if (selectedUnitIds.length >= item.quantity) {
+        toast.error(`Solo puedes seleccionar ${item.quantity} IDs`);
+        return;
+      }
+      setSelectedUnitIds([...selectedUnitIds, unitId]);
+    }
+  };
+
+  const handleSaveUnitIds = () => {
+    if (currentItemIndex === null) return;
+    
+    const item = items[currentItemIndex];
+    
+    if (selectedUnitIds.length !== item.quantity) {
+      toast.error(`Debes seleccionar exactamente ${item.quantity} IDs`);
+      return;
+    }
+    
+    const updated = [...items];
+    updated[currentItemIndex].unitIds = selectedUnitIds;
+    updated[currentItemIndex].unitIdNotes = unitIdNotes;
+    setItems(updated);
+    setUnitIdDialogOpen(false);
+    setCurrentItemIndex(null);
+    setSelectedUnitIds([]);
+    setUnitIdNotes({});
+    toast.success('IDs seleccionadas correctamente');
+  };
+
   return (
     <div className="min-h-screen bg-zinc-50">
       {/* Header */}
@@ -642,6 +794,24 @@ export function RegularInvoice() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Columna Principal */}
           <div className="lg:col-span-2 space-y-6">
+            {/* Atajos de Teclado - Compacto */}
+            <div className="px-3 py-2 bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+              <div className="flex items-center gap-2 flex-wrap text-[10px]">
+                <Info className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                <span className="text-blue-900 dark:text-blue-100 font-medium">Atajos:</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F1</kbd> Agregar</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F2</kbd> Precio</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F3</kbd> Cantidad</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F4</kbd> Quitar</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F5</kbd> Efectivo</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F6</kbd> Transfer.</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F7</kbd> Nequi</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F8</kbd> Daviplata</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">F9</kbd> Mixto</span>
+                <span className="text-blue-700 dark:text-blue-300"><kbd className="px-1.5 py-0.5 bg-white/80 dark:bg-zinc-800/80 border border-blue-300/50 rounded font-mono text-[9px]">Enter</kbd> Finalizar</span>
+              </div>
+            </div>
+
             {/* Información del Cliente (Opcional) */}
             <Card className="border-zinc-200">
               <CardHeader className="border-b border-zinc-100">
@@ -1014,6 +1184,9 @@ export function RegularInvoice() {
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="text-2xl">¿Cuál es el estado de esta factura?</DialogTitle>
+            <DialogDescription>
+              Selecciona el estado de pago de la factura
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-4">
             <Button
@@ -1060,6 +1233,9 @@ export function RegularInvoice() {
               <Receipt className="w-6 h-6 text-emerald-600" />
               Vista Previa de Factura
             </DialogTitle>
+            <DialogDescription>
+              Revisa los detalles de la factura antes de crearla
+            </DialogDescription>
           </DialogHeader>
           
           <div className="space-y-4 py-4">

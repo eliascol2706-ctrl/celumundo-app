@@ -445,6 +445,34 @@ export function Closures() {
       sales: closure.total,
     }));
 
+    // NUEVO: Calcular abonos de créditos del mes
+    const currentMonthCreditPayments = creditPayments.filter(payment => {
+      if (!payment.date) return false;
+      const paymentDate = extractColombiaDate(payment.date);
+      return paymentDate.substring(0, 7) === currentMonthStr;
+    });
+    const totalCreditPayments = currentMonthCreditPayments.reduce((sum, p) => sum + p.amount, 0);
+
+    // NUEVO: Calcular ganancias de facturas a crédito del mes
+    let profitFromCredit = 0;
+    currentMonthCreditInvoices.forEach(invoice => {
+      // Calcular ingresos
+      const revenue = invoice.total || 0;
+
+      // Calcular costos
+      let cost = 0;
+      if (invoice.items && Array.isArray(invoice.items)) {
+        invoice.items.forEach((item: any) => {
+          const product = products.find(p => p.id === item.productId);
+          if (product && product.current_cost) {
+            cost += product.current_cost * item.quantity;
+          }
+        });
+      }
+
+      profitFromCredit += (revenue - cost);
+    });
+
     return {
       closures: currentMonthClosures,
       totalRevenue,
@@ -460,7 +488,9 @@ export function Closures() {
       previousMonthNetRevenue,
       totalProductCost,
       realProfit,
-      serviceRevenue: currentMonthServiceRevenue, // NUEVO: Ingresos de servicio técnico
+      serviceRevenue: currentMonthServiceRevenue, // Ingresos de servicio técnico
+      totalCreditPayments, // NUEVO: Total de abonos de créditos del mes
+      profitFromCredit, // NUEVO: Ganancias de facturas a crédito del mes
     };
   };
 
@@ -783,15 +813,14 @@ export function Closures() {
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
-                <table className="w-full">
+<table className="w-full">
                   <thead>
                     <tr className="border-b border-border">
                       <th className="text-left py-2 px-3 text-sm font-medium">Fecha</th>
                       <th className="text-center py-2 px-3 text-sm font-medium">Facturas</th>
-                      <th className="text-right py-2 px-3 text-sm font-medium">Efectivo</th>
-                      <th className="text-right py-2 px-3 text-sm font-medium">Transferencias</th>
-                      <th className="text-right py-2 px-3 text-sm font-medium">Total</th>
-                      <th className="text-right py-2 px-3 text-sm font-medium">Ganancias</th>
+                      <th className="text-right py-2 px-3 text-sm font-medium">Total Ingresos</th>
+                      <th className="text-right py-2 px-3 text-sm font-medium">💰 Del Día</th>
+                      <th className="text-right py-2 px-3 text-sm font-medium">📊 Por Crédito</th>
                       <th className="text-left py-2 px-3 text-sm font-medium">Cerrado por</th>
                     </tr>
                   </thead>
@@ -805,26 +834,32 @@ export function Closures() {
 
                       return (
                         <>
-                          {paginatedClosures.map((closure) => (
-                            <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
-                              <td className="py-2 px-3 text-sm">
-                                {new Date(closure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}
-                              </td>
-                              <td className="py-2 px-3 text-center text-sm">{closure.total_invoices}</td>
-                              <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_cash)}</td>
-                              <td className="py-2 px-3 text-right text-sm">COP {formatCOP(closure.total_transfer)}</td>
-                              <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
-                                COP {formatCOP(closure.total)}
-                              </td>
-                              <td className="py-2 px-3 text-right text-sm font-bold text-blue-600 dark:text-blue-400">
-                                COP {formatCOP(closure.total_profit || 0)}
-                              </td>
-                              <td className="py-2 px-3 text-sm">{closure.closed_by}</td>
-                            </tr>
-                          ))}
+                          {paginatedClosures.map((closure) => {
+                            const profitGenerated = closure.profit_generated || 0;
+                            const profitCollected = closure.profit_collected || 0;
+
+                            return (
+                              <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
+                                <td className="py-2 px-3 text-sm">
+                                  {new Date(closure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}
+                                </td>
+                                <td className="py-2 px-3 text-center text-sm">{closure.total_invoices}</td>
+                                <td className="py-2 px-3 text-right text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                                  COP {formatCOP(closure.total)}
+                                </td>
+                                <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
+                                  COP {formatCOP(profitCollected)}
+                                </td>
+                                <td className="py-2 px-3 text-right text-sm font-bold text-blue-600 dark:text-blue-400">
+                                  COP {formatCOP(profitGenerated)}
+                                </td>
+                                <td className="py-2 px-3 text-sm">{closure.closed_by}</td>
+                              </tr>
+                            );
+                          })}
                           {paginatedClosures.length === 0 && (
                             <tr>
-                              <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                              <td colSpan={6} className="py-8 text-center text-muted-foreground">
                                 No hay cierres registrados
                               </td>
                             </tr>
@@ -1025,7 +1060,9 @@ export function Closures() {
                       <th className="text-left py-2 px-3 text-sm font-medium">Mes</th>
                       <th className="text-center py-2 px-3 text-sm font-medium">Año</th>
                       <th className="text-center py-2 px-3 text-sm font-medium">Facturas</th>
-                      <th className="text-right py-2 px-3 text-sm font-medium">Total</th>
+                      <th className="text-right py-2 px-3 text-sm font-medium">Total Ingresos</th>
+                      <th className="text-right py-2 px-3 text-sm font-medium">💰 Del Día</th>
+                      <th className="text-right py-2 px-3 text-sm font-medium">📊 Por Crédito</th>
                       <th className="text-left py-2 px-3 text-sm font-medium">Cerrado por</th>
                     </tr>
                   </thead>
@@ -1039,22 +1076,33 @@ export function Closures() {
 
                       return (
                         <>
-                          {paginatedClosures.map((closure) => (
-                            <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
-                              <td className="py-2 px-3 text-sm">
-                                {new Date(closure.month + '-01').toLocaleDateString('es-ES', { month: 'long', timeZone: 'UTC' })}
-                              </td>
-                              <td className="py-2 px-3 text-center text-sm">{closure.year}</td>
-                              <td className="py-2 px-3 text-center text-sm">{closure.totalInvoices}</td>
-                              <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
-                                COP {formatCOP(closure.totalRevenue)}
-                              </td>
-                              <td className="py-2 px-3 text-sm">{closure.closedBy}</td>
-                            </tr>
-                          ))}
+                          {paginatedClosures.map((closure) => {
+                            const profitGenerated = closure.profit_generated || 0;
+                            const profitCollected = closure.profit_collected || 0;
+
+                            return (
+                              <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
+                                <td className="py-2 px-3 text-sm">
+                                  {new Date(closure.month + '-01').toLocaleDateString('es-ES', { month: 'long', timeZone: 'UTC' })}
+                                </td>
+                                <td className="py-2 px-3 text-center text-sm">{closure.year}</td>
+                                <td className="py-2 px-3 text-center text-sm">{closure.totalInvoices}</td>
+                                <td className="py-2 px-3 text-right text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                                  COP {formatCOP(closure.totalRevenue)}
+                                </td>
+                                <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
+                                  COP {formatCOP(profitCollected)}
+                                </td>
+                                <td className="py-2 px-3 text-right text-sm font-bold text-blue-600 dark:text-blue-400">
+                                  COP {formatCOP(profitGenerated)}
+                                </td>
+                                <td className="py-2 px-3 text-sm">{closure.closedBy}</td>
+                              </tr>
+                            );
+                          })}
                           {paginatedClosures.length === 0 && (
                             <tr>
-                              <td colSpan={5} className="py-8 text-center text-muted-foreground">
+                              <td colSpan={7} className="py-8 text-center text-muted-foreground">
                                 No hay cierres mensuales registrados
                               </td>
                             </tr>

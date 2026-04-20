@@ -4,9 +4,10 @@ import { getCurrentCompany } from '../lib/supabase';
 interface ThermalInvoicePrintProps {
   invoice: any;
   creditPayments?: any[];
+  products?: any[];
 }
 
-export function ThermalInvoicePrint({ invoice, creditPayments = [] }: ThermalInvoicePrintProps) {
+export function ThermalInvoicePrint({ invoice, creditPayments = [], products = [] }: ThermalInvoicePrintProps) {
   const companyName = getCurrentCompany() === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
   
   return (
@@ -143,7 +144,28 @@ export function ThermalInvoicePrint({ invoice, creditPayments = [] }: ThermalInv
                     fontWeight: 'bold',
                     marginBottom: '1mm',
                   }}>IDs:</div>
-                  <div>{item.unitIds.join(', ')}</div>
+                  <div style={{ paddingLeft: '1mm' }}>
+                    {item.unitIds.map((id: string, idx: number) => {
+                      // Buscar el producto para obtener la nota
+                      const product = products.find(p => p.id === item.productId);
+                      let note = '';
+
+                      if (product && product.registered_ids) {
+                        const idObj = product.registered_ids.find((regId: any) => regId.id === id);
+                        if (idObj && idObj.note) {
+                          note = idObj.note;
+                        }
+                      }
+
+                      return (
+                        <span key={idx}>
+                          {idx > 0 && ' | '}
+                          <span style={{ fontWeight: 'bold' }}>{id}</span>
+                          {note && <span style={{ fontStyle: 'italic' }}> - ({note})</span>}
+                        </span>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>

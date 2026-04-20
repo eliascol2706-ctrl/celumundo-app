@@ -20,6 +20,7 @@ import {
   type CreditPayment,
   supabase
 } from '../lib/supabase';
+import { isElectron, onGlobalShortcut, removeGlobalShortcutListener } from '../lib/electron-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -32,6 +33,8 @@ import { jsPDF } from 'jspdf';
 import { ProductInfoDialog } from '../components/ProductInfoDialog';
 import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
 import { includesIgnoreAccents } from '../lib/string-utils';
+import { printThermalInvoice as printThermalDirect } from '../lib/thermal-printer';
+import { printPDFInvoice } from '../lib/pdf-printer';
 
 interface InvoiceItem {
   productId: string;
@@ -342,6 +345,161 @@ export function Invoices() {
       }
     };
   }, [isCreateDialogOpen, barcodeBuffer, products, invoiceType, invoiceItems]);
+
+  // Atajos de teclado para agilizar facturación
+  useEffect(() => {
+    // Función unificada para manejar atajos de teclado
+    const processShortcut = (key: string) => {
+      console.log('⌨️ Atajo recibido:', key, 'Dialog abierto:', isCreateDialogOpen, 'Payment dialog:', isPaymentDialogOpen);
+
+      // Solo cuando el diálogo de creación o pago está abierto
+      if (!isCreateDialogOpen && !isPaymentDialogOpen) return;
+
+      // Atajos solo cuando está el diálogo de creación (no el de pago)
+      if (isCreateDialogOpen && !isPaymentDialogOpen) {
+        // F1: Agregar producto
+        if (key === 'F1') {
+          console.log('✅ F1 - Agregar producto');
+          if (currentItem.productId && currentItem.price) {
+            handleAddItem();
+          } else {
+            handleOpenProductSelectDialog();
+          }
+          return;
+        }
+
+        // F2: Modificar precio del último producto
+        if (key === 'F2') {
+          console.log('✅ F2 - Editar precio');
+          if (invoiceItems.length > 0) {
+            const lastIndex = invoiceItems.length - 1;
+            const newPrice = prompt(`Nuevo precio para ${invoiceItems[lastIndex].productName}:`, invoiceItems[lastIndex].price.toString());
+            if (newPrice !== null && !isNaN(parseFloat(newPrice))) {
+              handleUpdateItemPrice(lastIndex, parseFloat(newPrice));
+              toast.success('Precio actualizado');
+            }
+          }
+          return;
+        }
+
+        // F3: Modificar cantidad del último producto
+        if (key === 'F3') {
+          console.log('✅ F3 - Editar cantidad');
+          if (invoiceItems.length > 0) {
+            const lastIndex = invoiceItems.length - 1;
+            const newQty = prompt(`Nueva cantidad para ${invoiceItems[lastIndex].productName}:`, invoiceItems[lastIndex].quantity.toString());
+            if (newQty !== null && !isNaN(parseInt(newQty))) {
+              handleUpdateItemQuantity(lastIndex, parseInt(newQty));
+              toast.success('Cantidad actualizada');
+            }
+          }
+          return;
+        }
+
+        // F4: Remover último producto
+        if (key === 'F4') {
+          console.log('✅ F4 - Quitar producto');
+          if (invoiceItems.length > 0) {
+            const lastIndex = invoiceItems.length - 1;
+            handleRemoveItem(lastIndex);
+            toast.success('Producto removido');
+          }
+          return;
+        }
+
+        // Enter: Finalizar factura
+        if (key === 'Enter') {
+          console.log('✅ Enter - Finalizar factura');
+          if (invoiceItems.length > 0 && !isSubmitting) {
+            const fakeEvent = new Event('submit', { bubbles: true, cancelable: true });
+            handleSubmit(fakeEvent as any);
+          }
+          return;
+        }
+      }
+
+      // F5-F9: Métodos de pago (solo cuando el diálogo de pago está abierto)
+      if (isPaymentDialogOpen) {
+        const total = calculateTotals().total;
+
+        if (key === 'F5') {
+          console.log('✅ F5 - Efectivo');
+          setPaymentData({ cash: total, transfer: 0, other: 0, note: '' });
+          toast.success('Método: Efectivo');
+          return;
+        }
+
+        if (key === 'F6') {
+          console.log('✅ F6 - Transferencia');
+          setPaymentData({ cash: 0, transfer: total, other: 0, note: '' });
+          toast.success('Método: Transferencia');
+          return;
+        }
+
+        if (key === 'F7') {
+          console.log('✅ F7 - Nequi');
+          setPaymentData({ cash: 0, transfer: 0, other: total, note: 'Nequi' });
+          toast.success('Método: Nequi');
+          return;
+        }
+
+        if (key === 'F8') {
+          console.log('✅ F8 - Daviplata');
+          setPaymentData({ cash: 0, transfer: 0, other: total, note: 'Daviplata' });
+          toast.success('Método: Daviplata');
+          return;
+        }
+
+        if (key === 'F9') {
+          console.log('✅ F9 - Mixto');
+          const half = total / 2;
+          setPaymentData({ cash: half, transfer: half, other: 0, note: '' });
+          toast.success('Método: Mixto');
+          return;
+        }
+      }
+    };
+
+    // Handler para eventos de teclado del navegador
+    const handleKeyboardShortcuts = (e: KeyboardEvent) => {
+      // No capturar si está escribiendo en inputs (excepto teclas F)
+      const isTyping = document.activeElement?.tagName === 'INPUT' ||
+                      document.activeElement?.tagName === 'TEXTAREA';
+
+      // Para teclas F, siempre procesarlas
+      if (e.key.startsWith('F') && /^F([1-9]|1[0-2])$/.test(e.key)) {
+        e.preventDefault();
+        processShortcut(e.key);
+        return;
+      }
+
+      // Para Enter, solo si no está escribiendo
+      if (e.key === 'Enter' && !isTyping) {
+        e.preventDefault();
+        processShortcut(e.key);
+        return;
+      }
+    };
+
+    // Registrar listener de teclado normal
+    document.addEventListener('keydown', handleKeyboardShortcuts);
+
+    // Si estamos en Electron, también registrar listener global
+    if (isElectron()) {
+      console.log('🖥️ Electron detectado - Registrando atajos globales');
+      onGlobalShortcut((key) => {
+        console.log('🌐 Atajo global de Electron:', key);
+        processShortcut(key);
+      });
+    }
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyboardShortcuts);
+      if (isElectron()) {
+        removeGlobalShortcutListener();
+      }
+    };
+  }, [isCreateDialogOpen, isPaymentDialogOpen, currentItem, invoiceItems, isSubmitting, handleSubmit, handleAddItem, handleOpenProductSelectDialog, handleUpdateItemPrice, handleUpdateItemQuantity, handleRemoveItem, calculateTotals, setPaymentData]);
 
   // Escuchar evento personalizado para abrir el diálogo de crear factura desde el botón flotante
   useEffect(() => {
@@ -802,6 +960,7 @@ export function Invoices() {
 
     // Si NO es crédito ni pendiente, abrir diálogo de método de pago
     const { total } = calculateTotals();
+    // Pre-llenar efectivo por defecto
     setPaymentData({
       cash: total,
       transfer: 0,
@@ -1380,6 +1539,30 @@ export function Invoices() {
   const handlePrint = async () => {
     if (!invoiceToPrint) return;
 
+    try {
+      // Cargar los abonos si es factura a crédito
+      let payments: CreditPayment[] = [];
+      if (invoiceToPrint.is_credit) {
+        payments = await getCreditPaymentsByInvoice(invoiceToPrint.id);
+      }
+
+      // Usar el nuevo servicio de impresión directa
+      await printPDFInvoice({
+        invoice: invoiceToPrint,
+        creditPayments: payments,
+        products: products,
+      });
+
+      toast.success('Factura PDF impresa exitosamente');
+    } catch (error: any) {
+      toast.error(error.message || 'Error al imprimir factura');
+    }
+  };
+
+  // DEPRECATED: Old jsPDF function - keeping for reference, can be removed later
+  const handlePrint_OLD = async () => {
+    if (!invoiceToPrint) return;
+
     // Cargar los abonos si es factura a crédito
     let payments: CreditPayment[] = [];
     if (invoiceToPrint.is_credit) {
@@ -1427,15 +1610,34 @@ export function Invoices() {
       y += 5;
       doc.text(`  Cantidad: ${item.quantity} x ${formatCOP(item.price)} = ${formatCOP(item.total)}`, 10, y);
       y += 5;
-      
-      // Mostrar IDs si existen
+
+      // Mostrar IDs con notas si existen
       if (item.unitIds && item.unitIds.length > 0) {
         doc.setFontSize(8);
-        doc.text(`  IDs: ${item.unitIds.join(', ')}`, 10, y);
+
+        // Buscar el producto para obtener las notas de las IDs
+        const product = products.find(p => p.id === item.productId);
+
+        // Construir la línea con todas las IDs y sus notas
+        const idsWithNotes = item.unitIds.map((id: string) => {
+          let note = '';
+
+          // Buscar la nota en registered_ids del producto
+          if (product && product.registered_ids) {
+            const idObj = product.registered_ids.find((regId: any) => regId.id === id);
+            if (idObj && idObj.note) {
+              note = idObj.note;
+            }
+          }
+
+          return note ? `${id} - (${note})` : id;
+        }).join(' | ');
+
+        doc.text(`  IDs: ${idsWithNotes}`, 10, y);
         y += 5;
         doc.setFontSize(9);
       }
-      
+
       y += 3;
     });
 
@@ -1524,46 +1726,27 @@ export function Invoices() {
     toast.success('Abriendo vista de impresión');
   };
 
-  const handleThermalPrint = () => {
-    if (!thermalPrintRef.current) return;
-    
-    // Crear un iframe temporal para la impresión
-    const printFrame = document.createElement('iframe');
-    printFrame.style.position = 'absolute';
-    printFrame.style.width = '0';
-    printFrame.style.height = '0';
-    printFrame.style.border = 'none';
-    
-    document.body.appendChild(printFrame);
-    
-    const printDocument = printFrame.contentDocument || printFrame.contentWindow?.document;
-    if (!printDocument) return;
-    
-    // Copiar TODO el contenido del ref (incluye el <style> del componente)
-    printDocument.open();
-    printDocument.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>Impresión Térmica</title>
-        </head>
-        <body>
-          ${thermalPrintRef.current.innerHTML}
-        </body>
-      </html>
-    `);
-    printDocument.close();
-    
-    // Esperar a que se cargue el contenido
-    setTimeout(() => {
-      printFrame.contentWindow?.print();
-      
-      // Limpiar el iframe después de imprimir
-      setTimeout(() => {
-        document.body.removeChild(printFrame);
-      }, 100);
-    }, 250);
+  const handleThermalPrint = async () => {
+    if (!invoiceToPrint) return;
+
+    try {
+      // Cargar los abonos si es factura a crédito
+      let payments: CreditPayment[] = [];
+      if (invoiceToPrint.is_credit) {
+        payments = await getCreditPaymentsByInvoice(invoiceToPrint.id);
+      }
+
+      // Usar el nuevo servicio de impresión directa térmica
+      await printThermalDirect({
+        invoice: invoiceToPrint,
+        creditPayments: payments,
+        products: products,
+      });
+
+      toast.success('Factura térmica impresa exitosamente');
+    } catch (error: any) {
+      toast.error(error.message || 'Error al imprimir factura');
+    }
   };
 
   const handleDownloadPDF = async () => {
@@ -1616,15 +1799,34 @@ export function Invoices() {
       y += 5;
       doc.text(`  Cantidad: ${item.quantity} x ${formatCOP(item.price)} = ${formatCOP(item.total)}`, 10, y);
       y += 5;
-      
-      // Mostrar IDs si existen
+
+      // Mostrar IDs con notas si existen
       if (item.unitIds && item.unitIds.length > 0) {
         doc.setFontSize(8);
-        doc.text(`  IDs: ${item.unitIds.join(', ')}`, 10, y);
+
+        // Buscar el producto para obtener las notas de las IDs
+        const product = products.find(p => p.id === item.productId);
+
+        // Construir la línea con todas las IDs y sus notas
+        const idsWithNotes = item.unitIds.map((id: string) => {
+          let note = '';
+
+          // Buscar la nota en registered_ids del producto
+          if (product && product.registered_ids) {
+            const idObj = product.registered_ids.find((regId: any) => regId.id === id);
+            if (idObj && idObj.note) {
+              note = idObj.note;
+            }
+          }
+
+          return note ? `${id} - (${note})` : id;
+        }).join(' | ');
+
+        doc.text(`  IDs: ${idsWithNotes}`, 10, y);
         y += 5;
         doc.setFontSize(9);
       }
-      
+
       y += 3;
     });
 
@@ -2579,6 +2781,20 @@ export function Invoices() {
               </div>
             </div>
 
+            {/* Indicador de Atajos de Teclado */}
+            <div className="px-6 pb-2">
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/30 rounded-lg border border-blue-200 dark:border-blue-800">
+                <p className="text-xs font-semibold text-blue-700 dark:text-blue-400 mb-2">⌨️ Atajos de Teclado:</p>
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-blue-600 dark:text-blue-300">
+                  <span><kbd className="px-1 py-0.5 bg-white dark:bg-blue-900 rounded border border-blue-300 dark:border-blue-700 font-mono">F1</kbd> Agregar producto</span>
+                  <span><kbd className="px-1 py-0.5 bg-white dark:bg-blue-900 rounded border border-blue-300 dark:border-blue-700 font-mono">F2</kbd> Editar precio último</span>
+                  <span><kbd className="px-1 py-0.5 bg-white dark:bg-blue-900 rounded border border-blue-300 dark:border-blue-700 font-mono">F3</kbd> Editar cantidad último</span>
+                  <span><kbd className="px-1 py-0.5 bg-white dark:bg-blue-900 rounded border border-blue-300 dark:border-blue-700 font-mono">F4</kbd> Quitar último producto</span>
+                  <span><kbd className="px-1 py-0.5 bg-white dark:bg-blue-900 rounded border border-blue-300 dark:border-blue-700 font-mono">Enter</kbd> Finalizar factura</span>
+                </div>
+              </div>
+            </div>
+
             <DialogFooter className="border-t border-border pt-4 mt-4">
               <Button
                 type="button"
@@ -2685,6 +2901,18 @@ export function Invoices() {
                   Diferencia: {formatCOP(Math.abs((paymentData.cash + paymentData.transfer + paymentData.other) - calculateTotals().total))}
                 </p>
               )}
+            </div>
+
+            {/* Indicador de Atajos de Método de Pago */}
+            <div className="p-3 bg-green-50 dark:bg-green-950/30 rounded-lg border border-green-200 dark:border-green-800">
+              <p className="text-xs font-semibold text-green-700 dark:text-green-400 mb-2">⌨️ Atajos rápidos de pago:</p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-xs text-green-600 dark:text-green-300">
+                <span><kbd className="px-1 py-0.5 bg-white dark:bg-green-900 rounded border border-green-300 dark:border-green-700 font-mono">F5</kbd> Efectivo</span>
+                <span><kbd className="px-1 py-0.5 bg-white dark:bg-green-900 rounded border border-green-300 dark:border-green-700 font-mono">F6</kbd> Transferencia</span>
+                <span><kbd className="px-1 py-0.5 bg-white dark:bg-green-900 rounded border border-green-300 dark:border-green-700 font-mono">F7</kbd> Nequi</span>
+                <span><kbd className="px-1 py-0.5 bg-white dark:bg-green-900 rounded border border-green-300 dark:border-green-700 font-mono">F8</kbd> Daviplata</span>
+                <span><kbd className="px-1 py-0.5 bg-white dark:bg-green-900 rounded border border-green-300 dark:border-green-700 font-mono">F9</kbd> Mixto (50/50)</span>
+              </div>
             </div>
           </div>
 
@@ -3413,9 +3641,10 @@ export function Invoices() {
 
           {invoiceToPrint && (
             <div ref={thermalPrintRef}>
-              <ThermalInvoicePrint 
-                invoice={invoiceToPrint} 
+              <ThermalInvoicePrint
+                invoice={invoiceToPrint}
                 creditPayments={creditPayments}
+                products={products}
               />
             </div>
           )}

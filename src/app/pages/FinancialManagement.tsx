@@ -56,6 +56,8 @@ import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
 import { jsPDF } from 'jspdf';
 import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
+import { printThermalInvoice as printThermalDirect } from '../lib/thermal-printer';
+import { printPDFInvoice } from '../lib/pdf-printer';
 import {
   LineChart,
   Line,
@@ -348,7 +350,32 @@ export function FinancialManagement() {
     setIsPrintDialogOpen(true);
   };
 
-  const handlePrintPDF = () => {
+  const handlePrintPDF = async () => {
+    if (!selectedInvoice) return;
+
+    try {
+      // Cargar pagos de crédito si aplica
+      let payments: CreditPayment[] = [];
+      if (selectedInvoice.is_credit) {
+        payments = await getCreditPaymentsByInvoice(selectedInvoice.id);
+      }
+
+      // Usar el nuevo servicio de impresión directa
+      await printPDFInvoice({
+        invoice: selectedInvoice,
+        creditPayments: payments,
+        products: products,
+      });
+
+      toast.success('Factura PDF impresa exitosamente');
+      setIsPrintDialogOpen(false);
+    } catch (error: any) {
+      toast.error(error.message || 'Error al imprimir factura');
+    }
+  };
+
+  // DEPRECATED: Old jsPDF function
+  const handlePrintPDF_OLD = () => {
     if (!selectedInvoice) return;
 
     const doc = new jsPDF();
@@ -423,7 +450,32 @@ export function FinancialManagement() {
     setIsPrintDialogOpen(false);
   };
 
-  const handleThermalPrint = () => {
+  const handleThermalPrint = async () => {
+    if (!selectedInvoice) return;
+
+    try {
+      // Cargar pagos de crédito si aplica
+      let payments: CreditPayment[] = [];
+      if (selectedInvoice.is_credit) {
+        payments = await getCreditPaymentsByInvoice(selectedInvoice.id);
+      }
+
+      // Usar el nuevo servicio de impresión directa térmica
+      await printThermalDirect({
+        invoice: selectedInvoice,
+        creditPayments: payments,
+        products: products,
+      });
+
+      toast.success('Factura térmica impresa exitosamente');
+      setIsPrintDialogOpen(false);
+    } catch (error: any) {
+      toast.error(error.message || 'Error al imprimir factura');
+    }
+  };
+
+  // DEPRECATED: Old iframe printing function
+  const handleThermalPrint_OLD = () => {
     setIsPrintDialogOpen(false);
     setIsThermalPrintDialogOpen(true);
 
@@ -1707,6 +1759,7 @@ export function FinancialManagement() {
               <ThermalInvoicePrint
                 invoice={selectedInvoice}
                 creditPayments={creditPayments}
+                products={products}
               />
             </div>
           )}

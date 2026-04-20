@@ -26,7 +26,8 @@ import {
   RefreshCw,
   Shield,
   Wallet,
-  Wrench
+  Wrench,
+  Printer
 } from 'lucide-react';
 import { useState, useEffect, useRef } from 'react';
 import { getCurrentUser, logoutUser, getSession, getProducts, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession, canCreateInvoice } from '../lib/supabase';
@@ -36,6 +37,9 @@ import { Button } from '../components/ui/button';
 import { Label } from '../components/ui/label';
 import { formatCOP } from '../lib/currency';
 import { includesIgnoreAccents } from '../lib/string-utils';
+import { getPrinterConfig, savePrinterConfig, getAvailablePrinters } from '../lib/printer-config';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { isPrintingAvailable } from '../lib/platform-detector';
 
 const adminNavigation = [
   // Sección 1: Gestión de Inventario
@@ -146,6 +150,12 @@ export function Layout() {
   const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [showSellerPassword, setShowSellerPassword] = useState(false);
 
+  // Estados para configuración de impresoras
+  const [thermalPrinter, setThermalPrinter] = useState("");
+  const [labelPrinter, setLabelPrinter] = useState("");
+  const [pdfPrinter, setPdfPrinter] = useState("");
+  const [availablePrinters, setAvailablePrinters] = useState<string[]>([]);
+
   // Cargar productos cuando se abre el diálogo
   useEffect(() => {
     if (productSearchDialogOpen && currentUser?.role === 'seller') {
@@ -157,10 +167,11 @@ export function Layout() {
     }
   }, [productSearchDialogOpen, currentUser]);
 
-  // Cargar usuarios cuando se abre el diálogo de configuración
+  // Cargar usuarios e impresoras cuando se abre el diálogo de configuración
   useEffect(() => {
     if (settingsDialogOpen && currentUser?.role === 'admin' && session) {
       loadUsers();
+      loadPrinterConfig();
     }
   }, [settingsDialogOpen]);
 
@@ -175,6 +186,24 @@ export function Layout() {
     setAdminPassword(admin?.password || '');
     setSellerUsername(seller?.username || '');
     setSellerPassword(seller?.password || '');
+  };
+
+  const loadPrinterConfig = async () => {
+    // Solo cargar en Electron
+    if (!isPrintingAvailable()) {
+      setAvailablePrinters([]);
+      return;
+    }
+
+    // Cargar configuración guardada
+    const config = await getPrinterConfig();
+    setThermalPrinter(config.thermal);
+    setLabelPrinter(config.labels);
+    setPdfPrinter(config.pdf);
+
+    // Cargar impresoras disponibles
+    const printers = await getAvailablePrinters();
+    setAvailablePrinters(printers);
   };
 
   const handleSaveSettings = async () => {
@@ -266,6 +295,13 @@ export function Layout() {
         const updatedUser = { ...currentUser, username: adminUsername };
         saveSession({ user: updatedUser, company: session.company });
       }
+
+      // Guardar configuración de impresoras
+      await savePrinterConfig({
+        thermal: thermalPrinter || '',
+        labels: labelPrinter || '',
+        pdf: pdfPrinter || '',
+      });
 
       alert('✅ Configuración guardada exitosamente');
       setSettingsDialogOpen(false);
@@ -946,6 +982,105 @@ export function Layout() {
                       </button>
                     </div>
                   </div>
+                </div>
+              </div>
+
+              {/* Sección de Impresoras */}
+              <div className="border border-purple-200 dark:border-purple-800 rounded-lg p-6 bg-purple-50 dark:bg-purple-950/30">
+                <div className="flex items-center gap-2 mb-4">
+                  <Printer className="h-5 w-5 text-purple-600" />
+                  <h3 className="text-lg font-bold text-purple-900 dark:text-purple-100">
+                    Configuración de Impresoras
+                  </h3>
+                </div>
+
+                {/* Advertencia cuando está en navegador web */}
+                {!isPrintingAvailable() && (
+                  <div className="mb-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                    <div className="flex items-start gap-3">
+                      <div className="text-red-600 dark:text-red-400 mt-0.5 text-xl">⚠️</div>
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-red-900 dark:text-red-100 mb-1">
+                          Impresión No Disponible
+                        </p>
+                        <p className="text-sm text-red-800 dark:text-red-200">
+                          La impresión directa solo está disponible en la aplicación de escritorio.
+                          Por favor, descarga e instala la versión de escritorio para poder imprimir facturas,
+                          etiquetas y documentos.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="thermalPrinter">Impresora Térmica (Facturas)</Label>
+                    <Select value={thermalPrinter || undefined} onValueChange={setThermalPrinter} disabled={isSavingSettings || !isPrintingAvailable()}>
+                      <SelectTrigger id="thermalPrinter" className="bg-white dark:bg-zinc-900">
+                        <SelectValue placeholder="Sin configurar" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white dark:bg-zinc-900">
+                        {availablePrinters.map((printer) => (
+                          <SelectItem key={printer} value={printer}>
+                            {printer}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Impresora para facturas y comprobantes térmicos
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="labelPrinter">Impresora de Etiquetas</Label>
+                    <Select value={labelPrinter || undefined} onValueChange={setLabelPrinter} disabled={isSavingSettings || !isPrintingAvailable()}>
+                      <SelectTrigger id="labelPrinter" className="bg-white dark:bg-zinc-900">
+                        <SelectValue placeholder="Sin configurar" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white dark:bg-zinc-900">
+                        {availablePrinters.map((printer) => (
+                          <SelectItem key={printer} value={printer}>
+                            {printer}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Impresora para etiquetas de productos
+                    </p>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="pdfPrinter">Impresora PDF (Documentos)</Label>
+                    <Select value={pdfPrinter || undefined} onValueChange={setPdfPrinter} disabled={isSavingSettings || !isPrintingAvailable()}>
+                      <SelectTrigger id="pdfPrinter" className="bg-white dark:bg-zinc-900">
+                        <SelectValue placeholder="Sin configurar" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white dark:bg-zinc-900">
+                        {availablePrinters.map((printer) => (
+                          <SelectItem key={printer} value={printer}>
+                            {printer}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-xs text-muted-foreground">
+                      Impresora para facturas PDF y documentos formales
+                    </p>
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={loadPrinterConfig}
+                    disabled={isSavingSettings || !isPrintingAvailable()}
+                    className="w-full"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Actualizar lista de impresoras
+                  </Button>
                 </div>
               </div>
 
