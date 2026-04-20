@@ -60,6 +60,8 @@ import { jsPDF } from "jspdf";
 import JsBarcode from "jsbarcode";
 import { includesIgnoreAccents } from "../lib/string-utils";
 import { printLabels } from "../lib/label-printer";
+import { isPrintingAvailable } from "../lib/platform-detector";
+import { getPrinterConfig, printDirect } from "../lib/printer-config";
 
 interface MovementItem {
   productId: string;
@@ -523,15 +525,172 @@ export function Movements() {
     }
   };
 
-  const handlePrint = () => {
-    if (printRef.current) {
-      const printContent = printRef.current.innerHTML;
-      const originalContent = document.body.innerHTML;
+  const handlePrint = async () => {
+    // Validar plataforma
+    if (!isPrintingAvailable()) {
+      toast.error('La impresión solo está disponible en la aplicación de escritorio');
+      return;
+    }
 
-      document.body.innerHTML = printContent;
-      window.print();
-      document.body.innerHTML = originalContent;
-      window.location.reload();
+    if (!completedMovement) return;
+
+    try {
+      const config = await getPrinterConfig();
+
+      if (!config.pdf) {
+        toast.error('No se ha configurado una impresora PDF. Ve a Configuración para configurarla.');
+        return;
+      }
+
+      // Generar HTML del comprobante
+      const itemsHTML = completedMovement.items.map((item: any) => {
+        const idsHTML = item.unitIds && item.unitIds.length > 0
+          ? `<div style="margin-top: 8px;">
+              <p style="font-size: 9pt; font-weight: bold; color: #2563eb; margin-bottom: 4px;">
+                IDs de las Unidades:
+              </p>
+              <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+                ${item.unitIds.map((id: string) => `
+                  <span style="display: inline-block; padding: 2px 8px; background-color: #dbeafe; color: #1e40af; border-radius: 4px; font-size: 8pt; font-family: monospace;">
+                    ${id}
+                  </span>
+                `).join('')}
+              </div>
+            </div>`
+          : '';
+
+        return `
+          <div style="background-color: #f3f4f6; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+              <div style="flex: 1;">
+                <p style="font-weight: 500; margin-bottom: 4px;">
+                  ${item.productCode} - ${item.productName}
+                </p>
+                <p style="font-size: 10pt; color: #6b7280;">
+                  Cantidad: ${item.quantity} | Costo: COP ${formatCOP(item.finalCost)}
+                </p>
+                ${idsHTML}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+
+      const html = `
+        <!DOCTYPE html>
+        <html>
+          <head>
+            <meta charset="utf-8">
+            <style>
+              @page {
+                size: A4;
+                margin: 20mm;
+              }
+              * {
+                -webkit-print-color-adjust: exact;
+                print-color-adjust: exact;
+              }
+              body {
+                font-family: 'Arial', 'Helvetica', sans-serif;
+                margin: 0;
+                padding: 0;
+                color: #333;
+              }
+              .container {
+                max-width: 700px;
+                margin: 0 auto;
+                border: 1px solid #ddd;
+                border-radius: 8px;
+                padding: 30px;
+              }
+              .header {
+                text-align: center;
+                margin-bottom: 30px;
+              }
+              .title {
+                font-size: 24pt;
+                font-weight: bold;
+                margin-bottom: 10px;
+              }
+              .subtitle {
+                font-size: 16pt;
+                font-weight: 600;
+                color: #666;
+              }
+              .info-section {
+                margin-bottom: 24px;
+              }
+              .info-row {
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 8px;
+                padding-bottom: 8px;
+                border-bottom: 1px solid #e5e7eb;
+              }
+              .info-label {
+                font-weight: 500;
+              }
+              .info-value {
+                font-family: monospace;
+              }
+              .products-section {
+                border-top: 2px solid #ddd;
+                padding-top: 20px;
+              }
+              .products-title {
+                font-weight: 600;
+                font-size: 14pt;
+                margin-bottom: 16px;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="header">
+                <div class="title">CELUMUNDO VIP</div>
+                <div class="subtitle">
+                  COMPROBANTE DE ${completedMovement.type === "entry" ? "ENTRADA" : "SALIDA"}
+                </div>
+              </div>
+
+              <div class="info-section">
+                <div class="info-row">
+                  <span class="info-label">Referencia:</span>
+                  <span class="info-value">${completedMovement.reference}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Fecha:</span>
+                  <span>${completedMovement.date}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Usuario:</span>
+                  <span>${completedMovement.user}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Motivo:</span>
+                  <span>${completedMovement.reason}</span>
+                </div>
+              </div>
+
+              <div class="products-section">
+                <div class="products-title">Productos</div>
+                ${itemsHTML}
+              </div>
+            </div>
+          </body>
+        </html>
+      `;
+
+      const success = await printDirect(config.pdf, html, 'pdf');
+
+      if (!success) {
+        throw new Error('Error al enviar el documento a la impresora');
+      }
+
+      toast.success('Comprobante enviado a la impresora');
+    } catch (error: any) {
+      console.error('Error al imprimir:', error);
+      toast.error(error.message || 'Error al imprimir el comprobante');
     }
   };
 
@@ -645,8 +804,27 @@ export function Movements() {
   };
 
   // Función para imprimir etiquetas
-  const handlePrintLabels = () => {
+  const handlePrintLabels = async () => {
+    // Validar plataforma
+    if (!isPrintingAvailable()) {
+      toast.error('La impresión de etiquetas solo está disponible en la aplicación de escritorio');
+      return;
+    }
+
     if (!completedMovement) return;
+
+    // Validar que la impresora de etiquetas esté configurada
+    try {
+      const config = await getPrinterConfig();
+      if (!config.labels) {
+        toast.error('No se ha configurado una impresora de etiquetas. Ve a Configuración para configurarla.');
+        return;
+      }
+    } catch (error) {
+      console.error('Error al validar impresora:', error);
+      toast.error('Error al validar la configuración de la impresora');
+      return;
+    }
 
     let labelsHTML = "";
     let pageLabels: string[] = [];
@@ -1023,7 +1201,26 @@ export function Movements() {
 
   // Función para reimprimir etiquetas de un movimiento existente
   const handleReprintLabels = async () => {
+    // Validar plataforma
+    if (!isPrintingAvailable()) {
+      toast.error('La impresión de etiquetas solo está disponible en la aplicación de escritorio');
+      return;
+    }
+
     if (!selectedMovement) return;
+
+    // Validar que la impresora de etiquetas esté configurada
+    try {
+      const config = await getPrinterConfig();
+      if (!config.labels) {
+        toast.error('No se ha configurado una impresora de etiquetas. Ve a Configuración para configurarla.');
+        return;
+      }
+    } catch (error) {
+      console.error('Error al validar impresora:', error);
+      toast.error('Error al validar la configuración de la impresora');
+      return;
+    }
 
     const product = products.find(p => p.id === selectedMovement.product_id);
     if (!product) {
@@ -1549,7 +1746,8 @@ export function Movements() {
                             setSelectedIdsForReprint([]);
                             setReprintDialogOpen(true);
                           }}
-                          className="text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          disabled={!isPrintingAvailable()}
+                          className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           <Printer className="h-4 w-4 mr-1" />
                           Reimprimir
@@ -2156,6 +2354,23 @@ export function Movements() {
             </DialogDescription>
           </DialogHeader>
 
+          {/* Advertencia cuando está en web */}
+          {!isPrintingAvailable() && (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <div className="text-red-600 dark:text-red-400 mt-0.5">⚠️</div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+                    Impresión No Disponible
+                  </p>
+                  <p className="text-xs text-red-800 dark:text-red-200">
+                    La impresión solo está disponible en la aplicación de escritorio. Puedes descargar el PDF desde el navegador.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {completedMovement && (
             <div ref={printRef} className="py-4">
               <div className="border border-border rounded-lg p-6 bg-background">
@@ -2262,12 +2477,12 @@ export function Movements() {
               <Download className="h-4 w-4 mr-2" />
               Descargar PDF
             </Button>
-            <Button onClick={handlePrint}>
+            <Button onClick={handlePrint} disabled={!isPrintingAvailable()}>
               <Printer className="h-4 w-4 mr-2" />
               Imprimir
             </Button>
             {completedMovement && completedMovement.type === "entry" && (
-              <Button onClick={handleOpenLabelDialog}>
+              <Button onClick={handleOpenLabelDialog} disabled={!isPrintingAvailable()}>
                 <Tag className="h-4 w-4 mr-2" />
                 Imprimir Etiquetas
               </Button>
@@ -2285,6 +2500,23 @@ export function Movements() {
               Configure la cantidad de etiquetas para cada producto. Las etiquetas mostrarán el código completo con ID única.
             </DialogDescription>
           </DialogHeader>
+
+          {/* Advertencia cuando está en web */}
+          {!isPrintingAvailable() && (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <div className="text-red-600 dark:text-red-400 mt-0.5">⚠️</div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+                    Impresión No Disponible
+                  </p>
+                  <p className="text-xs text-red-800 dark:text-red-200">
+                    La impresión de etiquetas solo está disponible en la aplicación de escritorio.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {completedMovement && (
             <div className="space-y-4">
@@ -2356,7 +2588,8 @@ export function Movements() {
             <Button
               onClick={handlePrintLabels}
               disabled={
-                Object.values(labelQuantities).reduce((sum, qty) => sum + qty, 0) === 0
+                Object.values(labelQuantities).reduce((sum, qty) => sum + qty, 0) === 0 ||
+                !isPrintingAvailable()
               }
             >
               <Printer className="h-4 w-4 mr-2" />
@@ -2505,6 +2738,23 @@ export function Movements() {
             </DialogDescription>
           </DialogHeader>
 
+          {/* Advertencia cuando está en web */}
+          {!isPrintingAvailable() && (
+            <div className="bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg p-3">
+              <div className="flex items-start gap-2">
+                <div className="text-red-600 dark:text-red-400 mt-0.5">⚠️</div>
+                <div className="flex-1">
+                  <p className="text-sm font-medium text-red-900 dark:text-red-100 mb-1">
+                    Impresión No Disponible
+                  </p>
+                  <p className="text-xs text-red-800 dark:text-red-200">
+                    La impresión de etiquetas solo está disponible en la aplicación de escritorio.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {selectedMovement && (
             <div className="space-y-4">
               {/* Información del movimiento */}
@@ -2616,7 +2866,10 @@ export function Movements() {
             </Button>
             <Button
               onClick={handleReprintLabels}
-              disabled={reprintSelection === 'specific' && selectedIdsForReprint.length === 0}
+              disabled={
+                (reprintSelection === 'specific' && selectedIdsForReprint.length === 0) ||
+                !isPrintingAvailable()
+              }
             >
               <Printer className="h-4 w-4 mr-2" />
               Imprimir Etiquetas
