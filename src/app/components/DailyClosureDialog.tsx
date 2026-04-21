@@ -527,6 +527,21 @@ export function DailyClosureDialog({
                           Incluye Servicio Técnico
                         </p>
                       )}
+                      {dailyStats.exchanges && dailyStats.exchanges.length > 0 && (() => {
+                        const exchangeImpact = dailyStats.exchanges.reduce((sum, ex) => sum + (ex.price_difference || 0), 0);
+                        if (exchangeImpact !== 0) {
+                          return (
+                            <p className={`text-xs mt-1 font-medium ${
+                              exchangeImpact > 0
+                                ? 'text-emerald-600 dark:text-emerald-400'
+                                : 'text-orange-600 dark:text-orange-400'
+                            }`}>
+                              Excedente Cambios: COP {formatCOP(exchangeImpact)}
+                            </p>
+                          );
+                        }
+                        return null;
+                      })()}
                     </CardContent>
                   </Card>
 

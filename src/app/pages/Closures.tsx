@@ -263,6 +263,13 @@ export function Closures() {
     console.log(`[DEBUG Cierres] Órdenes de servicio técnico: ${todayServiceOrders.length}`);
     console.log(`[DEBUG Cierres] Ingresos servicio técnico: ${formatCOP(serviceRevenue)}`);
 
+    // Calcular impacto de cambios del día
+    const exchangeImpact = todayExchanges.reduce((sum, exchange) => {
+      return sum + (exchange.price_difference || 0);
+    }, 0);
+
+    console.log(`[DEBUG Cierres] Impacto de cambios: ${formatCOP(exchangeImpact)}`);
+
     return {
       totalInvoices,
       regularInvoices,
@@ -273,7 +280,7 @@ export function Closures() {
       grossRevenue,
       totalReturns,
       serviceRevenue, // NUEVO: Ingresos de servicio técnico
-      netRevenue: grossRevenue - totalReturns + serviceRevenue, // MODIFICADO: Incluir servicio técnico
+      netRevenue: grossRevenue - totalReturns + serviceRevenue + exchangeImpact, // MODIFICADO: Incluir servicio técnico y cambios
       totalProductsSold: todayInvoices
         .filter(inv => inv.status === 'paid')
         .reduce((sum, inv) => {
@@ -540,7 +547,7 @@ export function Closures() {
     });
 
     return Object.values(productSales)
-      .sort((a, b) => b.revenue - a.revenue)
+      .sort((a, b) => b.quantity - a.quantity)
       .slice(0, 10);
   };
 

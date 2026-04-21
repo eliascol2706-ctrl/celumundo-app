@@ -3338,7 +3338,7 @@ export const getExchangesStats = async () => {
   // Solo de cambios completados
   const totalPositiveDifference = completedExchanges
     .filter(e => e.price_difference > 0)
-    .reduce((sum, e) => sum + (e.payment_amount || 0), 0);
+    .reduce((sum, e) => sum + e.price_difference, 0);
 
   // Calcular diferencia total negativa (cuánto se les ha devuelto a los clientes)
   // Solo de cambios completados
@@ -3362,15 +3362,9 @@ export const calculateExchangeImpact = (exchanges: Exchange[]): number => {
   // Solo contar cambios completados (excluir pendientes y cancelados)
   const completedExchanges = exchanges.filter(ex => ex.status === 'completed');
 
-  // El impacto neto es la suma de todas las diferencias de precio que se cobraron
+  // El impacto neto es la suma de todas las diferencias de precio
   return completedExchanges.reduce((sum, ex) => {
-    // Solo contar las diferencias que se pagaron realmente
-    if (ex.price_difference > 0 && ex.payment_amount) {
-      return sum + ex.payment_amount;
-    } else if (ex.price_difference < 0) {
-      return sum + ex.price_difference; // Negativo, resta de ingresos
-    }
-    return sum;
+    return sum + ex.price_difference;
   }, 0);
 };
 
