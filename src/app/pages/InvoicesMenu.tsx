@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useEffect, useState } from 'react';
-import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, type CreditPayment, getCurrentUser, getCurrentCompany } from '../lib/supabase';
+import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges } from '../lib/supabase';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
@@ -27,7 +27,8 @@ export function InvoicesMenu() {
     totalCreditPending: 0,
     totalSalesToday: 0,
     cashToday: 0,
-    transferToday: 0
+    transferToday: 0,
+    exchangeImpactToday: 0
   });
   const [loading, setLoading] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
@@ -88,9 +89,10 @@ export function InvoicesMenu() {
   const loadStats = async () => {
     setLoading(true);
     try {
-      const [invoices, products] = await Promise.all([
+      const [invoices, products, exchanges] = await Promise.all([
         getInvoices(),
-        getAllProducts()
+        getAllProducts(),
+        getExchanges()
       ]);
       
       // Obtener fecha actual en zona horaria de Colombia (GMT-5)
@@ -135,6 +137,17 @@ export function InvoicesMenu() {
         return sum + (inv.payment_transfer || 0) + (inv.payment_other || 0);
       }, 0);
 
+      // Calcular impacto de cambios del día (solo cambios completados)
+      const exchangesToday = exchanges.filter(ex => {
+        if (!ex.date || ex.status !== 'completed') return false;
+        const exchangeDate = extractColombiaDate(ex.date);
+        return exchangeDate === todayStr;
+      });
+
+      const exchangeImpactToday = exchangesToday.reduce((sum, ex) => {
+        return sum + (ex.price_difference || 0);
+      }, 0);
+
       console.log('[InvoicesMenu] Stats calculadas:', {
         todayStr,
         regularToday,
@@ -143,6 +156,7 @@ export function InvoicesMenu() {
         totalSalesToday,
         cashToday,
         transferToday,
+        exchangeImpactToday,
         invoicesToday: invoicesToday.length,
         paidInvoicesToday: paidInvoicesToday.length
       });
@@ -154,7 +168,8 @@ export function InvoicesMenu() {
         totalCreditPending,
         totalSalesToday,
         cashToday,
-        transferToday
+        transferToday,
+        exchangeImpactToday
       });
 
       // Cargar TODAS las facturas (no solo las de hoy) para los filtros
@@ -687,8 +702,17 @@ export function InvoicesMenu() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{formatCOP(stats.totalSalesToday)}</div>
+              <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{formatCOP(stats.totalSalesToday + stats.exchangeImpactToday)}</div>
               <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-1">Solo facturas pagadas</p>
+              {stats.exchangeImpactToday !== 0 && (
+                <p className={`text-xs mt-1 font-medium ${
+                  stats.exchangeImpactToday > 0
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : 'text-orange-600 dark:text-orange-400'
+                }`}>
+                  Excedente Cambios: COP {formatCOP(stats.exchangeImpactToday)}
+                </p>
+              )}
             </CardContent>
           </Card>
 
