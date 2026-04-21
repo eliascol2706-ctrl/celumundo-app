@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Plus, Package, TrendingUp, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight, Trash2, Edit, CheckCircle, XCircle } from 'lucide-react';
+import { Search, Plus, Package, TrendingUp, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight, Trash2, Edit, CheckCircle, XCircle, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -8,8 +8,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Textarea } from '../components/ui/textarea';
 import { formatCOP } from '../lib/currency';
-import { getExchanges, getAllProducts, getInvoices, addExchange, deleteExchange, finalizeExchange, cancelExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, type Exchange, type Product, type Invoice } from '../lib/supabase';
-import { extractIds } from '../lib/unit-ids-utils';
+import { getExchanges, getAllProducts, getInvoices, addExchange, deleteExchange, finalizeExchange, cancelExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, type Exchange, type ExchangeProduct, type Product, type Invoice } from '../lib/supabase';
+import { extractIds, type UnitIdWithNote } from '../lib/unit-ids-utils';
 import { toast } from 'sonner';
 
 export default function Exchanges() {
@@ -39,18 +39,19 @@ export default function Exchanges() {
   // Formulario - Datos generales
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [invoiceSearch, setInvoiceSearch] = useState('');
-  
-  // Producto Original (que se devuelve)
-  const [originalProduct, setOriginalProduct] = useState<Product | null>(null);
-  const [originalQuantity, setOriginalQuantity] = useState(1);
-  const [originalPrice, setOriginalPrice] = useState(0);
-  const [originalUnitIds, setOriginalUnitIds] = useState<string[]>([]);
-  
-  // Producto Nuevo (que se lleva)
-  const [newProduct, setNewProduct] = useState<Product | null>(null);
-  const [newQuantity, setNewQuantity] = useState(1);
-  const [newPrice, setNewPrice] = useState(0);
-  const [newUnitIds, setNewUnitIds] = useState<string[]>([]);
+
+  // Arrays de productos
+  const [originalProducts, setOriginalProducts] = useState<ExchangeProduct[]>([]);
+  const [newProducts, setNewProducts] = useState<ExchangeProduct[]>([]);
+
+  // Estados temporales para agregar productos
+  const [tempProduct, setTempProduct] = useState<Product | null>(null);
+  const [tempQuantity, setTempQuantity] = useState(1);
+  const [tempPrice, setTempPrice] = useState(0);
+  const [tempUnitIds, setTempUnitIds] = useState<string[]>([]);
+
+  // Campo de nombre de cliente
+  const [customerName, setCustomerName] = useState('');
   
   // Diferencia de precio
   const [paymentMethod, setPaymentMethod] = useState(''); // Mantener por compatibilidad
@@ -62,10 +63,11 @@ export default function Exchanges() {
   // Modal de finalización de cambio pendiente
   const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false);
   const [exchangeToFinalize, setExchangeToFinalize] = useState<Exchange | null>(null);
-  const [finalizeNewProduct, setFinalizeNewProduct] = useState<Product | null>(null);
-  const [finalizeNewQuantity, setFinalizeNewQuantity] = useState(1);
-  const [finalizeNewPrice, setFinalizeNewPrice] = useState(0);
-  const [finalizeNewUnitIds, setFinalizeNewUnitIds] = useState<string[]>([]);
+  const [finalizeNewProducts, setFinalizeNewProducts] = useState<ExchangeProduct[]>([]);
+  const [finalizeTempProduct, setFinalizeTempProduct] = useState<Product | null>(null);
+  const [finalizeTempQuantity, setFinalizeTempQuantity] = useState(1);
+  const [finalizeTempPrice, setFinalizeTempPrice] = useState(0);
+  const [finalizeTempUnitIds, setFinalizeTempUnitIds] = useState<string[]>([]);
   const [finalizePaymentCash, setFinalizePaymentCash] = useState(0);
   const [finalizePaymentTransfer, setFinalizePaymentTransfer] = useState(0);
   const [finalizePaymentOther, setFinalizePaymentOther] = useState(0);
@@ -73,13 +75,24 @@ export default function Exchanges() {
   const itemsPerPage = 10;
   const currentUser = getCurrentUser();
 
+  // Helper functions para filtrar IDs según contexto
+  const getDisabledIds = (product: Product | null): UnitIdWithNote[] => {
+    if (!product || !product.registered_ids) return [];
+    return product.registered_ids.filter((idObj: UnitIdWithNote) => idObj.disabled === true);
+  };
+
+  const getAvailableIds = (product: Product | null): UnitIdWithNote[] => {
+    if (!product || !product.registered_ids) return [];
+    return product.registered_ids.filter((idObj: UnitIdWithNote) => !idObj.disabled);
+  };
+
   useEffect(() => {
     loadData();
   }, []);
 
   // Limpiar campos de pago cuando la diferencia es 0
   useEffect(() => {
-    if (originalProduct && newProduct) {
+    if (originalProducts.length > 0 && newProducts.length > 0) {
       const difference = calculatePriceDifference();
       if (difference === 0) {
         setPaymentCash(0);
@@ -87,7 +100,7 @@ export default function Exchanges() {
         setPaymentOther(0);
       }
     }
-  }, [originalProduct, newProduct, originalQuantity, newQuantity, originalPrice, newPrice]);
+  }, [originalProducts, newProducts]);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -119,19 +132,175 @@ export default function Exchanges() {
     setExchangeType('direct');
     setSelectedInvoice(null);
     setInvoiceSearch('');
-    setOriginalProduct(null);
-    setOriginalQuantity(1);
-    setOriginalPrice(0);
-    setOriginalUnitIds([]);
-    setNewProduct(null);
-    setNewQuantity(1);
-    setNewPrice(0);
-    setNewUnitIds([]);
+    setOriginalProducts([]);
+    setNewProducts([]);
+    setTempProduct(null);
+    setTempQuantity(1);
+    setTempPrice(0);
+    setTempUnitIds([]);
+    setCustomerName('');
     setPaymentMethod('');
     setPaymentCash(0);
     setPaymentTransfer(0);
     setPaymentOther(0);
     setNotes('');
+  };
+
+  const handleAddOriginalProduct = () => {
+    if (!tempProduct) {
+      toast.error('Selecciona un producto');
+      return;
+    }
+
+    if (tempQuantity <= 0) {
+      toast.error('La cantidad debe ser mayor a 0');
+      return;
+    }
+
+    // Validar IDs únicas si aplica
+    if (tempProduct.use_unit_ids && tempUnitIds.length !== tempQuantity) {
+      toast.error(`Debes seleccionar ${tempQuantity} ID(s) única(s)`);
+      return;
+    }
+
+    const newProduct: ExchangeProduct = {
+      productId: tempProduct.id,
+      productName: tempProduct.name,
+      quantity: tempQuantity,
+      price: tempPrice,
+      total: tempPrice * tempQuantity,
+      unitIds: tempUnitIds.length > 0 ? tempUnitIds : undefined,
+    };
+
+    setOriginalProducts([...originalProducts, newProduct]);
+
+    // Limpiar temporales
+    setTempProduct(null);
+    setTempQuantity(1);
+    setTempPrice(0);
+    setTempUnitIds([]);
+    setProductSelectorOpen(false);
+  };
+
+  const handleRemoveOriginalProduct = (index: number) => {
+    setOriginalProducts(originalProducts.filter((_, i) => i !== index));
+  };
+
+  const handleAddNewProduct = () => {
+    if (!tempProduct) {
+      toast.error('Selecciona un producto');
+      return;
+    }
+
+    if (tempQuantity <= 0) {
+      toast.error('La cantidad debe ser mayor a 0');
+      return;
+    }
+
+    // Validar stock
+    if (tempProduct.stock < tempQuantity) {
+      toast.error(`Stock insuficiente. Disponible: ${tempProduct.stock}`);
+      return;
+    }
+
+    // Validar IDs únicas si aplica
+    if (tempProduct.use_unit_ids) {
+      const availableIds = extractIds(tempProduct.registered_ids);
+      if (availableIds.length < tempQuantity) {
+        toast.error('No hay suficientes IDs únicas disponibles');
+        return;
+      }
+      if (tempUnitIds.length !== tempQuantity) {
+        toast.error(`Debes seleccionar ${tempQuantity} ID(s) única(s)`);
+        return;
+      }
+    }
+
+    const newProduct: ExchangeProduct = {
+      productId: tempProduct.id,
+      productName: tempProduct.name,
+      quantity: tempQuantity,
+      price: tempPrice,
+      total: tempPrice * tempQuantity,
+      unitIds: tempUnitIds.length > 0 ? tempUnitIds : undefined,
+    };
+
+    setNewProducts([...newProducts, newProduct]);
+
+    // Limpiar temporales
+    setTempProduct(null);
+    setTempQuantity(1);
+    setTempPrice(0);
+    setTempUnitIds([]);
+    setProductSelectorOpen(false);
+  };
+
+  const handleRemoveNewProduct = (index: number) => {
+    setNewProducts(newProducts.filter((_, i) => i !== index));
+  };
+
+  const handleAddFinalizeProduct = () => {
+    if (!finalizeTempProduct) {
+      toast.error('Selecciona un producto');
+      return;
+    }
+
+    if (finalizeTempQuantity <= 0) {
+      toast.error('La cantidad debe ser mayor a 0');
+      return;
+    }
+
+    // Validar stock
+    if (finalizeTempProduct.stock < finalizeTempQuantity) {
+      toast.error(`Stock insuficiente. Disponible: ${finalizeTempProduct.stock}`);
+      return;
+    }
+
+    // Validar IDs únicas si aplica
+    if (finalizeTempProduct.use_unit_ids) {
+      const availableIds = extractIds(finalizeTempProduct.registered_ids);
+      if (availableIds.length < finalizeTempQuantity) {
+        toast.error('No hay suficientes IDs únicas disponibles');
+        return;
+      }
+      if (finalizeTempUnitIds.length !== finalizeTempQuantity) {
+        toast.error(`Debes seleccionar ${finalizeTempQuantity} ID(s) única(s)`);
+        return;
+      }
+    }
+
+    const newProduct: ExchangeProduct = {
+      productId: finalizeTempProduct.id,
+      productName: finalizeTempProduct.name,
+      quantity: finalizeTempQuantity,
+      price: finalizeTempPrice,
+      total: finalizeTempPrice * finalizeTempQuantity,
+      unitIds: finalizeTempUnitIds.length > 0 ? finalizeTempUnitIds : undefined,
+    };
+
+    setFinalizeNewProducts([...finalizeNewProducts, newProduct]);
+
+    // Limpiar temporales
+    setFinalizeTempProduct(null);
+    setFinalizeTempQuantity(1);
+    setFinalizeTempPrice(0);
+    setFinalizeTempUnitIds([]);
+    setProductSelectorOpen(false);
+  };
+
+  const handleRemoveFinalizeProduct = (index: number) => {
+    setFinalizeNewProducts(finalizeNewProducts.filter((_, i) => i !== index));
+  };
+
+  const handleSelectTempProduct = (productId: string) => {
+    const product = products.find(p => p.id === productId);
+    if (product) {
+      setTempProduct(product);
+      setTempPrice(product.final_price);
+      setTempQuantity(1);
+      setTempUnitIds([]);
+      // No cerrar el modal, solo seleccionar el producto
+    }
   };
 
   const handleSelectInvoice = (invoiceNumber: string) => {
@@ -142,132 +311,38 @@ export default function Exchanges() {
     }
   };
 
-  const handleSelectOriginalFromInvoice = (productId: string) => {
-    if (!selectedInvoice) return;
-    
-    const invoiceItem = selectedInvoice.items.find(item => item.productId === productId);
+
+  const handleSelectFinalizeTempProduct = (productId: string) => {
+    // Solo se usa en el modal de finalización
     const product = products.find(p => p.id === productId);
-    
-    if (invoiceItem && product) {
-      setOriginalProduct(product);
-      setOriginalQuantity(1);
-      setOriginalPrice(invoiceItem.price);
-      
-      // Si el producto usa IDs únicas, obtenerlas del item de la factura
-      if (product.use_unit_ids && invoiceItem.unitIds) {
-        setOriginalUnitIds(invoiceItem.unitIds.slice(0, 1));
-      }
-    }
-  };
-
-  const handleSelectOriginalProduct = (productId: string) => {
-    const product = products.find(p => p.id === productId);
-    if (product) {
-      setOriginalProduct(product);
-      setOriginalPrice(product.final_price);
-      setOriginalUnitIds([]);
-    }
-  };
-
-  const handleSelectNewProduct = (productId: string) => {
-    const product = products.find(p => p.id === productId);
-    if (product) {
-      // Si estamos en el modal de finalización
-      if (finalizeDialogOpen) {
-        setFinalizeNewProduct(product);
-        setFinalizeNewPrice(product.final_price);
-
-        if (product.use_unit_ids && product.registered_ids) {
-          const ids = extractIds(product.registered_ids);
-          setFinalizeNewUnitIds(ids.slice(0, finalizeNewQuantity));
-        } else {
-          setFinalizeNewUnitIds([]);
-        }
-      } else {
-        // Modal de crear cambio nuevo
-        setNewProduct(product);
-        setNewPrice(product.final_price);
-
-        if (product.use_unit_ids && product.registered_ids) {
-          const ids = extractIds(product.registered_ids);
-          setNewUnitIds(ids.slice(0, newQuantity));
-        } else {
-          setNewUnitIds([]);
-        }
-      }
-    }
-  };
-
-  const handleOriginalQuantityChange = (qty: number) => {
-    if (!originalProduct) return;
-    setOriginalQuantity(qty);
-
-    // Ajustar IDs únicas si aplica
-    if (originalProduct.use_unit_ids) {
-      if (exchangeType === 'invoice' && selectedInvoice) {
-        // Si es de factura, mantener las IDs de la factura hasta la cantidad
-        const invoiceItem = selectedInvoice.items.find(item => item.productId === originalProduct.id);
-        if (invoiceItem?.unitIds) {
-          setOriginalUnitIds(invoiceItem.unitIds.slice(0, qty));
-        }
-      } else {
-        // Para cambios directos y pendientes, limpiar las IDs cuando cambia la cantidad
-        setOriginalUnitIds([]);
-      }
-    }
-  };
-
-  const handleNewQuantityChange = (qty: number) => {
-    if (!newProduct) return;
-    setNewQuantity(qty);
-
-    // Limpiar IDs si la cantidad cambió
-    if (newProduct.use_unit_ids) {
-      setNewUnitIds([]);
+    if (product && finalizeDialogOpen) {
+      setFinalizeTempProduct(product);
+      setFinalizeTempPrice(product.final_price);
+      setFinalizeTempQuantity(1);
+      setFinalizeTempUnitIds([]);
     }
   };
 
   const calculatePriceDifference = () => {
-    const originalTotal = originalPrice * originalQuantity;
-    const newTotal = newPrice * newQuantity;
+    const originalTotal = originalProducts.reduce((sum, p) => sum + p.total, 0);
+    const newTotal = newProducts.reduce((sum, p) => sum + p.total, 0);
     return newTotal - originalTotal;
   };
 
   const validateForm = (): string | null => {
-    if (!originalProduct) return 'Selecciona el producto original';
-
-    // Para cambios pendientes, no se requiere producto nuevo
-    if (exchangeType !== 'pending') {
-      if (!newProduct) return 'Selecciona el producto nuevo';
-      if (originalProduct.id === newProduct.id) return 'Los productos deben ser diferentes';
-      if (newQuantity <= 0) return 'La cantidad nueva debe ser mayor a 0';
-
-      // Validar stock del producto nuevo
-      if (newProduct.stock < newQuantity) {
-        return `Stock insuficiente de ${newProduct.name}. Disponible: ${newProduct.stock}`;
-      }
-
-      // Validar IDs únicas del producto nuevo
-      if (newProduct.use_unit_ids) {
-        if (!newProduct.registered_ids || newProduct.registered_ids.length < newQuantity) {
-          return `No hay suficientes IDs únicas disponibles de ${newProduct.name}`;
-        }
-        if (newUnitIds.length !== newQuantity) {
-          return `Debes seleccionar ${newQuantity} ID(s) única(s) del producto nuevo`;
-        }
-      }
+    if (originalProducts.length === 0) {
+      return 'Debes agregar al menos un producto original';
     }
 
-    if (originalQuantity <= 0) return 'La cantidad original debe ser mayor a 0';
-
-    // Validar IDs únicas del producto original si es cambio directo
-    if (exchangeType === 'direct' && originalProduct.use_unit_ids) {
-      if (originalUnitIds.length !== originalQuantity) {
-        return `Debes especificar ${originalQuantity} ID(s) única(s) del producto original`;
-      }
+    if (exchangeType !== 'pending' && newProducts.length === 0) {
+      return 'Debes agregar al menos un producto nuevo';
     }
 
-    // Validar método de pago si hay diferencia (solo para cambios no pendientes)
+    if (!customerName.trim()) {
+      return 'Debes ingresar el nombre del cliente';
+    }
+
+    // Validar diferencia de precio
     if (exchangeType !== 'pending') {
       const difference = calculatePriceDifference();
       if (difference !== 0) {
@@ -310,88 +385,52 @@ export default function Exchanges() {
       return;
     }
 
-    if (!originalProduct || !currentUser) return;
-    if (exchangeType !== 'pending' && !newProduct) return;
+    if (!currentUser) return;
 
     setIsLoading(true);
     try {
-      const originalTotal = originalPrice * originalQuantity;
+      const exchangeData = {
+        type: exchangeType,
+        status: exchangeType === 'pending' ? ('pending' as const) : ('completed' as const),
+        invoice_id: selectedInvoice?.id,
+        invoice_number: selectedInvoice?.number,
+        customer_name: customerName,
 
-      if (exchangeType === 'pending') {
-        // Para cambios pendientes, solo registrar el producto original
-        const exchangeData = {
-          date: getColombiaDateTime().toISOString(),
-          type: exchangeType,
-          status: 'pending' as const,
-          invoice_id: undefined,
-          invoice_number: undefined,
-          customer_name: undefined,
-          original_product_id: originalProduct.id,
-          original_product_name: originalProduct.name,
-          original_quantity: originalQuantity,
-          original_price: originalPrice,
-          original_total: originalTotal,
-          original_unit_ids: originalProduct.use_unit_ids ? originalUnitIds : undefined,
-          notes: notes || undefined,
-          registered_by: currentUser.username,
-        };
+        // NUEVO: Arrays de productos
+        original_products: originalProducts,
+        new_products: exchangeType === 'pending' ? [] : newProducts,
 
-        const result = await addExchange(exchangeData);
+        // Compatibilidad con campos antiguos (primer producto de cada array)
+        original_product_id: originalProducts[0]?.productId || '',
+        original_product_name: originalProducts[0]?.productName || '',
+        original_quantity: originalProducts.reduce((sum, p) => sum + p.quantity, 0),
+        original_price: originalProducts[0]?.price || 0,
+        original_total: originalProducts.reduce((sum, p) => sum + p.total, 0),
+        original_unit_ids: originalProducts[0]?.unitIds,
 
-        if (result) {
-          toast.success('Cambio pendiente registrado exitosamente');
-          setIsDialogOpen(false);
-          loadData();
-        } else {
-          toast.error('Error al registrar el cambio pendiente');
-        }
+        new_product_id: newProducts[0]?.productId,
+        new_product_name: newProducts[0]?.productName,
+        new_quantity: newProducts.reduce((sum, p) => sum + p.quantity, 0),
+        new_price: newProducts[0]?.price || 0,
+        new_total: newProducts.reduce((sum, p) => sum + p.total, 0),
+        new_unit_ids: newProducts[0]?.unitIds,
+
+        price_difference: calculatePriceDifference(),
+        payment_cash: paymentCash,
+        payment_transfer: paymentTransfer,
+        payment_other: paymentOther,
+        notes: notes,
+        registered_by: currentUser?.username || 'Usuario',
+      };
+
+      const result = await addExchange(exchangeData);
+
+      if (result) {
+        toast.success('Cambio registrado exitosamente');
+        setIsDialogOpen(false);
+        loadData();
       } else {
-        // Para cambios directos o por factura
-        const priceDifference = calculatePriceDifference();
-        const newTotal = newPrice * newQuantity;
-
-        const exchangeData = {
-          date: getColombiaDateTime().toISOString(),
-          type: exchangeType,
-          status: 'completed' as const,
-          invoice_id: exchangeType === 'invoice' ? selectedInvoice?.id : undefined,
-          invoice_number: exchangeType === 'invoice' ? selectedInvoice?.number : undefined,
-          customer_name: exchangeType === 'invoice' ? selectedInvoice?.customer_name : undefined,
-          original_product_id: originalProduct.id,
-          original_product_name: originalProduct.name,
-          original_quantity: originalQuantity,
-          original_price: originalPrice,
-          original_total: originalTotal,
-          original_unit_ids: originalProduct.use_unit_ids ? originalUnitIds : undefined,
-          new_product_id: newProduct!.id,
-          new_product_name: newProduct!.name,
-          new_quantity: newQuantity,
-          new_price: newPrice,
-          new_total: newTotal,
-          new_unit_ids: newProduct!.use_unit_ids ? newUnitIds : undefined,
-          price_difference: priceDifference,
-          payment_method: priceDifference !== 0 ? (
-            (paymentCash > 0 ? 1 : 0) + (paymentTransfer > 0 ? 1 : 0) + (paymentOther > 0 ? 1 : 0) > 1
-              ? 'Mixto'
-              : paymentCash > 0 ? 'Efectivo' : paymentTransfer > 0 ? 'Transferencia' : 'Otro'
-          ) : undefined,
-          payment_amount: Math.abs(priceDifference),
-          payment_cash: paymentCash,
-          payment_transfer: paymentTransfer,
-          payment_other: paymentOther,
-          notes: notes || undefined,
-          registered_by: currentUser.username,
-        };
-
-        const result = await addExchange(exchangeData);
-
-        if (result) {
-          toast.success('Cambio registrado exitosamente');
-          setIsDialogOpen(false);
-          loadData();
-        } else {
-          toast.error('Error al registrar el cambio');
-        }
+        toast.error('Error al registrar el cambio');
       }
     } catch (error) {
       console.error('Error submitting exchange:', error);
@@ -528,6 +567,7 @@ export default function Exchanges() {
                     <tr className="border-b border-border">
                       <th className="text-left py-3 px-3 text-sm font-medium">Número</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Fecha</th>
+                      <th className="text-left py-3 px-3 text-sm font-medium">Cliente</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Estado</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Tipo</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Producto Original</th>
@@ -543,6 +583,9 @@ export default function Exchanges() {
                         <td className="py-3 px-3 text-sm font-medium">{exchange.exchange_number}</td>
                         <td className="py-3 px-3 text-sm">
                           {new Date(exchange.date).toLocaleDateString('es-ES')}
+                        </td>
+                        <td className="py-3 px-3 text-sm">
+                          {exchange.customer_name || <span className="text-muted-foreground italic">Sin nombre</span>}
                         </td>
                         <td className="py-3 px-3">
                           <span className={`px-2 py-1 text-xs rounded-full ${
@@ -567,13 +610,41 @@ export default function Exchanges() {
                           </span>
                         </td>
                         <td className="py-3 px-3 text-sm">
-                          <div>{exchange.original_product_name}</div>
-                          <div className="text-xs text-muted-foreground">
-                            Cant: {exchange.original_quantity} × COP {formatCOP(exchange.original_price)}
-                          </div>
+                          {exchange.original_products && exchange.original_products.length > 0 ? (
+                            <div className="space-y-1">
+                              {exchange.original_products.map((prod, idx) => (
+                                <div key={idx}>
+                                  <div className="font-medium">{prod.productName}</div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Cant: {prod.quantity} × COP {formatCOP(prod.price)} = {formatCOP(prod.total)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            // Fallback para registros antiguos
+                            <>
+                              <div>{exchange.original_product_name}</div>
+                              <div className="text-xs text-muted-foreground">
+                                Cant: {exchange.original_quantity} × COP {formatCOP(exchange.original_price)}
+                              </div>
+                            </>
+                          )}
                         </td>
                         <td className="py-3 px-3 text-sm">
-                          {exchange.new_product_name ? (
+                          {exchange.new_products && exchange.new_products.length > 0 ? (
+                            <div className="space-y-1">
+                              {exchange.new_products.map((prod, idx) => (
+                                <div key={idx}>
+                                  <div className="font-medium">{prod.productName}</div>
+                                  <div className="text-xs text-muted-foreground">
+                                    Cant: {prod.quantity} × COP {formatCOP(prod.price)} = {formatCOP(prod.total)}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          ) : exchange.new_product_name ? (
+                            // Fallback para registros antiguos
                             <>
                               <div>{exchange.new_product_name}</div>
                               <div className="text-xs text-muted-foreground">
@@ -585,7 +656,9 @@ export default function Exchanges() {
                           )}
                         </td>
                         <td className="py-3 px-3 text-right">
-                          {exchange.price_difference !== undefined && exchange.price_difference !== null ? (
+                          {exchange.status === 'pending' ? (
+                            <span className="text-xs text-muted-foreground italic">Por definir</span>
+                          ) : exchange.price_difference !== undefined && exchange.price_difference !== null ? (
                             <span className={`text-sm font-medium ${
                               exchange.price_difference > 0
                                 ? 'text-green-600 dark:text-green-400'
@@ -610,10 +683,11 @@ export default function Exchanges() {
                                   size="sm"
                                   onClick={() => {
                                     setExchangeToFinalize(exchange);
-                                    setFinalizeNewProduct(null);
-                                    setFinalizeNewQuantity(1);
-                                    setFinalizeNewPrice(0);
-                                    setFinalizeNewUnitIds([]);
+                                    setFinalizeNewProducts([]);
+                                    setFinalizeTempProduct(null);
+                                    setFinalizeTempQuantity(1);
+                                    setFinalizeTempPrice(0);
+                                    setFinalizeTempUnitIds([]);
                                     setFinalizePaymentCash(0);
                                     setFinalizePaymentTransfer(0);
                                     setFinalizePaymentOther(0);
@@ -767,264 +841,107 @@ export default function Exchanges() {
               </div>
             )}
 
-            <div className={`grid gap-6 ${exchangeType === 'pending' ? 'grid-cols-1' : 'grid-cols-1 md:grid-cols-2'}`}>
-              {/* Producto Original */}
-              <div className="space-y-4 p-4 border border-border rounded-lg">
-                <h3 className="font-semibold text-lg">Producto que Devuelve</h3>
-                
-                {exchangeType === 'invoice' && selectedInvoice ? (
-                  <div className="space-y-2">
-                    <Label>Producto Original (de la factura)</Label>
-                    <Select value={originalProduct?.id || ''} onValueChange={handleSelectOriginalFromInvoice}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Seleccionar producto de la factura" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {selectedInvoice.items.map(item => (
-                          <SelectItem key={item.productId} value={item.productId}>
-                            {item.productName} (Cant: {item.quantity})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : (
-                  <div className="space-y-2">
-                    <Label>Producto Original</Label>
-                    {originalProduct ? (
-                      <div className="p-3 border border-green-500 dark:border-green-600 rounded-lg bg-green-50 dark:bg-green-950/30">
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="flex-1">
-                            <p className="font-semibold text-green-900 dark:text-green-100">{originalProduct.name}</p>
-                            <p className="text-xs text-green-700 dark:text-green-300">{originalProduct.code}</p>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setOriginalProduct(null)}
-                            className="text-red-500 hover:text-red-700"
-                          >
-                            ✕
-                          </Button>
-                        </div>
-                        <div className="grid grid-cols-2 gap-2 text-sm">
-                          <div>
-                            <span className="text-muted-foreground">Stock:</span>
-                            <span className="ml-1 font-medium">{originalProduct.stock}</span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">Precio:</span>
-                            <span className="ml-1 font-medium">COP {formatCOP(originalProduct.final_price)}</span>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="w-full h-20 border-dashed border-2 hover:bg-green-50 dark:hover:bg-green-950/20 hover:border-green-500"
-                        onClick={() => {
-                          setSelectingFor('original');
-                          setProductSearchTerm('');
-                          setProductSelectorOpen(true);
-                        }}
-                      >
-                        <div className="flex flex-col items-center gap-2">
-                          <Package className="h-6 w-6 text-muted-foreground" />
-                          <span className="text-sm font-medium">SELECCIONAR PRODUCTO</span>
-                        </div>
-                      </Button>
-                    )}
-                  </div>
-                )}
-
-                {originalProduct && (
-                  <>
-                    <div className="space-y-2">
-                      <Label>Cantidad</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        value={originalQuantity}
-                        onChange={(e) => handleOriginalQuantityChange(parseInt(e.target.value) || 1)}
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Precio Unitario</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={originalPrice}
-                        onChange={(e) => setOriginalPrice(parseFloat(e.target.value) || 0)}
-                      />
-                    </div>
-
-                    {originalProduct.use_unit_ids && (exchangeType === 'direct' || exchangeType === 'pending') && (
-                      <div className="space-y-2">
-                        <Label>IDs Únicas (Se requieren {originalQuantity} ID(s) de 4 dígitos)</Label>
-                        <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
-                          {Array.from({ length: originalQuantity }).map((_, index) => (
-                            <div key={index} className="space-y-1">
-                              <Label className="text-xs text-muted-foreground text-center block">#{index + 1}</Label>
-                              <Input
-                                placeholder="0001"
-                                maxLength={4}
-                                value={originalUnitIds[index] || ''}
-                                onChange={(e) => {
-                                  const value = e.target.value.replace(/\D/g, '').slice(0, 4);
-                                  const newIds = [...originalUnitIds];
-                                  newIds[index] = value.padStart(4, '0');
-                                  setOriginalUnitIds(newIds.filter(id => id && id !== '0000'));
-                                }}
-                                className="font-mono text-center text-sm h-9"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                        {originalUnitIds.length !== originalQuantity && (
-                          <p className="text-xs text-red-600 dark:text-red-400">
-                            ⚠️ Debes ingresar exactamente {originalQuantity} ID(s)
-                          </p>
-                        )}
-                      </div>
-                    )}
-
-                    <div className="p-3 bg-muted rounded-lg">
-                      <p className="text-sm font-medium">Total Original:</p>
-                      <p className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                        COP {formatCOP(originalPrice * originalQuantity)}
-                      </p>
-                    </div>
-                  </>
-                )}
-              </div>
-
-              {/* Producto Nuevo - Ocultar cuando es pending */}
-              {exchangeType !== 'pending' && (
-                <div className="space-y-4 p-4 border border-border rounded-lg">
-                  <h3 className="font-semibold text-lg">Producto que Lleva</h3>
-                
-                <div className="space-y-2">
-                  <Label>Producto Nuevo</Label>
-                  {newProduct ? (
-                    <div className="p-3 border border-blue-500 dark:border-blue-600 rounded-lg bg-blue-50 dark:bg-blue-950/30">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex-1">
-                          <p className="font-semibold text-blue-900 dark:text-blue-100">{newProduct.name}</p>
-                          <p className="text-xs text-blue-700 dark:text-blue-300">{newProduct.code}</p>
-                        </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setNewProduct(null)}
-                          className="text-red-500 hover:text-red-700"
-                        >
-                          ✕
-                        </Button>
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">Stock:</span>
-                          <span className="ml-1 font-medium">{newProduct.stock}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Precio:</span>
-                          <span className="ml-1 font-medium">COP {formatCOP(newProduct.final_price)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full h-20 border-dashed border-2 hover:bg-blue-50 dark:hover:bg-blue-950/20 hover:border-blue-500"
-                      onClick={() => {
-                        setSelectingFor('new');
-                        setProductSearchTerm('');
-                        setProductSelectorOpen(true);
-                      }}
-                    >
-                      <div className="flex flex-col items-center gap-2">
-                        <Package className="h-6 w-6 text-muted-foreground" />
-                        <span className="text-sm font-medium">SELECCIONAR PRODUCTO</span>
-                      </div>
-                    </Button>
-                  )}
-                </div>
-
-                {newProduct && (
-                  <>
-                    <div className="space-y-2">
-                      <Label>Cantidad</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        max={newProduct.stock}
-                        value={newQuantity}
-                        onChange={(e) => handleNewQuantityChange(parseInt(e.target.value) || 1)}
-                      />
-                      <p className="text-xs text-muted-foreground">Stock disponible: {newProduct.stock}</p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Precio Unitario</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={newPrice}
-                        onChange={(e) => setNewPrice(parseFloat(e.target.value) || 0)}
-                      />
-                    </div>
-
-                    {newProduct.use_unit_ids && (
-                      <div className="space-y-2">
-                        <Label>IDs Únicas (Se requieren {newQuantity} ID(s) de 4 dígitos)</Label>
-                        <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
-                          {Array.from({ length: newQuantity }).map((_, index) => (
-                            <div key={index} className="space-y-1">
-                              <Label className="text-xs text-muted-foreground text-center block">#{index + 1}</Label>
-                              <Input
-                                placeholder="0001"
-                                maxLength={4}
-                                value={newUnitIds[index] || ''}
-                                onChange={(e) => {
-                                  const value = e.target.value.replace(/\D/g, '').slice(0, 4);
-                                  const newIds = [...newUnitIds];
-                                  newIds[index] = value.padStart(4, '0');
-                                  setNewUnitIds(newIds.filter(id => id && id !== '0000'));
-                                }}
-                                className="font-mono text-center text-sm h-9"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                        {newUnitIds.length !== newQuantity && (
-                          <p className="text-xs text-red-600 dark:text-red-400">
-                            ⚠️ Debes ingresar exactamente {newQuantity} ID(s)
-                          </p>
-                        )}
-                        <p className="text-xs text-blue-600 dark:text-blue-400">
-                          💡 IDs disponibles: {extractIds(newProduct.registered_ids || []).slice(0, 10).join(', ')}
-                          {extractIds(newProduct.registered_ids || []).length > 10 && '...'}
-                        </p>
-                      </div>
-                    )}
-
-                    <div className="p-3 bg-muted rounded-lg">
-                      <p className="text-sm font-medium">Total Nuevo:</p>
-                      <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                        COP {formatCOP(newPrice * newQuantity)}
-                      </p>
-                    </div>
-                  </>
-                )}
-                </div>
-              )}
+            {/* Campo Nombre de Cliente */}
+            <div className="space-y-2">
+              <Label htmlFor="customerName">Nombre del Cliente *</Label>
+              <Input
+                id="customerName"
+                placeholder="Ingresa el nombre del cliente"
+                value={customerName}
+                onChange={(e) => setCustomerName(e.target.value)}
+              />
             </div>
 
+            {/* Productos a Devolver (Originales) */}
+            <div className="space-y-3">
+              <Label>Productos a Devolver</Label>
+
+              {/* Lista de productos agregados */}
+              <div className="space-y-2">
+                {originalProducts.map((product, index) => (
+                  <div key={index} className="flex items-center gap-2 border rounded p-2 bg-red-50 dark:bg-red-950/30">
+                    <div className="flex-1">
+                      <div className="font-medium text-sm">{product.productName}</div>
+                      <div className="text-xs text-gray-600 dark:text-gray-400">
+                        {product.quantity} × {formatCOP(product.price)} = {formatCOP(product.total)}
+                      </div>
+                      {product.unitIds && product.unitIds.length > 0 && (
+                        <div className="text-xs text-gray-500">
+                          IDs: {product.unitIds.join(', ')}
+                        </div>
+                      )}
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemoveOriginalProduct(index)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              {/* Botón agregar */}
+              <Button
+                onClick={() => {
+                  setSelectingFor('original');
+                  setProductSelectorOpen(true);
+                }}
+                className="w-full"
+                variant="outline"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Agregar Producto a Devolver
+              </Button>
+            </div>
+
+            {/* Productos Nuevos (que se entregan) - Ocultar cuando es pending */}
+            {exchangeType !== 'pending' && (
+              <div className="space-y-3">
+                <Label>Productos a Entregar</Label>
+
+                <div className="space-y-2">
+                  {newProducts.map((product, index) => (
+                    <div key={index} className="flex items-center gap-2 border rounded p-2 bg-green-50 dark:bg-green-950/30">
+                      <div className="flex-1">
+                        <div className="font-medium text-sm">{product.productName}</div>
+                        <div className="text-xs text-gray-600 dark:text-gray-400">
+                          {product.quantity} × {formatCOP(product.price)} = {formatCOP(product.total)}
+                        </div>
+                        {product.unitIds && product.unitIds.length > 0 && (
+                          <div className="text-xs text-gray-500">
+                            IDs: {product.unitIds.join(', ')}
+                          </div>
+                        )}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveNewProduct(index)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+
+                <Button
+                  onClick={() => {
+                    setSelectingFor('new');
+                    setProductSelectorOpen(true);
+                  }}
+                  className="w-full"
+                  variant="outline"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Agregar Producto a Entregar
+                </Button>
+              </div>
+            )}
+
             {/* Diferencia de Precio - Solo para cambios no pendientes */}
-            {exchangeType !== 'pending' && originalProduct && newProduct && (
+            {exchangeType !== 'pending' && originalProducts.length > 0 && newProducts.length > 0 && (
               <div className="p-4 border-2 border-dashed rounded-lg">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="font-semibold text-lg">Diferencia de Precio</h3>
@@ -1260,12 +1177,13 @@ export default function Exchanges() {
                       <button
                         key={product.id}
                         onClick={() => {
-                          if (selectingFor === 'original') {
-                            handleSelectOriginalProduct(product.id);
+                          // Si estamos en el modal de finalización
+                          if (finalizeDialogOpen) {
+                            handleSelectFinalizeTempProduct(product.id);
                           } else {
-                            handleSelectNewProduct(product.id);
+                            // Modal de crear cambio nuevo - usar temp product (no cerrar modal)
+                            handleSelectTempProduct(product.id);
                           }
-                          setProductSelectorOpen(false);
                         }}
                         className="p-4 border border-border rounded-lg hover:border-green-500 dark:hover:border-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 transition-all text-left group"
                       >
@@ -1353,10 +1271,231 @@ export default function Exchanges() {
                 </p>
               );
             })()}
+
+            {/* Configuración del producto seleccionado */}
+            {!finalizeDialogOpen && tempProduct && (
+              <div className="space-y-4 p-4 border-2 border-green-500 dark:border-green-600 rounded-lg bg-green-50 dark:bg-green-950/30">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-green-900 dark:text-green-100">
+                    Configurar: {tempProduct.name}
+                  </h4>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setTempProduct(null)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Cantidad</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={tempQuantity}
+                      onChange={(e) => setTempQuantity(parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Precio Unitario</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={tempPrice}
+                      onChange={(e) => setTempPrice(parseFloat(e.target.value) || 0)}
+                    />
+                  </div>
+                </div>
+
+                {tempProduct.use_unit_ids && (
+                  <div className="space-y-2">
+                    <Label>IDs Únicas (Se requieren {tempQuantity} ID(s))</Label>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {Array.from({ length: tempQuantity }).map((_, index) => {
+                        const availableForSelection = selectingFor === 'original'
+                          ? getDisabledIds(tempProduct).filter(idObj => !tempUnitIds.includes(idObj.id))
+                          : getAvailableIds(tempProduct).filter(idObj => !tempUnitIds.includes(idObj.id));
+
+                        return (
+                          <div key={index} className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">ID #{index + 1}</Label>
+                            <Select
+                              value={tempUnitIds[index] || ''}
+                              onValueChange={(value) => {
+                                const newIds = [...tempUnitIds];
+                                newIds[index] = value;
+                                setTempUnitIds(newIds.filter(id => id));
+                              }}
+                            >
+                              <SelectTrigger className="font-mono text-sm h-9">
+                                <SelectValue placeholder="Seleccionar" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {availableForSelection.map((idObj) => (
+                                  <SelectItem key={idObj.id} value={idObj.id} className="font-mono">
+                                    {idObj.id} {idObj.note && `(${idObj.note})`}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {tempUnitIds.length !== tempQuantity && (
+                      <p className="text-xs text-red-600 dark:text-red-400">
+                        ⚠️ Debes seleccionar {tempQuantity} ID(s)
+                      </p>
+                    )}
+                    {selectingFor === 'original' && (
+                      <p className="text-xs text-orange-600 dark:text-orange-400">
+                        💡 IDs inhabilitadas/vendidas: {getDisabledIds(tempProduct).length} disponibles
+                      </p>
+                    )}
+                    {selectingFor === 'new' && (
+                      <p className="text-xs text-blue-600 dark:text-blue-400">
+                        💡 IDs disponibles: {getAvailableIds(tempProduct).length} en stock
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                <div className="p-2 bg-white dark:bg-gray-900 rounded">
+                  <p className="text-sm font-medium">Total:</p>
+                  <p className="text-lg font-bold text-green-600 dark:text-green-400">
+                    COP {formatCOP(tempPrice * tempQuantity)}
+                  </p>
+                </div>
+
+                <Button
+                  onClick={() => {
+                    if (selectingFor === 'original') {
+                      handleAddOriginalProduct();
+                    } else {
+                      handleAddNewProduct();
+                    }
+                  }}
+                  className="w-full"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Agregar Producto
+                </Button>
+              </div>
+            )}
+
+            {/* Configuración del producto para finalización */}
+            {finalizeDialogOpen && finalizeTempProduct && (
+              <div className="space-y-4 p-4 border-2 border-blue-500 dark:border-blue-600 rounded-lg bg-blue-50 dark:bg-blue-950/30">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-semibold text-blue-900 dark:text-blue-100">
+                    Configurar: {finalizeTempProduct.name}
+                  </h4>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setFinalizeTempProduct(null)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label>Cantidad</Label>
+                    <Input
+                      type="number"
+                      min="1"
+                      value={finalizeTempQuantity}
+                      onChange={(e) => setFinalizeTempQuantity(parseInt(e.target.value) || 1)}
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Precio Unitario</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={finalizeTempPrice}
+                      onChange={(e) => setFinalizeTempPrice(parseFloat(e.target.value) || 0)}
+                    />
+                  </div>
+                </div>
+
+                {finalizeTempProduct.use_unit_ids && (
+                  <div className="space-y-2">
+                    <Label>IDs Únicas (Se requieren {finalizeTempQuantity} ID(s))</Label>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {Array.from({ length: finalizeTempQuantity }).map((_, index) => {
+                        const availableForSelection = getAvailableIds(finalizeTempProduct).filter(
+                          idObj => !finalizeTempUnitIds.includes(idObj.id)
+                        );
+
+                        return (
+                          <div key={index} className="space-y-1">
+                            <Label className="text-xs text-muted-foreground">ID #{index + 1}</Label>
+                            <Select
+                              value={finalizeTempUnitIds[index] || ''}
+                              onValueChange={(value) => {
+                                const newIds = [...finalizeTempUnitIds];
+                                newIds[index] = value;
+                                setFinalizeTempUnitIds(newIds.filter(id => id));
+                              }}
+                            >
+                              <SelectTrigger className="font-mono text-sm h-9">
+                                <SelectValue placeholder="Seleccionar" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {availableForSelection.map((idObj) => (
+                                  <SelectItem key={idObj.id} value={idObj.id} className="font-mono">
+                                    {idObj.id} {idObj.note && `(${idObj.note})`}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    {finalizeTempUnitIds.length !== finalizeTempQuantity && (
+                      <p className="text-xs text-red-600 dark:text-red-400">
+                        ⚠️ Debes seleccionar {finalizeTempQuantity} ID(s)
+                      </p>
+                    )}
+                    <p className="text-xs text-blue-600 dark:text-blue-400">
+                      💡 IDs disponibles: {getAvailableIds(finalizeTempProduct).length} en stock
+                    </p>
+                  </div>
+                )}
+
+                <div className="p-2 bg-white dark:bg-gray-900 rounded">
+                  <p className="text-sm font-medium">Total:</p>
+                  <p className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                    COP {formatCOP(finalizeTempPrice * finalizeTempQuantity)}
+                  </p>
+                </div>
+
+                <Button
+                  onClick={handleAddFinalizeProduct}
+                  className="w-full"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Agregar Producto
+                </Button>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end pt-4 border-t">
-            <Button variant="outline" onClick={() => setProductSelectorOpen(false)}>
+            <Button variant="outline" onClick={() => {
+              setProductSelectorOpen(false);
+              setTempProduct(null);
+              setTempQuantity(1);
+              setTempPrice(0);
+              setTempUnitIds([]);
+            }}>
               Cancelar
             </Button>
           </div>
@@ -1408,136 +1547,53 @@ export default function Exchanges() {
                 )}
               </div>
 
-              {/* Selector de Producto Nuevo */}
-              <div className="space-y-4 p-4 border border-border rounded-lg">
-                <h3 className="font-semibold text-lg">Producto que Lleva el Cliente</h3>
+              {/* Productos a Entregar */}
+              <div className="space-y-3">
+                <Label>Productos a Entregar</Label>
 
+                {/* Lista de productos agregados */}
                 <div className="space-y-2">
-                  <Label>Producto Nuevo</Label>
-                  {finalizeNewProduct ? (
-                    <div className="p-3 border border-blue-500 dark:border-blue-600 rounded-lg bg-blue-50 dark:bg-blue-950/30">
-                      <div className="flex items-start justify-between mb-2">
-                        <div className="flex-1">
-                          <p className="font-semibold text-blue-900 dark:text-blue-100">{finalizeNewProduct.name}</p>
-                          <p className="text-xs text-blue-700 dark:text-blue-300">{finalizeNewProduct.code}</p>
+                  {finalizeNewProducts.map((product, index) => (
+                    <div key={index} className="flex items-center gap-2 border rounded p-2 bg-green-50 dark:bg-green-950/30">
+                      <div className="flex-1">
+                        <div className="font-medium text-sm">{product.productName}</div>
+                        <div className="text-xs text-gray-600 dark:text-gray-400">
+                          {product.quantity} × {formatCOP(product.price)} = {formatCOP(product.total)}
                         </div>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setFinalizeNewProduct(null)}
-                          className="text-red-500 hover:text-red-700"
-                        >
-                          ✕
-                        </Button>
+                        {product.unitIds && product.unitIds.length > 0 && (
+                          <div className="text-xs text-gray-500">
+                            IDs: {product.unitIds.join(', ')}
+                          </div>
+                        )}
                       </div>
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        <div>
-                          <span className="text-muted-foreground">Stock:</span>
-                          <span className="ml-1 font-medium">{finalizeNewProduct.stock}</span>
-                        </div>
-                        <div>
-                          <span className="text-muted-foreground">Precio:</span>
-                          <span className="ml-1 font-medium">COP {formatCOP(finalizeNewProduct.final_price)}</span>
-                        </div>
-                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveFinalizeProduct(index)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
                     </div>
-                  ) : (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full h-20 border-dashed border-2 hover:bg-blue-50 dark:hover:bg-blue-950/20 hover:border-blue-500"
-                      onClick={() => {
-                        setSelectingFor('new');
-                        setProductSearchTerm('');
-                        setProductSelectorOpen(true);
-                      }}
-                    >
-                      <div className="flex flex-col items-center gap-2">
-                        <Package className="h-6 w-6 text-muted-foreground" />
-                        <span className="text-sm font-medium">SELECCIONAR PRODUCTO</span>
-                      </div>
-                    </Button>
-                  )}
+                  ))}
                 </div>
 
-                {finalizeNewProduct && (
-                  <>
-                    <div className="space-y-2">
-                      <Label>Cantidad</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        max={finalizeNewProduct.stock}
-                        value={finalizeNewQuantity}
-                        onChange={(e) => {
-                          const qty = parseInt(e.target.value) || 1;
-                          setFinalizeNewQuantity(qty);
-                          // Limpiar IDs cuando cambia la cantidad
-                          if (finalizeNewProduct.use_unit_ids) {
-                            setFinalizeNewUnitIds([]);
-                          }
-                        }}
-                      />
-                      <p className="text-xs text-muted-foreground">Stock disponible: {finalizeNewProduct.stock}</p>
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label>Precio Unitario</Label>
-                      <Input
-                        type="number"
-                        min="0"
-                        value={finalizeNewPrice}
-                        onChange={(e) => setFinalizeNewPrice(parseFloat(e.target.value) || 0)}
-                      />
-                    </div>
-
-                    {finalizeNewProduct.use_unit_ids && (
-                      <div className="space-y-2">
-                        <Label>IDs Únicas (Se requieren {finalizeNewQuantity} ID(s) de 4 dígitos)</Label>
-                        <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
-                          {Array.from({ length: finalizeNewQuantity }).map((_, index) => (
-                            <div key={index} className="space-y-1">
-                              <Label className="text-xs text-muted-foreground text-center block">#{index + 1}</Label>
-                              <Input
-                                placeholder="0001"
-                                maxLength={4}
-                                value={finalizeNewUnitIds[index] || ''}
-                                onChange={(e) => {
-                                  const value = e.target.value.replace(/\D/g, '').slice(0, 4);
-                                  const newIds = [...finalizeNewUnitIds];
-                                  newIds[index] = value.padStart(4, '0');
-                                  setFinalizeNewUnitIds(newIds.filter(id => id && id !== '0000'));
-                                }}
-                                className="font-mono text-center text-sm h-9"
-                              />
-                            </div>
-                          ))}
-                        </div>
-                        {finalizeNewUnitIds.length !== finalizeNewQuantity && (
-                          <p className="text-xs text-red-600 dark:text-red-400">
-                            ⚠️ Debes ingresar exactamente {finalizeNewQuantity} ID(s)
-                          </p>
-                        )}
-                        <p className="text-xs text-blue-600 dark:text-blue-400">
-                          💡 IDs disponibles: {extractIds(finalizeNewProduct.registered_ids || []).slice(0, 10).join(', ')}
-                          {extractIds(finalizeNewProduct.registered_ids || []).length > 10 && '...'}
-                        </p>
-                      </div>
-                    )}
-
-                    <div className="p-3 bg-muted rounded-lg">
-                      <p className="text-sm font-medium">Total Nuevo Producto:</p>
-                      <p className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                        COP {formatCOP(finalizeNewPrice * finalizeNewQuantity)}
-                      </p>
-                    </div>
-                  </>
-                )}
+                {/* Botón agregar */}
+                <Button
+                  onClick={() => {
+                    setSelectingFor('new');
+                    setProductSelectorOpen(true);
+                  }}
+                  className="w-full"
+                  variant="outline"
+                >
+                  <Plus className="h-4 w-4 mr-2" />
+                  Agregar Producto a Entregar
+                </Button>
               </div>
 
               {/* Diferencia de Precio y Métodos de Pago */}
-              {finalizeNewProduct && (() => {
-                const newTotal = finalizeNewPrice * finalizeNewQuantity;
+              {finalizeNewProducts.length > 0 && (() => {
+                const newTotal = finalizeNewProducts.reduce((sum, p) => sum + p.total, 0);
                 const originalTotal = exchangeToFinalize.original_total;
                 const difference = newTotal - originalTotal;
 
@@ -1652,12 +1708,12 @@ export default function Exchanges() {
                 </Button>
                 <Button
                   onClick={async () => {
-                    if (!finalizeNewProduct) {
-                      toast.error('Selecciona el producto nuevo');
+                    if (finalizeNewProducts.length === 0) {
+                      toast.error('Debes agregar al menos un producto a entregar');
                       return;
                     }
 
-                    const newTotal = finalizeNewPrice * finalizeNewQuantity;
+                    const newTotal = finalizeNewProducts.reduce((sum, p) => sum + p.total, 0);
                     const difference = newTotal - exchangeToFinalize.original_total;
 
                     if (difference !== 0) {
@@ -1666,11 +1722,6 @@ export default function Exchanges() {
                         toast.error(`El total de pagos debe ser igual a la diferencia: ${formatCOP(Math.abs(difference))}`);
                         return;
                       }
-                    }
-
-                    if (finalizeNewProduct.stock < finalizeNewQuantity) {
-                      toast.error(`Stock insuficiente de ${finalizeNewProduct.name}`);
-                      return;
                     }
 
                     setIsLoading(true);
@@ -1696,11 +1747,7 @@ export default function Exchanges() {
                       const success = await finalizeExchange(
                         exchangeToFinalize.id,
                         {
-                          new_product_id: finalizeNewProduct.id,
-                          new_product_name: finalizeNewProduct.name,
-                          new_quantity: finalizeNewQuantity,
-                          new_price: finalizeNewPrice,
-                          new_unit_ids: finalizeNewProduct.use_unit_ids ? finalizeNewUnitIds : undefined,
+                          new_products: finalizeNewProducts,
                           payment_method: calculatedPaymentMethod,
                           payment_cash: finalizePaymentCash,
                           payment_transfer: finalizePaymentTransfer,

@@ -194,34 +194,50 @@ export interface User {
   company?: 'celumundo' | 'repuestos';
 }
 
+export interface ExchangeProduct {
+  productId: string;
+  productName: string;
+  quantity: number;
+  price: number;
+  total: number;
+  unitIds?: string[];
+}
+
 export interface Exchange {
   id: string;
   company: 'celumundo' | 'repuestos';
   exchange_number: string;
   date: string;
   type: 'invoice' | 'direct' | 'pending';
-  status?: 'completed' | 'pending' | 'cancelled'; // NUEVO: Estado del cambio
+  status?: 'completed' | 'pending' | 'cancelled';
   invoice_id?: string;
   invoice_number?: string;
   customer_name?: string;
-  original_product_id: string;
-  original_product_name: string;
-  original_quantity: number;
-  original_price: number;
-  original_total: number;
+
+  // NUEVO: Múltiples productos
+  original_products: ExchangeProduct[];
+  new_products: ExchangeProduct[];
+
+  // DEPRECATED: Mantener para compatibilidad con registros antiguos
+  original_product_id?: string;
+  original_product_name?: string;
+  original_quantity?: number;
+  original_price?: number;
+  original_total?: number;
   original_unit_ids?: string[];
-  new_product_id?: string; // Ahora opcional (para cambios en espera)
-  new_product_name?: string; // Ahora opcional
-  new_quantity?: number; // Ahora opcional
-  new_price?: number; // Ahora opcional
-  new_total?: number; // Ahora opcional
+  new_product_id?: string;
+  new_product_name?: string;
+  new_quantity?: number;
+  new_price?: number;
+  new_total?: number;
   new_unit_ids?: string[];
-  price_difference?: number; // Ahora opcional
+
+  price_difference?: number;
   payment_method?: string;
   payment_amount?: number;
   payment_cash?: number;
   payment_transfer?: number;
-  payment_other?: number; // NUEVO: Monto en otros (Nequi, Daviplata)
+  payment_other?: number;
   notes?: string;
   registered_by: string;
   created_at?: string;
@@ -2927,16 +2943,16 @@ export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_
   for (let attempt = 0; attempt < maxRetries; attempt++) {
     exchange_number = await generateExchangeNumber();
     console.log(`🔄 Attempting to create exchange ${exchange_number} (attempt ${attempt + 1}/${maxRetries})`);
-    
+
     const result = await supabase
       .from('exchanges')
-      .insert([{ 
-        ...exchangeData, 
-        company, 
+      .insert([{
+        ...exchangeData,
+        company,
         exchange_number,
-        date: colombiaDateTime 
+        date: colombiaDateTime
       }])
-      .select()
+      .select('*')
       .single();
     
     if (result.error) {
@@ -2970,80 +2986,93 @@ export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_
 
   const isPendingExchange = exchangeData.status === 'pending';
 
-  // 1. Devolver el producto original al inventario
-  await addMovement({
-    type: 'entry',
-    product_id: exchangeData.original_product_id,
-    product_name: exchangeData.original_product_name,
-    quantity: exchangeData.original_quantity,
-    reason: isPendingExchange ? 'Cambio en espera - Producto devuelto' : 'Cambio - Producto devuelto',
-    reference: exchange_number,
-    user_name: exchangeData.registered_by,
-    unit_ids: exchangeData.original_unit_ids || []
-  });
-
-  const { data: originalProduct } = await supabase
-    .from('products')
-    .select('*')
-    .eq('id', exchangeData.original_product_id)
-    .single();
-
-  if (originalProduct) {
-    const newStock = originalProduct.stock + exchangeData.original_quantity;
-    let newRegisteredIds = originalProduct.registered_ids || [];
-
-    // Si el producto usa IDs únicas, agregarlas de vuelta
-    if (originalProduct.use_unit_ids && exchangeData.original_unit_ids && exchangeData.original_unit_ids.length > 0) {
-      if (isPendingExchange) {
-        // Para cambios pendientes, restaurar las IDs pero marcarlas como "en cambio"
-        const { restoreIdsForExchange } = await import('./unit-ids-utils');
-        newRegisteredIds = restoreIdsForExchange(newRegisteredIds, exchangeData.original_unit_ids, data.id);
-      } else {
-        // Para cambios completados, agregar las IDs normalmente como disponibles
-        const { convertToIdsWithNotes } = await import('./unit-ids-utils');
-        const idsAsObjects = convertToIdsWithNotes(exchangeData.original_unit_ids);
-        newRegisteredIds = [...idsAsObjects, ...newRegisteredIds];
-      }
-    }
-
-    await updateProduct(exchangeData.original_product_id, {
-      stock: newStock,
-      registered_ids: newRegisteredIds
-    });
-  }
-
-  // 2. Solo sacar el producto nuevo si NO es un cambio en espera
-  if (!isPendingExchange && exchangeData.new_product_id) {
+  // ============================================
+  // PROCESAR PRODUCTOS ORIGINALES (MÚLTIPLES)
+  // ============================================
+  for (const originalProd of exchangeData.original_products) {
+    // 1. Registrar movimiento de entrada
     await addMovement({
-      type: 'exit',
-      product_id: exchangeData.new_product_id,
-      product_name: exchangeData.new_product_name!,
-      quantity: exchangeData.new_quantity!,
-      reason: 'Cambio - Producto entregado',
+      type: 'entry',
+      product_id: originalProd.productId,
+      product_name: originalProd.productName,
+      quantity: originalProd.quantity,
+      reason: isPendingExchange ? 'Cambio en espera - Producto devuelto' : 'Cambio - Producto devuelto',
       reference: exchange_number,
       user_name: exchangeData.registered_by,
-      unit_ids: exchangeData.new_unit_ids || []
+      unit_ids: originalProd.unitIds || []
     });
 
-    const { data: newProduct } = await supabase
+    // 2. Actualizar stock del producto original (sumar)
+    const { data: product } = await supabase
       .from('products')
       .select('*')
-      .eq('id', exchangeData.new_product_id)
+      .eq('id', originalProd.productId)
       .single();
 
-    if (newProduct) {
-      const newStock = newProduct.stock - exchangeData.new_quantity!;
-      let newRegisteredIds = newProduct.registered_ids || [];
+    if (product) {
+      const newStock = product.stock + originalProd.quantity;
+      let newRegisteredIds = product.registered_ids || [];
 
-      // Si el producto usa IDs únicas, removerlas
-      if (newProduct.use_unit_ids && exchangeData.new_unit_ids && exchangeData.new_unit_ids.length > 0) {
-        newRegisteredIds = newRegisteredIds.filter(id => !exchangeData.new_unit_ids?.includes(id));
+      // Si el producto usa IDs únicas, agregarlas de vuelta
+      if (product.use_unit_ids && originalProd.unitIds && originalProd.unitIds.length > 0) {
+        if (isPendingExchange) {
+          const { restoreIdsForExchange } = await import('./unit-ids-utils');
+          newRegisteredIds = restoreIdsForExchange(newRegisteredIds, originalProd.unitIds, data.id);
+        } else {
+          const { convertToIdsWithNotes } = await import('./unit-ids-utils');
+          const idsAsObjects = convertToIdsWithNotes(originalProd.unitIds);
+          newRegisteredIds = [...idsAsObjects, ...newRegisteredIds];
+        }
       }
 
-      await updateProduct(exchangeData.new_product_id, {
+      await updateProduct(originalProd.productId, {
         stock: newStock,
         registered_ids: newRegisteredIds
       });
+    }
+  }
+
+  // ============================================
+  // PROCESAR PRODUCTOS NUEVOS (MÚLTIPLES)
+  // Solo si NO es un cambio en espera
+  // ============================================
+  if (!isPendingExchange && exchangeData.new_products.length > 0) {
+    for (const newProd of exchangeData.new_products) {
+      // 1. Registrar movimiento de salida
+      await addMovement({
+        type: 'exit',
+        product_id: newProd.productId,
+        product_name: newProd.productName,
+        quantity: newProd.quantity,
+        reason: 'Cambio - Producto entregado',
+        reference: exchange_number,
+        user_name: exchangeData.registered_by,
+        unit_ids: newProd.unitIds || []
+      });
+
+      // 2. Actualizar stock del producto nuevo (restar)
+      const { data: product } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', newProd.productId)
+        .single();
+
+      if (product) {
+        const newStock = product.stock - newProd.quantity;
+        let newRegisteredIds = product.registered_ids || [];
+
+        // Si el producto usa IDs únicas, removerlas
+        if (product.use_unit_ids && newProd.unitIds && newProd.unitIds.length > 0) {
+          newRegisteredIds = newRegisteredIds.filter(
+            (idObj: any) => !newProd.unitIds?.includes(typeof idObj === 'string' ? idObj : idObj.id)
+          );
+        }
+
+        await updateProduct(newProd.productId, {
+          stock: newStock,
+          registered_ids: newRegisteredIds
+        });
+      }
     }
   }
 
@@ -3056,11 +3085,7 @@ export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_
 export const finalizeExchange = async (
   exchangeId: string,
   finalizeData: {
-    new_product_id: string;
-    new_product_name: string;
-    new_quantity: number;
-    new_price: number;
-    new_unit_ids?: string[];
+    new_products: ExchangeProduct[];
     payment_method?: string;
     payment_cash?: number;
     payment_transfer?: number;
@@ -3089,70 +3114,99 @@ export const finalizeExchange = async (
     }
 
     // 2. Calcular diferencia de precio
-    const new_total = finalizeData.new_price * finalizeData.new_quantity;
+    const new_total = finalizeData.new_products.reduce((sum, p) => sum + p.total, 0);
     const price_difference = new_total - exchange.original_total;
 
-    // 3. Sacar el producto nuevo del inventario
-    await addMovement({
-      type: 'exit',
-      product_id: finalizeData.new_product_id,
-      product_name: finalizeData.new_product_name,
-      quantity: finalizeData.new_quantity,
-      reason: 'Cambio finalizado - Producto entregado',
-      reference: exchange.exchange_number,
-      user_name: exchange.registered_by,
-      unit_ids: finalizeData.new_unit_ids || []
-    });
+    // 3. Procesar cada producto nuevo (sacar del inventario)
+    for (const newProd of finalizeData.new_products) {
+      // Registrar movimiento de salida
+      await addMovement({
+        type: 'exit',
+        product_id: newProd.productId,
+        product_name: newProd.productName,
+        quantity: newProd.quantity,
+        reason: 'Cambio finalizado - Producto entregado',
+        reference: exchange.exchange_number,
+        user_name: exchange.registered_by,
+        unit_ids: newProd.unitIds || []
+      });
 
-    const { data: newProduct } = await supabase
-      .from('products')
-      .select('*')
-      .eq('id', finalizeData.new_product_id)
-      .single();
+      // Actualizar stock
+      const { data: product } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', newProd.productId)
+        .single();
 
-    if (newProduct) {
-      const newStock = newProduct.stock - finalizeData.new_quantity;
-      let newRegisteredIds = newProduct.registered_ids || [];
+      if (product) {
+        const newStock = product.stock - newProd.quantity;
+        let newRegisteredIds = product.registered_ids || [];
 
-      // Si el producto usa IDs únicas, eliminarlas definitivamente
-      if (newProduct.use_unit_ids && finalizeData.new_unit_ids && finalizeData.new_unit_ids.length > 0) {
-        const { removeIds } = await import('./unit-ids-utils');
-        newRegisteredIds = removeIds(newRegisteredIds, finalizeData.new_unit_ids);
+        // Si el producto usa IDs únicas, eliminarlas definitivamente
+        if (product.use_unit_ids && newProd.unitIds && newProd.unitIds.length > 0) {
+          const { removeIds } = await import('./unit-ids-utils');
+          newRegisteredIds = removeIds(newRegisteredIds, newProd.unitIds);
+        }
+
+        await updateProduct(newProd.productId, {
+          stock: newStock,
+          registered_ids: newRegisteredIds
+        });
       }
-
-      await updateProduct(finalizeData.new_product_id, {
-        stock: newStock,
-        registered_ids: newRegisteredIds
-      });
     }
 
-    // 3.5. Liberar las IDs del producto original que estaban marcadas como "en cambio"
-    const { data: originalProduct } = await supabase
-      .from('products')
-      .select('*')
-      .eq('id', exchange.original_product_id)
-      .single();
+    // 4. Liberar las IDs del producto original que estaban marcadas como "en cambio"
+    // (si el cambio original tenía IDs de productos con uso de IDs únicas)
+    if (exchange.original_products && Array.isArray(exchange.original_products)) {
+      // Si usa el formato nuevo de arrays
+      for (const originalProd of exchange.original_products) {
+        const { data: product } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', originalProd.productId)
+          .single();
 
-    if (originalProduct && originalProduct.use_unit_ids && exchange.original_unit_ids && exchange.original_unit_ids.length > 0) {
-      const { releaseExchangeIds } = await import('./unit-ids-utils');
-      const newRegisteredIds = releaseExchangeIds(originalProduct.registered_ids || [], exchangeId);
+        if (product && product.use_unit_ids && originalProd.unitIds && originalProd.unitIds.length > 0) {
+          const { releaseExchangeIds } = await import('./unit-ids-utils');
+          const newRegisteredIds = releaseExchangeIds(product.registered_ids || [], exchangeId);
 
-      await updateProduct(exchange.original_product_id, {
-        registered_ids: newRegisteredIds
-      });
+          await updateProduct(originalProd.productId, {
+            registered_ids: newRegisteredIds
+          });
+        }
+      }
+    } else {
+      // Compatibilidad con formato antiguo (single product)
+      const { data: originalProduct } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', exchange.original_product_id)
+        .single();
+
+      if (originalProduct && originalProduct.use_unit_ids && exchange.original_unit_ids && exchange.original_unit_ids.length > 0) {
+        const { releaseExchangeIds } = await import('./unit-ids-utils');
+        const newRegisteredIds = releaseExchangeIds(originalProduct.registered_ids || [], exchangeId);
+
+        await updateProduct(exchange.original_product_id, {
+          registered_ids: newRegisteredIds
+        });
+      }
     }
 
-    // 4. Actualizar el cambio con los datos del producto nuevo
+    // 5. Actualizar el cambio con los datos de los productos nuevos
     const { data: updatedExchange, error: updateError } = await supabase
       .from('exchanges')
       .update({
         status: 'completed',
-        new_product_id: finalizeData.new_product_id,
-        new_product_name: finalizeData.new_product_name,
-        new_quantity: finalizeData.new_quantity,
-        new_price: finalizeData.new_price,
+        // Nuevo formato con arrays
+        new_products: finalizeData.new_products,
+        // Compatibilidad con campos antiguos (primer producto)
+        new_product_id: finalizeData.new_products[0]?.productId,
+        new_product_name: finalizeData.new_products[0]?.productName,
+        new_quantity: finalizeData.new_products.reduce((sum, p) => sum + p.quantity, 0),
+        new_price: finalizeData.new_products[0]?.price || 0,
         new_total: new_total,
-        new_unit_ids: finalizeData.new_unit_ids || [],
+        new_unit_ids: finalizeData.new_products[0]?.unitIds || [],
         price_difference: price_difference,
         payment_method: finalizeData.payment_method,
         payment_cash: finalizeData.payment_cash || 0,
@@ -3161,7 +3215,7 @@ export const finalizeExchange = async (
       })
       .eq('id', exchangeId)
       .eq('company', company)
-      .select()
+      .select('*')
       .single();
 
     if (updateError) {
@@ -3202,39 +3256,52 @@ export const cancelExchange = async (exchangeId: string): Promise<boolean> => {
       return false;
     }
 
-    // 2. Devolver el producto original de vuelta al cliente (revertir la devolución)
-    // Esto significa sacarlo del inventario nuevamente
-    await addMovement({
-      type: 'exit',
-      product_id: exchange.original_product_id,
-      product_name: exchange.original_product_name,
-      quantity: exchange.original_quantity,
-      reason: 'Cambio cancelado - Producto devuelto al cliente',
-      reference: exchange.exchange_number,
-      user_name: exchange.registered_by,
-      unit_ids: exchange.original_unit_ids || []
-    });
+    // 2. Devolver los productos originales de vuelta al cliente (revertir la devolución)
+    // Esto significa sacarlos del inventario nuevamente
+    const originalProducts = exchange.original_products && Array.isArray(exchange.original_products)
+      ? exchange.original_products
+      : [{
+          productId: exchange.original_product_id,
+          productName: exchange.original_product_name,
+          quantity: exchange.original_quantity,
+          price: exchange.original_price,
+          total: exchange.original_total,
+          unitIds: exchange.original_unit_ids
+        }];
 
-    const { data: originalProduct } = await supabase
-      .from('products')
-      .select('*')
-      .eq('id', exchange.original_product_id)
-      .single();
-
-    if (originalProduct) {
-      const newStock = originalProduct.stock - exchange.original_quantity;
-      let newRegisteredIds = originalProduct.registered_ids || [];
-
-      // Si el producto usa IDs únicas, liberar las IDs que estaban marcadas como "en cambio"
-      if (originalProduct.use_unit_ids && exchange.original_unit_ids && exchange.original_unit_ids.length > 0) {
-        const { releaseExchangeIds } = await import('./unit-ids-utils');
-        newRegisteredIds = releaseExchangeIds(newRegisteredIds, exchangeId);
-      }
-
-      await updateProduct(exchange.original_product_id, {
-        stock: newStock,
-        registered_ids: newRegisteredIds
+    for (const originalProd of originalProducts) {
+      await addMovement({
+        type: 'exit',
+        product_id: originalProd.productId,
+        product_name: originalProd.productName,
+        quantity: originalProd.quantity,
+        reason: 'Cambio cancelado - Producto devuelto al cliente',
+        reference: exchange.exchange_number,
+        user_name: exchange.registered_by,
+        unit_ids: originalProd.unitIds || []
       });
+
+      const { data: product } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', originalProd.productId)
+        .single();
+
+      if (product) {
+        const newStock = product.stock - originalProd.quantity;
+        let newRegisteredIds = product.registered_ids || [];
+
+        // Si el producto usa IDs únicas, liberar las IDs que estaban marcadas como "en cambio"
+        if (product.use_unit_ids && originalProd.unitIds && originalProd.unitIds.length > 0) {
+          const { releaseExchangeIds } = await import('./unit-ids-utils');
+          newRegisteredIds = releaseExchangeIds(newRegisteredIds, exchangeId);
+        }
+
+        await updateProduct(originalProd.productId, {
+          stock: newStock,
+          registered_ids: newRegisteredIds
+        });
+      }
     }
 
     // 3. Marcar el cambio como cancelado
@@ -3259,21 +3326,26 @@ export const cancelExchange = async (exchangeId: string): Promise<boolean> => {
 
 export const getExchangesStats = async () => {
   const exchanges = await getExchanges();
-  
-  const totalExchanges = exchanges.length;
-  const exchangesByInvoice = exchanges.filter(e => e.type === 'invoice').length;
-  const directExchanges = exchanges.filter(e => e.type === 'direct').length;
-  
+
+  // Solo contar cambios completados (excluir pendientes y cancelados)
+  const completedExchanges = exchanges.filter(e => e.status === 'completed');
+
+  const totalExchanges = completedExchanges.length;
+  const exchangesByInvoice = completedExchanges.filter(e => e.type === 'invoice').length;
+  const directExchanges = completedExchanges.filter(e => e.type === 'direct').length;
+
   // Calcular diferencia total (cuánto han pagado los clientes por diferencias)
-  const totalPositiveDifference = exchanges
+  // Solo de cambios completados
+  const totalPositiveDifference = completedExchanges
     .filter(e => e.price_difference > 0)
     .reduce((sum, e) => sum + (e.payment_amount || 0), 0);
-  
+
   // Calcular diferencia total negativa (cuánto se les ha devuelto a los clientes)
-  const totalNegativeDifference = exchanges
+  // Solo de cambios completados
+  const totalNegativeDifference = completedExchanges
     .filter(e => e.price_difference < 0)
     .reduce((sum, e) => sum + Math.abs(e.price_difference), 0);
-  
+
   return {
     totalExchanges,
     exchangesByInvoice,
@@ -3287,8 +3359,11 @@ export const getExchangesStats = async () => {
  * Calcula el impacto de cambios en los ingresos
  */
 export const calculateExchangeImpact = (exchanges: Exchange[]): number => {
+  // Solo contar cambios completados (excluir pendientes y cancelados)
+  const completedExchanges = exchanges.filter(ex => ex.status === 'completed');
+
   // El impacto neto es la suma de todas las diferencias de precio que se cobraron
-  return exchanges.reduce((sum, ex) => {
+  return completedExchanges.reduce((sum, ex) => {
     // Solo contar las diferencias que se pagaron realmente
     if (ex.price_difference > 0 && ex.payment_amount) {
       return sum + ex.payment_amount;
@@ -3340,72 +3415,104 @@ export const deleteExchange = async (exchangeId: string): Promise<boolean> => {
       return false;
     }
     
-    // 1. REVERTIR: Sacar el producto original del inventario (el que devolvieron)
-    // Porque al crear el cambio se AGREGÓ al inventario
-    await addMovement({
-      type: 'exit',
-      product_id: exchange.original_product_id,
-      product_name: exchange.original_product_name,
-      quantity: exchange.original_quantity,
-      reason: 'Cambio eliminado - Revertir devolución',
-      reference: exchange.exchange_number,
-      user_name: user.username,
-      unit_ids: exchange.original_unit_ids || []
-    });
-    
-    const { data: originalProduct } = await supabase
-      .from('products')
-      .select('*')
-      .eq('id', exchange.original_product_id)
-      .single();
-    
-    if (originalProduct) {
-      const newStock = originalProduct.stock - exchange.original_quantity;
-      let newRegisteredIds = originalProduct.registered_ids || [];
-      
-      // Si el producto usa IDs únicas, removerlas
-      if (originalProduct.use_unit_ids && exchange.original_unit_ids && exchange.original_unit_ids.length > 0) {
-        newRegisteredIds = newRegisteredIds.filter(id => !exchange.original_unit_ids?.includes(id));
-      }
-      
-      await updateProduct(exchange.original_product_id, { 
-        stock: newStock,
-        registered_ids: newRegisteredIds
+    // 1. REVERTIR: Sacar los productos originales del inventario (los que devolvieron)
+    // Porque al crear el cambio se AGREGARON al inventario
+    const originalProducts = exchange.original_products && Array.isArray(exchange.original_products)
+      ? exchange.original_products
+      : [{
+          productId: exchange.original_product_id,
+          productName: exchange.original_product_name,
+          quantity: exchange.original_quantity,
+          price: exchange.original_price,
+          total: exchange.original_total,
+          unitIds: exchange.original_unit_ids
+        }];
+
+    for (const originalProd of originalProducts) {
+      await addMovement({
+        type: 'exit',
+        product_id: originalProd.productId,
+        product_name: originalProd.productName,
+        quantity: originalProd.quantity,
+        reason: 'Cambio eliminado - Revertir devolución',
+        reference: exchange.exchange_number,
+        user_name: user.username,
+        unit_ids: originalProd.unitIds || []
       });
+
+      const { data: product } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', originalProd.productId)
+        .single();
+
+      if (product) {
+        const newStock = product.stock - originalProd.quantity;
+        let newRegisteredIds = product.registered_ids || [];
+
+        // Si el producto usa IDs únicas, removerlas
+        if (product.use_unit_ids && originalProd.unitIds && originalProd.unitIds.length > 0) {
+          newRegisteredIds = newRegisteredIds.filter(
+            (idObj: any) => !originalProd.unitIds?.includes(typeof idObj === 'string' ? idObj : idObj.id)
+          );
+        }
+
+        await updateProduct(originalProd.productId, {
+          stock: newStock,
+          registered_ids: newRegisteredIds
+        });
+      }
     }
-    
-    // 2. REVERTIR: Devolver el producto nuevo al inventario (el que entregaron)
-    // Porque al crear el cambio se RESTÓ del inventario
-    await addMovement({
-      type: 'entry',
-      product_id: exchange.new_product_id,
-      product_name: exchange.new_product_name,
-      quantity: exchange.new_quantity,
-      reason: 'Cambio eliminado - Devolver producto',
-      reference: exchange.exchange_number,
-      user_name: user.username,
-      unit_ids: exchange.new_unit_ids || []
-    });
-    
-    const { data: newProduct } = await supabase
-      .from('products')
-      .select('*')
-      .eq('id', exchange.new_product_id)
-      .single();
-    
-    if (newProduct) {
-      const newStock = newProduct.stock + exchange.new_quantity;
-      let newRegisteredIds = newProduct.registered_ids || [];
-      
-      // Si el producto usa IDs únicas, agregarlas de vuelta
-      if (newProduct.use_unit_ids && exchange.new_unit_ids && exchange.new_unit_ids.length > 0) {
-        newRegisteredIds = [...exchange.new_unit_ids, ...newRegisteredIds];
+
+    // 2. REVERTIR: Devolver los productos nuevos al inventario (los que entregaron)
+    // Porque al crear el cambio se RESTARON del inventario
+    if (exchange.new_product_id) {
+      const newProducts = exchange.new_products && Array.isArray(exchange.new_products)
+        ? exchange.new_products
+        : [{
+            productId: exchange.new_product_id,
+            productName: exchange.new_product_name,
+            quantity: exchange.new_quantity,
+            price: exchange.new_price,
+            total: exchange.new_total,
+            unitIds: exchange.new_unit_ids
+          }];
+
+      for (const newProd of newProducts) {
+        await addMovement({
+          type: 'entry',
+          product_id: newProd.productId,
+          product_name: newProd.productName,
+          quantity: newProd.quantity,
+          reason: 'Cambio eliminado - Devolver producto',
+          reference: exchange.exchange_number,
+          user_name: user.username,
+          unit_ids: newProd.unitIds || []
+        });
+
+        const { data: product } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', newProd.productId)
+          .single();
+
+        if (product) {
+          const newStock = product.stock + newProd.quantity;
+          let newRegisteredIds = product.registered_ids || [];
+
+          // Si el producto usa IDs únicas, agregarlas de vuelta
+          if (product.use_unit_ids && newProd.unitIds && newProd.unitIds.length > 0) {
+            const { convertToIdsWithNotes } = await import('./unit-ids-utils');
+            const idsAsObjects = convertToIdsWithNotes(newProd.unitIds);
+            newRegisteredIds = [...idsAsObjects, ...newRegisteredIds];
+          }
+
+          await updateProduct(newProd.productId, {
+            stock: newStock,
+            registered_ids: newRegisteredIds
+          });
+        }
       }
-      
-      await updateProduct(exchange.new_product_id, { 
-        stock: newStock,
-        registered_ids: newRegisteredIds
-      });
     }
     
     // 3. Eliminar el cambio de la base de datos
