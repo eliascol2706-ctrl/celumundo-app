@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Plus, Edit2, Trash2, Image as ImageIcon, Percent, Eye, EyeOff, GripVertical, Upload, Search, Loader2, X } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -36,6 +36,14 @@ export function CatalogAdmin() {
   const [showPrice, setShowPrice] = useState(true);
   const [imageUrl, setImageUrl] = useState('');
   const [displayOrder, setDisplayOrder] = useState(0);
+  const [description, setDescription] = useState('');
+  const [customPrice, setCustomPrice] = useState<number | ''>('');
+  const [displayName, setDisplayName] = useState('');
+  const [showReferences, setShowReferences] = useState(false);
+  const [productReferences, setProductReferences] = useState<string[]>([]);
+
+  // References modal
+  const [showReferencesModal, setShowReferencesModal] = useState(false);
 
   // Image upload states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -111,6 +119,11 @@ export function CatalogAdmin() {
     setImageUrl(item.image_url || '');
     setImagePreview(item.image_url || '');
     setDisplayOrder(item.display_order || 0);
+    setDescription(item.description || '');
+    setCustomPrice(item.custom_price || '');
+    setDisplayName(item.display_name || '');
+    setShowReferences(item.show_references || false);
+    setProductReferences(item.product_references || []);
     setShowAddDialog(true);
   };
 
@@ -120,6 +133,11 @@ export function CatalogAdmin() {
     setShowPrice(true);
     setImageUrl('');
     setDisplayOrder(catalogItems.length);
+    setDescription('');
+    setCustomPrice('');
+    setDisplayName('');
+    setShowReferences(false);
+    setProductReferences([]);
     setSelectedFile(null);
     setImagePreview('');
     setProductSearchInput('');
@@ -175,6 +193,33 @@ export function CatalogAdmin() {
     setSelectedProductId(productId);
     setProductSearchInput('');
     setSearchResults([]);
+
+    // Cargar el precio y nombre del producto automáticamente
+    const selectedProduct = products.find(p => p.id === productId) ||
+                           searchResults.find(p => p.id === productId);
+    if (selectedProduct) {
+      setCustomPrice(selectedProduct.price1 || selectedProduct.final_price || 0);
+      setDisplayName(selectedProduct.name || '');
+    }
+  };
+
+  const handleAddReference = () => {
+    setProductReferences([...productReferences, '']);
+  };
+
+  const handleRemoveReference = (index: number) => {
+    setProductReferences(productReferences.filter((_, i) => i !== index));
+  };
+
+  const handleReferenceChange = (index: number, value: string) => {
+    const newReferences = [...productReferences];
+    newReferences[index] = value;
+    setProductReferences(newReferences);
+  };
+
+  const getSelectedProduct = () => {
+    return products.find(p => p.id === selectedProductId) ||
+           searchResults.find(p => p.id === selectedProductId);
   };
 
   const handleSave = async () => {
@@ -185,6 +230,11 @@ export function CatalogAdmin() {
 
     if (!imageUrl) {
       toast.error('Debes cargar una imagen del producto');
+      return;
+    }
+
+    if (showPrice && (!customPrice || Number(customPrice) <= 0)) {
+      toast.error('Debes ingresar un precio válido para el producto');
       return;
     }
 
@@ -204,10 +254,15 @@ export function CatalogAdmin() {
     const catalogData = {
       product_id: selectedProductId,
       company: getCurrentCompany(),
+      price_type: 'price1', // Campo requerido por la base de datos
       original_price: selectedProduct!.price1 || selectedProduct!.final_price || 0,
+      custom_price: customPrice ? Number(customPrice) : null,
       discount_percentage: discountPercentage,
+      description: description.trim() || null,
+      display_name: displayName.trim() || null,
+      show_references: showReferences,
+      product_references: productReferences.length > 0 ? productReferences.filter(ref => ref.trim()) : null,
       show_price: showPrice,
-      price_type: showPrice ? 'show' : 'consult',
       image_url: imageUrl,
       display_order: displayOrder
     };
@@ -438,24 +493,27 @@ export function CatalogAdmin() {
 
       {/* Add/Edit Dialog */}
       <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader className="flex-shrink-0">
             <DialogTitle>
               {editingItem ? 'Editar Producto' : 'Agregar Producto al Catálogo'}
             </DialogTitle>
+            <DialogDescription>
+              {editingItem ? 'Modifica la información del producto en el catálogo' : 'Configura cómo se mostrará el producto en el catálogo público'}
+            </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4">
+          <div className="space-y-3 overflow-y-auto flex-1 px-1">
             {/* Product Search */}
             <div className="space-y-2">
               <Label>Producto</Label>
               {selectedProductId ? (
-                <div className="flex items-center gap-2 p-3 border rounded-md bg-accent/50">
-                  <div className="flex-1">
-                    <div className="font-semibold">
+                <div className="flex items-center gap-2 p-2 border rounded-md bg-accent/50">
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm truncate">
                       {getProductName(selectedProductId)}
                     </div>
-                    <div className="text-sm text-muted-foreground">
+                    <div className="text-xs text-muted-foreground">
                       {formatCOP(products.find(p => p.id === selectedProductId)?.price1 || 0)}
                     </div>
                   </div>
@@ -475,46 +533,40 @@ export function CatalogAdmin() {
               ) : (
                 <div className="space-y-2">
                   <div className="relative">
-                    <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
                       value={productSearchInput}
                       onChange={(e) => setProductSearchInput(e.target.value)}
-                      placeholder="Buscar por nombre, código o categoría..."
-                      className="pl-10"
+                      placeholder="Buscar producto..."
+                      className="pl-10 h-9"
                       disabled={!!editingItem}
                     />
                     {isSearchingProducts && (
-                      <Loader2 className="absolute right-3 top-3 h-4 w-4 animate-spin text-muted-foreground" />
+                      <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />
                     )}
                   </div>
 
-                  {/* Search Results */}
                   {searchResults.length > 0 && (
-                    <div className="border rounded-md max-h-64 overflow-y-auto">
+                    <div className="border rounded-md max-h-40 overflow-y-auto">
                       {searchResults.map((product) => (
                         <button
                           key={product.id}
                           onClick={() => handleSelectProduct(product.id)}
-                          className="w-full text-left p-3 hover:bg-accent transition-colors border-b last:border-b-0"
+                          className="w-full text-left p-2 hover:bg-accent transition-colors border-b last:border-b-0"
                         >
-                          <div className="font-semibold">{product.name}</div>
-                          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                            <span>Código: {product.code}</span>
+                          <div className="font-semibold text-sm">{product.name}</div>
+                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                            <span>{product.code}</span>
                             <span>•</span>
                             <span>{formatCOP(product.price1)}</span>
                           </div>
-                          {product.category && (
-                            <div className="text-xs text-muted-foreground mt-1">
-                              Categoría: {product.category}
-                            </div>
-                          )}
                         </button>
                       ))}
                     </div>
                   )}
 
                   {productSearchInput && !isSearchingProducts && searchResults.length === 0 && (
-                    <div className="text-sm text-muted-foreground text-center py-4">
+                    <div className="text-sm text-muted-foreground text-center py-2">
                       No se encontraron productos
                     </div>
                   )}
@@ -522,46 +574,126 @@ export function CatalogAdmin() {
               )}
             </div>
 
-            {/* Discount */}
-            <div className="space-y-2">
-              <Label>Descuento (%)</Label>
-              <div className="flex items-center gap-2">
-                <Percent className="h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="number"
-                  min="0"
-                  max="100"
-                  value={discountPercentage}
-                  onChange={(e) => setDiscountPercentage(Number(e.target.value))}
-                  placeholder="0"
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">
-                Deja en 0 si no hay descuento
-              </p>
-            </div>
+            {selectedProductId && (
+              <>
+                {/* Display Name */}
+                <div className="space-y-1">
+                  <Label className="text-sm">Nombre de Visualización</Label>
+                  <Input
+                    value={displayName}
+                    onChange={(e) => setDisplayName(e.target.value)}
+                    placeholder="Nombre para mostrar en el catálogo"
+                    className="h-9"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Este nombre aparecerá en el catálogo público
+                  </p>
+                </div>
 
-            {/* Show Price */}
-            <div className="flex items-center justify-between space-y-2">
-              <div className="space-y-0.5">
-                <Label>Mostrar Precio</Label>
-                <p className="text-xs text-muted-foreground">
-                  Si está desactivado, se mostrará el botón "Consultar"
-                </p>
-              </div>
-              <Switch
-                checked={showPrice}
-                onCheckedChange={setShowPrice}
-              />
-            </div>
+                {/* Show References Toggle and Button */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between p-2 border rounded-md">
+                    <Label className="text-sm">Mostrar Referencias</Label>
+                    <Switch
+                      checked={showReferences}
+                      onCheckedChange={setShowReferences}
+                    />
+                  </div>
+                  {showReferences && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setShowReferencesModal(true)}
+                      className="w-full h-9"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      {productReferences.length > 0
+                        ? `${productReferences.length} Referencias`
+                        : 'Agregar Referencias'}
+                    </Button>
+                  )}
+                </div>
+
+                {/* Price and Discount in Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Custom Price */}
+                  <div className="space-y-1">
+                    <Label className="text-sm">Precio</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      step="100"
+                      value={customPrice}
+                      onChange={(e) => setCustomPrice(e.target.value ? Number(e.target.value) : '')}
+                      placeholder="Precio"
+                      className="h-9"
+                    />
+                  </div>
+
+                  {/* Discount */}
+                  <div className="space-y-1">
+                    <Label className="text-sm">Descuento (%)</Label>
+                    <div className="flex items-center gap-2">
+                      <Percent className="h-4 w-4 text-muted-foreground flex-shrink-0" />
+                      <Input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={discountPercentage}
+                        onChange={(e) => setDiscountPercentage(Number(e.target.value))}
+                        placeholder="0"
+                        className="h-9"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Description */}
+                <div className="space-y-1">
+                  <Label className="text-sm">Descripción</Label>
+                  <textarea
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="Descripción del producto..."
+                    className="w-full min-h-[60px] px-3 py-2 text-sm rounded-md border border-input bg-background resize-none focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                    rows={2}
+                  />
+                </div>
+
+                {/* Show Price and Order in Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Show Price */}
+                  <div className="flex items-center justify-between p-2 border rounded-md">
+                    <Label className="text-sm">Mostrar Precio</Label>
+                    <Switch
+                      checked={showPrice}
+                      onCheckedChange={setShowPrice}
+                    />
+                  </div>
+
+                  {/* Display Order */}
+                  <div className="space-y-1">
+                    <Label className="text-sm">Orden</Label>
+                    <Input
+                      type="number"
+                      min="0"
+                      value={displayOrder}
+                      onChange={(e) => setDisplayOrder(Number(e.target.value))}
+                      placeholder="0"
+                      className="h-9"
+                    />
+                  </div>
+                </div>
+              </>
+            )}
 
             {/* Image Upload */}
             <div className="space-y-2">
-              <Label>Imagen del Producto</Label>
+              <Label className="text-sm">Imagen del Producto</Label>
 
               {imageUrl ? (
                 <div className="space-y-2">
-                  <div className="w-full h-48 border rounded-md overflow-hidden bg-muted">
+                  <div className="w-full h-32 border rounded-md overflow-hidden bg-muted">
                     <img src={imageUrl} alt="Preview" className="w-full h-full object-cover" />
                   </div>
                   <Button
@@ -572,9 +704,9 @@ export function CatalogAdmin() {
                       setSelectedFile(null);
                       setImagePreview('');
                     }}
-                    className="w-full"
+                    className="w-full h-8"
                   >
-                    <X className="h-4 w-4 mr-2" />
+                    <X className="h-3 w-3 mr-2" />
                     Cambiar Imagen
                   </Button>
                 </div>
@@ -584,95 +716,85 @@ export function CatalogAdmin() {
                     type="file"
                     accept="image/*"
                     onChange={handleFileSelect}
-                    className="cursor-pointer"
+                    className="cursor-pointer h-9 text-sm"
                   />
 
                   {imagePreview && (
                     <div className="space-y-2">
-                      <div className="w-full h-48 border rounded-md overflow-hidden bg-muted">
+                      <div className="w-full h-32 border rounded-md overflow-hidden bg-muted">
                         <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
                       </div>
                       <Button
                         onClick={handleUploadImage}
                         disabled={isUploading}
-                        className="w-full"
+                        className="w-full h-8"
+                        size="sm"
                       >
                         {isUploading ? (
                           <>
-                            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                            <Loader2 className="h-3 w-3 mr-2 animate-spin" />
                             Subiendo...
                           </>
                         ) : (
                           <>
-                            <Upload className="h-4 w-4 mr-2" />
+                            <Upload className="h-3 w-3 mr-2" />
                             Subir Imagen
                           </>
                         )}
                       </Button>
                     </div>
                   )}
-
-                  <p className="text-xs text-muted-foreground">
-                    Selecciona una imagen (max 5MB). Formatos: JPG, PNG, WebP
-                  </p>
                 </div>
               )}
             </div>
 
-            {/* Display Order */}
-            <div className="space-y-2">
-              <Label>Orden de Visualización</Label>
-              <Input
-                type="number"
-                min="0"
-                value={displayOrder}
-                onChange={(e) => setDisplayOrder(Number(e.target.value))}
-                placeholder="0"
-              />
-              <p className="text-xs text-muted-foreground">
-                Menor número = aparece primero
-              </p>
-            </div>
-
             {/* Preview */}
-            {selectedProductId && (
-              <div className="border-t pt-4">
-                <Label className="mb-2 block">Vista Previa</Label>
-                <div className="border rounded-lg p-4 bg-accent/20">
-                  <div className="flex items-start gap-4">
-                    <div className="w-24 h-24 bg-muted rounded-md overflow-hidden flex-shrink-0">
-                      {(imageUrl || imagePreview) ? (
-                        <img src={imageUrl || imagePreview} alt="Preview" className="w-full h-full object-cover" />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <ImageIcon className="h-8 w-8 text-muted-foreground" />
+            {selectedProductId && imageUrl && (
+              <div className="border-t pt-3">
+                <Label className="mb-2 block text-sm">Vista Previa</Label>
+                <div className="border rounded-lg p-3 bg-accent/20">
+                  <div className="flex items-start gap-3">
+                    <div className="w-16 h-16 bg-muted rounded-md overflow-hidden flex-shrink-0">
+                      <img src={imageUrl || imagePreview} alt="Preview" className="w-full h-full object-cover" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-sm truncate">
+                        {displayName || getProductName(selectedProductId)}
+                      </h4>
+                      {description && (
+                        <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
+                          {description}
+                        </p>
+                      )}
+                      {showReferences && productReferences.length > 0 && (
+                        <div className="mt-1">
+                          <p className="text-xs text-muted-foreground mb-1">Referencias:</p>
+                          <div className="flex flex-wrap gap-1">
+                            {productReferences.filter(ref => ref.trim()).map((ref, idx) => (
+                              <Badge key={idx} variant="outline" className="text-xs">
+                                {ref}
+                              </Badge>
+                            ))}
+                          </div>
                         </div>
                       )}
-                    </div>
-                    <div className="flex-1">
-                      <h4 className="font-semibold">
-                        {getProductName(selectedProductId)}
-                      </h4>
                       {showPrice ? (
-                        <div className="mt-2">
+                        <div className="mt-1">
                           {(() => {
-                            const selectedProduct = products.find(p => p.id === selectedProductId) ||
-                                                   searchResults.find(p => p.id === selectedProductId);
-                            const originalPrice = selectedProduct?.price1 || selectedProduct?.final_price || 0;
-
+                            const basePrice = customPrice ? Number(customPrice) : 0;
                             return (
                               <>
                                 {discountPercentage > 0 && (
-                                  <div className="text-sm text-muted-foreground line-through">
-                                    {formatCOP(originalPrice)}
+                                  <div className="text-xs text-muted-foreground line-through">
+                                    {formatCOP(basePrice)}
                                   </div>
                                 )}
-                                <div className={`text-xl font-bold ${discountPercentage > 0 ? 'text-green-600' : ''}`}>
-                                  {formatCOP(calculateDiscountedPrice(originalPrice, discountPercentage))}
+                                <div className={`text-lg font-bold ${discountPercentage > 0 ? 'text-green-600' : ''}`}>
+                                  {formatCOP(calculateDiscountedPrice(basePrice, discountPercentage))}
                                 </div>
                                 {discountPercentage > 0 && (
-                                  <Badge variant="destructive" className="mt-1">
-                                    -{discountPercentage}% OFF
+                                  <Badge variant="destructive" className="mt-1 text-xs">
+                                    -{discountPercentage}%
                                   </Badge>
                                 )}
                               </>
@@ -680,8 +802,8 @@ export function CatalogAdmin() {
                           })()}
                         </div>
                       ) : (
-                        <Button variant="outline" className="mt-2" size="sm">
-                          Consultar Precio
+                        <Button variant="outline" className="mt-1 h-7 text-xs" size="sm">
+                          Consultar
                         </Button>
                       )}
                     </div>
@@ -691,12 +813,71 @@ export function CatalogAdmin() {
             )}
           </div>
 
-          <div className="flex justify-end gap-2 mt-4">
-            <Button variant="outline" onClick={() => setShowAddDialog(false)}>
+          <div className="flex justify-end gap-2 mt-3 pt-3 border-t flex-shrink-0">
+            <Button variant="outline" onClick={() => setShowAddDialog(false)} size="sm">
               Cancelar
             </Button>
-            <Button onClick={handleSave}>
+            <Button onClick={handleSave} size="sm">
               {editingItem ? 'Actualizar' : 'Agregar'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* References Modal */}
+      <Dialog open={showReferencesModal} onOpenChange={setShowReferencesModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Agregar Referencias</DialogTitle>
+            <DialogDescription>
+              Agrega las referencias o modelos compatibles del producto (ej: Samsung A34, Samsung A35)
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+            {productReferences.length === 0 ? (
+              <div className="text-center py-6 text-muted-foreground text-sm">
+                No hay referencias agregadas
+              </div>
+            ) : (
+              productReferences.map((reference, index) => (
+                <div key={index} className="flex items-center gap-2">
+                  <Input
+                    value={reference}
+                    onChange={(e) => handleReferenceChange(index, e.target.value)}
+                    placeholder={`Referencia ${index + 1}`}
+                    className="h-9"
+                  />
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleRemoveReference(index)}
+                    className="flex-shrink-0"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))
+            )}
+
+            <Button
+              onClick={handleAddReference}
+              variant="outline"
+              className="w-full"
+              size="sm"
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Agregar Referencia
+            </Button>
+          </div>
+
+          <div className="flex justify-end gap-2 mt-4 pt-3 border-t">
+            <Button
+              variant="outline"
+              onClick={() => setShowReferencesModal(false)}
+              size="sm"
+            >
+              Cerrar
             </Button>
           </div>
         </DialogContent>

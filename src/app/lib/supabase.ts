@@ -279,11 +279,16 @@ export interface PublicCatalog {
   id: string;
   company: 'celumundo' | 'repuestos';
   product_id: string;
-  price_type: 'show' | 'consult'; // show = mostrar precio, consult = botón consultar
+  price_type: 'price1' | 'price2' | 'final_price'; // Campo requerido por constraint de DB
   display_order: number;
   image_url?: string;
   discount_percentage?: number; // Porcentaje de descuento (0-100)
   original_price: number; // Precio original del producto
+  custom_price?: number; // Precio personalizado (sobrescribe original_price con descuento)
+  description?: string; // Descripción personalizada para el catálogo
+  display_name?: string; // Nombre personalizado para mostrar en el catálogo
+  show_references?: boolean; // true = mostrar referencias en el catálogo
+  product_references?: string[]; // Referencias específicas del producto
   show_price: boolean; // true = muestra precio, false = muestra botón consultar
   created_at?: string;
   updated_at?: string;

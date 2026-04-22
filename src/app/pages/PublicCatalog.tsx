@@ -54,8 +54,12 @@ export function PublicCatalog() {
     }
   };
 
-  const getProductName = (productId: string) => {
-    const product = products.find(p => p.id === productId);
+  const getProductName = (item: CatalogItem) => {
+    // Usar display_name si existe, sino usar el nombre del producto
+    if (item.display_name) {
+      return item.display_name;
+    }
+    const product = products.find(p => p.id === item.product_id);
     return product?.name || 'Producto';
   };
 
@@ -77,8 +81,10 @@ export function PublicCatalog() {
   };
 
   const filteredItems = catalogItems.filter(item => {
-    const productName = getProductName(item.product_id).toLowerCase();
-    return productName.includes(searchTerm.toLowerCase());
+    const productName = getProductName(item).toLowerCase();
+    const description = (item.description || '').toLowerCase();
+    const searchLower = searchTerm.toLowerCase();
+    return productName.includes(searchLower) || description.includes(searchLower);
   });
 
   if (loading) {
@@ -158,10 +164,11 @@ export function PublicCatalog() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filteredItems.map((item) => {
               const hasDiscount = (item.discount_percentage || 0) > 0;
+              const basePrice = item.custom_price || item.original_price;
               const discountedPrice = hasDiscount
-                ? calculateDiscountedPrice(item.original_price, item.discount_percentage!)
-                : item.original_price;
-              const productName = getProductName(item.product_id);
+                ? calculateDiscountedPrice(basePrice, item.discount_percentage!)
+                : basePrice;
+              const productName = getProductName(item);
 
               return (
                 <div
@@ -195,16 +202,36 @@ export function PublicCatalog() {
 
                   {/* Product Info */}
                   <div className="p-6">
-                    <h3 className="text-lg font-bold text-gray-800 mb-3 line-clamp-2 min-h-[3.5rem]">
+                    <h3 className="text-lg font-bold text-gray-800 mb-2 line-clamp-2">
                       {productName}
                     </h3>
+
+                    {item.description && (
+                      <p className="text-sm text-gray-600 mb-3 line-clamp-2">
+                        {item.description}
+                      </p>
+                    )}
+
+                    {/* References */}
+                    {item.show_references && item.product_references && item.product_references.length > 0 && (
+                      <div className="mb-3">
+                        <p className="text-xs text-gray-500 font-semibold mb-1">Referencias:</p>
+                        <div className="flex flex-wrap gap-1">
+                          {item.product_references.map((ref, idx) => (
+                            <Badge key={idx} variant="outline" className="text-xs">
+                              {ref}
+                            </Badge>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Price Section */}
                     {item.show_price ? (
                       <div className="mb-4">
                         {hasDiscount && (
                           <div className="text-sm text-gray-400 line-through mb-1">
-                            {formatCOP(item.original_price)}
+                            {formatCOP(basePrice)}
                           </div>
                         )}
                         <div className={`text-3xl font-bold ${hasDiscount ? 'text-emerald-600' : 'text-gray-800'}`}>
@@ -212,7 +239,7 @@ export function PublicCatalog() {
                         </div>
                         {hasDiscount && (
                           <div className="text-sm text-emerald-600 font-semibold mt-1">
-                            Ahorras: COP {formatCOP(item.original_price - discountedPrice)}
+                            Ahorras: COP {formatCOP(basePrice - discountedPrice)}
                           </div>
                         )}
                       </div>
