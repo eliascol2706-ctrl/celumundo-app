@@ -40,17 +40,17 @@ const generateThermalInvoiceHTML = (
           .join(' | ');
 
         idsHTML = `
-          <div style="font-size: 10pt; margin-top: 2mm; padding: 2mm; background: #f5f5f5; border: 1px solid #ddd;">
-            <div style="font-weight: bold; margin-bottom: 1mm;">IDs:</div>
+          <div style="font-size: 7pt; margin-top: 1mm; padding: 1mm; background: #f5f5f5; border: 1px solid #ddd;">
+            <div style="font-weight: bold; margin-bottom: 0.5mm;">IDs:</div>
             <div>${idsWithNotes}</div>
           </div>
         `;
       }
 
       return `
-        <div style="margin-bottom: 4mm; font-size: 11pt;">
-          <div style="font-weight: bold; margin-bottom: 1.5mm; font-size: 12pt;">${item.productName}</div>
-          <div style="margin-bottom: 1.5mm;">
+        <div style="margin-bottom: 2mm; font-size: 8pt;">
+          <div style="font-weight: bold; margin-bottom: 1mm; font-size: 9pt;">${item.productName}</div>
+          <div style="margin-bottom: 1mm;">
             ${item.quantity} x ${formatCOP(item.price)} = ${formatCOP(item.total)}
           </div>
           ${idsHTML}
@@ -65,16 +65,16 @@ const generateThermalInvoiceHTML = (
     let paymentsHTML = '';
     if (creditPayments && creditPayments.length > 0) {
       paymentsHTML = `
-        <div style="font-weight: bold; margin-bottom: 2mm; font-size: 12pt;">Abonos:</div>
+        <div style="font-weight: bold; margin-bottom: 1mm; font-size: 9pt;">Abonos:</div>
         ${creditPayments
           .map(
             (payment: any) => `
-          <div style="margin-bottom: 3mm; padding-bottom: 2mm; border-bottom: 1px dotted #ccc;">
+          <div style="margin-bottom: 2mm; padding-bottom: 1mm; border-bottom: 1px dotted #ccc;">
             <div style="display: flex; justify-content: space-between;">
               <span>${new Date(payment.date).toLocaleDateString('es-ES')}</span>
               <span>${formatCOP(payment.amount)}</span>
             </div>
-            <div style="font-size: 10pt; margin-top: 1mm;">
+            <div style="font-size: 7pt; margin-top: 0.5mm;">
               ${
                 payment.payment_method === 'cash'
                   ? 'Efectivo'
@@ -87,7 +87,7 @@ const generateThermalInvoiceHTML = (
         `
           )
           .join('')}
-        <div style="font-weight: bold; margin-top: 3mm; font-size: 12pt;">
+        <div style="font-weight: bold; margin-top: 2mm; font-size: 9pt;">
           <div style="display: flex; justify-content: space-between;">
             <span>Total Abonado:</span>
             <span>${formatCOP(creditPayments.reduce((sum: number, p: any) => sum + p.amount, 0))}</span>
@@ -97,16 +97,16 @@ const generateThermalInvoiceHTML = (
     }
 
     creditHTML = `
-      <div style="margin-bottom: 5mm; font-size: 11pt; border-bottom: 1px dashed black; padding-bottom: 4mm;">
-        <div style="font-weight: bold; text-align: center; margin-bottom: 3mm; font-size: 13pt;">FACTURA A CRÉDITO</div>
+      <div style="margin-bottom: 3mm; font-size: 8pt; border-bottom: 1px dashed black; padding-bottom: 2mm;">
+        <div style="font-weight: bold; text-align: center; margin-bottom: 2mm; font-size: 10pt;">FACTURA A CRÉDITO</div>
         ${paymentsHTML}
-        <div style="font-weight: bold; margin-top: 3mm; font-size: 12pt;">
+        <div style="font-weight: bold; margin-top: 2mm; font-size: 9pt;">
           <div style="display: flex; justify-content: space-between;">
             <span>Saldo Pendiente:</span>
             <span>${formatCOP(invoice.credit_balance || invoice.total)}</span>
           </div>
         </div>
-        <div style="margin-top: 2mm; font-size: 10pt;">
+        <div style="margin-top: 1mm; font-size: 8pt;">
           Estado: ${invoice.status === 'paid' ? 'PAGADO' : 'PENDIENTE'}
         </div>
       </div>
@@ -123,14 +123,14 @@ const generateThermalInvoiceHTML = (
       if (invoice.payment_transfer > 0)
         details.push(`• Transferencia: ${formatCOP(invoice.payment_transfer)}`);
       if (invoice.payment_other > 0) details.push(`• Otros: ${formatCOP(invoice.payment_other)}`);
-      paymentDetails = details.map((d) => `<div style="margin-bottom: 1.5mm;">${d}</div>`).join('');
+      paymentDetails = details.map((d) => `<div style="margin-bottom: 1mm;">${d}</div>`).join('');
     } else {
       paymentDetails = `<div>${invoice.payment_method}</div>`;
     }
 
     paymentHTML = `
-      <div style="margin-bottom: 5mm; font-size: 11pt; border-bottom: 1px dashed black; padding-bottom: 4mm;">
-        <div style="font-weight: bold; margin-bottom: 2mm; font-size: 12pt;">Método de Pago:</div>
+      <div style="margin-bottom: 3mm; font-size: 8pt; border-bottom: 1px dashed black; padding-bottom: 2mm;">
+        <div style="font-weight: bold; margin-bottom: 1mm; font-size: 9pt;">Método de Pago:</div>
         ${paymentDetails}
       </div>
     `;
@@ -151,42 +151,42 @@ const generateThermalInvoiceHTML = (
             print-color-adjust: exact;
           }
           body {
-            width: 80mm;
+            width: 72mm;
             font-family: 'Courier New', Courier, monospace;
-            font-size: 12pt;
-            padding: 4mm 3mm 6mm 3mm;
+            font-size: 9pt;
+            padding: 2mm 4mm 4mm 4mm;
             background: white;
             color: black;
             margin: 0 auto;
-            line-height: 1.3;
+            line-height: 1.2;
           }
         </style>
       </head>
       <body>
         <!-- Header -->
-        <div style="text-align: center; margin-bottom: 5mm; border-bottom: 2px dashed black; padding-bottom: 4mm;">
-          <div style="font-size: 18pt; font-weight: bold; margin-bottom: 2mm; letter-spacing: 1px;">${companyName}</div>
-          <div style="font-size: 14pt; font-weight: bold; margin-bottom: 2mm;">FACTURA DE VENTA</div>
-          <div style="font-size: 13pt; font-weight: bold;">No. ${invoice.number}</div>
+        <div style="text-align: center; margin-bottom: 3mm; border-bottom: 1px dashed black; padding-bottom: 2mm;">
+          <div style="font-size: 12pt; font-weight: bold; margin-bottom: 1mm;">${companyName}</div>
+          <div style="font-size: 10pt; font-weight: bold; margin-bottom: 1mm;">FACTURA DE VENTA</div>
+          <div style="font-size: 9pt; font-weight: bold;">No. ${invoice.number}</div>
         </div>
 
         <!-- Info -->
-        <div style="margin-bottom: 5mm; font-size: 11pt; border-bottom: 1px dashed black; padding-bottom: 4mm;">
-          <div style="margin-bottom: 2mm;">
+        <div style="margin-bottom: 3mm; font-size: 8pt; border-bottom: 1px dashed black; padding-bottom: 2mm;">
+          <div style="margin-bottom: 1mm;">
             <span style="font-weight: bold;">Cliente: </span>
             <span>${invoice.customer_name || 'Consumidor Final'}</span>
           </div>
           ${
             invoice.customer_document
               ? `
-          <div style="margin-bottom: 2mm;">
+          <div style="margin-bottom: 1mm;">
             <span style="font-weight: bold;">Documento: </span>
             <span>${invoice.customer_document}</span>
           </div>
           `
               : ''
           }
-          <div style="margin-bottom: 2mm;">
+          <div style="margin-bottom: 1mm;">
             <span style="font-weight: bold;">Fecha: </span>
             <span>${new Date(invoice.date).toLocaleString('es-ES', {
               day: '2-digit',
@@ -196,14 +196,14 @@ const generateThermalInvoiceHTML = (
               minute: '2-digit',
             })}</span>
           </div>
-          <div style="margin-bottom: 2mm;">
+          <div style="margin-bottom: 1mm;">
             <span style="font-weight: bold;">Tipo: </span>
             <span>${invoice.type === 'regular' ? 'Regular' : 'Al Mayor'}</span>
           </div>
           ${
             invoice.attended_by
               ? `
-          <div style="margin-bottom: 2mm;">
+          <div style="margin-bottom: 1mm;">
             <span style="font-weight: bold;">Atendido: </span>
             <span>${invoice.attended_by}</span>
           </div>
@@ -213,14 +213,14 @@ const generateThermalInvoiceHTML = (
         </div>
 
         <!-- Products -->
-        <div style="margin-bottom: 5mm; border-bottom: 2px dashed black; padding-bottom: 4mm;">
-          <div style="font-size: 13pt; font-weight: bold; text-align: center; margin-bottom: 3mm;">PRODUCTOS</div>
+        <div style="margin-bottom: 3mm; border-bottom: 1px dashed black; padding-bottom: 2mm;">
+          <div style="font-size: 9pt; font-weight: bold; text-align: center; margin-bottom: 2mm;">PRODUCTOS</div>
           ${productsHTML}
         </div>
 
         <!-- Total -->
-        <div style="margin-bottom: 5mm; font-size: 12pt;">
-          <div style="font-size: 15pt; font-weight: bold; border-top: 3px double black; padding-top: 3mm; margin-top: 2mm; display: flex; justify-content: space-between;">
+        <div style="margin-bottom: 3mm; font-size: 9pt;">
+          <div style="font-size: 11pt; font-weight: bold; border-top: 2px solid black; padding-top: 2mm; margin-top: 1mm; display: flex; justify-content: space-between;">
             <span>TOTAL:</span>
             <span>${formatCOP(invoice.total)}</span>
           </div>
@@ -230,24 +230,27 @@ const generateThermalInvoiceHTML = (
         ${creditHTML}
 
         <!-- Footer -->
-        <div style="text-align: center; font-size: 11pt; margin-top: 5mm; padding-top: 3mm; padding-bottom: 5mm;">
-          <div style="margin-bottom: 3mm;">================================</div>
-          <div style="font-weight: bold; margin-top: 3mm; margin-bottom: 3mm; font-size: 14pt;">
+        <div style="text-align: center; font-size: 8pt; margin-top: 3mm; padding-top: 2mm; padding-bottom: 3mm;">
+          <div style="margin-bottom: 2mm;">================================</div>
+          <div style="font-weight: bold; margin-top: 2mm; margin-bottom: 2mm; font-size: 10pt;">
             ¡GRACIAS POR SU COMPRA!
           </div>
-          <div style="margin-top: 3mm; margin-bottom: 2mm; font-size: 12pt; font-weight: bold;">
+          <div style="margin-top: 2mm; margin-bottom: 1mm; font-size: 9pt; font-weight: bold;">
             ${companyName}
           </div>
-          <div style="margin-bottom: 2mm; font-size: 11pt;">
+          <div style="margin-bottom: 1mm; font-size: 8pt;">
             www.celumundovip.com
           </div>
-          <div style="font-size: 10pt; margin-top: 2mm; margin-bottom: 3mm;">
+          <div style="font-size: 7pt; margin-top: 1mm; margin-bottom: 2mm;">
             ${new Date().toLocaleString('es-ES')}
           </div>
         </div>
 
         <!-- Espacio adicional para que la factura salga completa -->
-        <div style="height: 50mm; width: 100%;"></div>
+        <div style="height: 30mm; width: 100%;"></div>
+
+        <!-- Comando de corte de papel (ESC/POS) -->
+        <div style="page-break-after: always;"></div>
       </body>
     </html>
   `;

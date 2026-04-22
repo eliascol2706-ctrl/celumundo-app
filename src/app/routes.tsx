@@ -1,40 +1,69 @@
 import * as React from 'react';
 import { createBrowserRouter, Navigate } from 'react-router';
+import { getCurrentUser } from './lib/supabase';
+
+// Imports críticos (siempre cargados)
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
-import { Products } from './pages/Products';
-import { InvoicesMenu } from './pages/InvoicesMenu';
-import { RegularInvoice } from './pages/RegularInvoice';
-import { CreditInvoice } from './pages/CreditInvoice';
-import { FinancialManagement } from './pages/FinancialManagement';
-import { Movements } from './pages/Movements';
-import { Expenses } from './pages/Expenses';
-import { Reports } from './pages/Reports';
-import { Closures } from './pages/Closures';
-import { Departments } from './pages/Departments';
-import { Returns } from './pages/Returns';
-import { Customers } from './pages/Customers';
-import { CustomersNew } from './pages/CustomersNew';
-import { CustomerProfile } from './pages/CustomerProfile';
-import Exchanges from './pages/Exchanges';
-import Warranties from './pages/Warranties';
-import { getCurrentUser } from './lib/supabase';
-import ServiceOrders from './pages/ServiceOrders';
-import TrackingPage from './pages/TrackingPage';
+
+// Lazy loading para componentes pesados
+const Products = React.lazy(() => import('./pages/Products').then(m => ({ default: m.Products })));
+const InvoicesMenu = React.lazy(() => import('./pages/InvoicesMenu').then(m => ({ default: m.InvoicesMenu })));
+const RegularInvoice = React.lazy(() => import('./pages/RegularInvoice').then(m => ({ default: m.RegularInvoice })));
+const CreditInvoice = React.lazy(() => import('./pages/CreditInvoice').then(m => ({ default: m.CreditInvoice })));
+const FinancialManagement = React.lazy(() => import('./pages/FinancialManagement').then(m => ({ default: m.FinancialManagement })));
+const Movements = React.lazy(() => import('./pages/Movements').then(m => ({ default: m.Movements })));
+const Expenses = React.lazy(() => import('./pages/Expenses').then(m => ({ default: m.Expenses })));
+const Reports = React.lazy(() => import('./pages/Reports').then(m => ({ default: m.Reports })));
+const Closures = React.lazy(() => import('./pages/Closures').then(m => ({ default: m.Closures })));
+const Departments = React.lazy(() => import('./pages/Departments').then(m => ({ default: m.Departments })));
+const Returns = React.lazy(() => import('./pages/Returns').then(m => ({ default: m.Returns })));
+const Customers = React.lazy(() => import('./pages/Customers').then(m => ({ default: m.Customers })));
+const CustomersNew = React.lazy(() => import('./pages/CustomersNew').then(m => ({ default: m.CustomersNew })));
+const CustomerProfile = React.lazy(() => import('./pages/CustomerProfile').then(m => ({ default: m.CustomerProfile })));
+const Exchanges = React.lazy(() => import('./pages/Exchanges'));
+const Warranties = React.lazy(() => import('./pages/Warranties'));
+const ServiceOrders = React.lazy(() => import('./pages/ServiceOrders'));
+const TrackingPage = React.lazy(() => import('./pages/TrackingPage'));
+const CatalogAdmin = React.lazy(() => import('./pages/CatalogAdmin').then(m => ({ default: m.CatalogAdmin })));
+const PublicCatalog = React.lazy(() => import('./pages/PublicCatalog').then(m => ({ default: m.PublicCatalog })));
+
+// Componente Suspense Wrapper
+function SuspenseWrapper({ children }: { children: React.ReactNode }) {
+  return (
+    <React.Suspense
+      fallback={
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-center">
+            <div className="w-16 h-16 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-xl font-semibold text-gray-700">Cargando...</p>
+          </div>
+        </div>
+      }
+    >
+      {children}
+    </React.Suspense>
+  );
+}
 
 // Componente para proteger rutas
 function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: string[] }) {
   const currentUser = getCurrentUser();
-  
+
   if (!currentUser) {
     return <Navigate to="/login" replace />;
   }
-  
+
+  // Si el usuario es catalog_admin y no está en una ruta permitida, redirigir a catálogo
+  if (currentUser.role === 'catalog_admin' && allowedRoles && !allowedRoles.includes('catalog_admin')) {
+    return <Navigate to="/catalogo" replace />;
+  }
+
   if (allowedRoles && !allowedRoles.includes(currentUser.role)) {
     return <Navigate to="/" replace />;
   }
-  
+
   return <>{children}</>;
 }
 
@@ -46,6 +75,10 @@ export const router = createBrowserRouter([
   {
     path: '/seguimiento/:trackingCode',
     Component: TrackingPage,
+  },
+  {
+    path: '/catalogo-publico/:company',
+    Component: PublicCatalog,
   },
   {
     path: '/',
@@ -179,11 +212,19 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'ordenes-servicio', 
+      {
+        path: 'ordenes-servicio',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
             <ServiceOrders />
+          </ProtectedRoute>
+        )
+      },
+      {
+        path: 'catalogo',
+        element: (
+          <ProtectedRoute allowedRoles={['catalog_admin']}>
+            <CatalogAdmin />
           </ProtectedRoute>
         )
       },

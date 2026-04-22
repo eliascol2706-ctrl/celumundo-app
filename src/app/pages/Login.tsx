@@ -29,12 +29,19 @@ export function Login() {
           company,
         };
         saveSession(session);
-        
+
         const companyName = company === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
+        const roleLabel = user.role === 'admin' ? 'Administrador' : user.role === 'catalog_admin' ? 'Administrador de Catálogo' : 'Vendedor';
         toast.success(`¡Bienvenido a ${companyName}!`, {
-          description: `Usuario: ${user.role === 'admin' ? 'Administrador' : 'Vendedor'}`,
+          description: `Usuario: ${roleLabel}`,
         });
-        navigate('/');
+
+        // Redirigir según el rol
+        if (user.role === 'catalog_admin') {
+          navigate('/catalogo');
+        } else {
+          navigate('/');
+        }
       } else {
         toast.error('Usuario o contraseña incorrectos para esta empresa');
       }

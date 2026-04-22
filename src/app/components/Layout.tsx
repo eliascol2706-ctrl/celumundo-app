@@ -1,3 +1,4 @@
+import { Suspense } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   LayoutDashboard,
@@ -93,6 +94,16 @@ const sellerNavigation = [
     section: 'Consultas',
     items: [
       { name: 'Cierres', href: '/cierres', icon: DoorOpen },
+    ]
+  }
+];
+
+const catalogAdminNavigation = [
+  // Sección única: Administración de Catálogo
+  {
+    section: 'Catálogo',
+    items: [
+      { name: 'Administrar Catálogo', href: '/catalogo', icon: LayoutDashboard },
     ]
   }
 ];
@@ -359,7 +370,10 @@ export function Layout() {
     }
   }, [currentUser, navigate]);
 
-  const navigation = currentUser?.role === 'admin' ? adminNavigation : sellerNavigation;
+  const navigation =
+    currentUser?.role === 'admin' ? adminNavigation :
+    currentUser?.role === 'catalog_admin' ? catalogAdminNavigation :
+    sellerNavigation;
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme');
@@ -569,7 +583,18 @@ export function Layout() {
 
         {/* Contenido */}
         <main className="flex-1 overflow-y-auto p-4 lg:p-6">
-          <Outlet />
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center h-96">
+                <div className="text-center">
+                  <div className="w-12 h-12 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                  <p className="text-lg font-semibold text-gray-700">Cargando...</p>
+                </div>
+              </div>
+            }
+          >
+            <Outlet />
+          </Suspense>
         </main>
       </div>
 

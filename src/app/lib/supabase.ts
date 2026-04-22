@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 
 import { projectId, publicAnonKey } from '../../../utils/supabase/info.tsx';
+import { cache, cacheKeys, invalidateCache } from './cache';
 
 // Cliente de Supabase
 const supabaseUrl = `https://${projectId}.supabase.co`;
@@ -278,12 +279,18 @@ export interface PublicCatalog {
   id: string;
   company: 'celumundo' | 'repuestos';
   product_id: string;
-  price_type: 'price1' | 'price2' | 'final_price';
+  price_type: 'show' | 'consult'; // show = mostrar precio, consult = botón consultar
   display_order: number;
   image_url?: string;
+  discount_percentage?: number; // Porcentaje de descuento (0-100)
+  original_price: number; // Precio original del producto
+  show_price: boolean; // true = muestra precio, false = muestra botón consultar
   created_at?: string;
   updated_at?: string;
 }
+
+// Type alias para usar en el código
+export type CatalogItem = PublicCatalog;
 
 // ============================================
 // GESTIÓN DE USUARIOS
@@ -405,17 +412,24 @@ export const logoutUser = () => {
 
 export const getDepartments = async (): Promise<Department[]> => {
   const company = getCurrentCompany();
-  const { data, error } = await supabase
-    .from('departments')
-    .select('*')
-    .eq('company', company)
-    .order('name');
-  
-  if (error) {
-    console.error('Error fetching departments:', error);
-    return [];
-  }
-  return data || [];
+
+  return cache.withCache(
+    cacheKeys.departments(company),
+    async () => {
+      const { data, error } = await supabase
+        .from('departments')
+        .select('id, name, company, created_at, updated_at')
+        .eq('company', company)
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching departments:', error);
+        return [];
+      }
+      return data || [];
+    },
+    10 * 60 * 1000 // 10 minutos
+  );
 };
 
 export const addDepartment = async (department: Omit<Department, 'id' | 'company' | 'created_at' | 'updated_at'>): Promise<Department | null> => {
@@ -425,11 +439,15 @@ export const addDepartment = async (department: Omit<Department, 'id' | 'company
     .insert([{ ...department, company }])
     .select()
     .single();
-  
+
   if (error) {
     console.error('Error adding department:', error);
     return null;
   }
+
+  // Invalidar caché
+  invalidateCache.departments(company);
+
   return data;
 };
 
@@ -504,43 +522,50 @@ export const getProducts = async (): Promise<Product[]> => {
 // NUEVA FUNCIÓN: Obtiene TODOS los productos sin límite (paginación automática)
 export const getAllProducts = async (): Promise<Product[]> => {
   const company = getCurrentCompany();
-  const pageSize = 1000;
-  let allProducts: Product[] = [];
-  let page = 0;
-  let hasMore = true;
 
-  try {
-    while (hasMore) {
-      const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('company', company)
-        .order('name')
-        .range(page * pageSize, (page + 1) * pageSize - 1);
+  return cache.withCache(
+    cacheKeys.products(company),
+    async () => {
+      const pageSize = 1000;
+      let allProducts: Product[] = [];
+      let page = 0;
+      let hasMore = true;
 
-      if (error) {
-        console.error('Error fetching all products:', error);
+      try {
+        while (hasMore) {
+          const { data, error } = await supabase
+            .from('products')
+            .select('id, code, name, description, price1, price2, final_price, stock, registered_ids, created_at, updated_at, company, current_cost')
+            .eq('company', company)
+            .order('name')
+            .range(page * pageSize, (page + 1) * pageSize - 1);
+
+          if (error) {
+            console.error('Error fetching all products:', error);
+            throw error;
+          }
+
+          if (data && data.length > 0) {
+            allProducts = [...allProducts, ...data];
+            page++;
+
+            // Si obtuvimos menos de 1000, ya no hay más datos
+            if (data.length < pageSize) {
+              hasMore = false;
+            }
+          } else {
+            hasMore = false;
+          }
+        }
+
+        return allProducts;
+      } catch (error) {
+        console.error('Error connecting to Supabase:', error);
         throw error;
       }
-
-      if (data && data.length > 0) {
-        allProducts = [...allProducts, ...data];
-        page++;
-
-        // Si obtuvimos menos de 1000, ya no hay más datos
-        if (data.length < pageSize) {
-          hasMore = false;
-        }
-      } else {
-        hasMore = false;
-      }
-    }
-
-    return allProducts;
-  } catch (error) {
-    console.error('Error connecting to Supabase:', error);
-    throw error;
-  }
+    },
+    5 * 60 * 1000 // 5 minutos
+  );
 };
 
 // NUEVA FUNCIÓN: Búsqueda de productos con filtros y paginación del lado del servidor
@@ -679,44 +704,45 @@ export const deleteProduct = async (id: string): Promise<boolean> => {
 // GESTIÓN DE IMÁGENES DEL CATÁLOGO
 // ============================================
 
-export const uploadCatalogImage = async (file: File, catalogId: string): Promise<string | null> => {
-  try {
-    const fileExt = file.name.split('.').pop();
-    const fileName = `${catalogId}_${Date.now()}.${fileExt}`;
-    const filePath = `${fileName}`;
+/**
+ * Subir imagen al Storage de Supabase para catálogo
+ */
+export const uploadCatalogImage = async (file: File): Promise<string> => {
+  const company = getCurrentCompany();
 
-    const { data, error } = await supabase.storage
-      .from('catalog-images')
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: false
-      });
+  // Generar nombre único para el archivo
+  const fileExt = file.name.split('.').pop();
+  const fileName = `${company}/${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
 
-    if (error) {
-      console.error('Error uploading catalog image:', error);
-      return null;
-    }
+  // Subir archivo al bucket catalog-images
+  const { data, error } = await supabase.storage
+    .from('catalog-images')
+    .upload(fileName, file, {
+      cacheControl: '3600',
+      upsert: false
+    });
 
-    // Obtener la URL pública de la imagen
-    const { data: { publicUrl } } = supabase.storage
-      .from('catalog-images')
-      .getPublicUrl(filePath);
-
-    return publicUrl;
-  } catch (error) {
-    console.error('Error uploading catalog image:', error);
-    return null;
+  if (error) {
+    console.error('Error uploading image:', error);
+    throw error;
   }
+
+  // Obtener URL pública de la imagen
+  const { data: urlData } = supabase.storage
+    .from('catalog-images')
+    .getPublicUrl(data.path);
+
+  return urlData.publicUrl;
 };
 
-export const deleteCatalogImage = async (imageUrl: string): Promise<boolean> => {
+/**
+ * Eliminar imagen del Storage
+ */
+export const deleteCatalogImage = async (imageUrl: string): Promise<void> => {
   try {
-    // Extraer el path del archivo desde la URL
+    // Extraer el path del URL
     const urlParts = imageUrl.split('/catalog-images/');
-    if (urlParts.length < 2) {
-      console.error('Invalid image URL format');
-      return false;
-    }
+    if (urlParts.length < 2) return;
 
     const filePath = urlParts[1];
 
@@ -725,14 +751,11 @@ export const deleteCatalogImage = async (imageUrl: string): Promise<boolean> => 
       .remove([filePath]);
 
     if (error) {
-      console.error('Error deleting catalog image:', error);
-      return false;
+      console.error('Error deleting image:', error);
+      throw error;
     }
-
-    return true;
   } catch (error) {
-    console.error('Error deleting catalog image:', error);
-    return false;
+    console.error('Error in deleteCatalogImage:', error);
   }
 };
 
@@ -2399,17 +2422,24 @@ export const calculateNetRevenue = (invoices: Invoice[], returns: Return[], exch
 
 export const getCustomers = async (): Promise<Customer[]> => {
   const company = getCurrentCompany();
-  const { data, error } = await supabase
-    .from('customers')
-    .select('*')
-    .eq('company', company)
-    .order('name');
-  
-  if (error) {
-    console.error('Error fetching customers:', error);
-    return [];
-  }
-  return data || [];
+
+  return cache.withCache(
+    cacheKeys.customers(company),
+    async () => {
+      const { data, error } = await supabase
+        .from('customers')
+        .select('id, name, document, email, phone, address, company, created_at')
+        .eq('company', company)
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching customers:', error);
+        return [];
+      }
+      return data || [];
+    },
+    5 * 60 * 1000 // 5 minutos
+  );
 };
 
 export const getCustomerByDocument = async (document: string): Promise<Customer | null> => {
@@ -3889,5 +3919,111 @@ export const updateCatalogImage = async (
   } catch (error) {
     console.error('Error updating catalog image:', error);
     return null;
+  }
+};
+
+// ============================================
+// GESTIÓN DE CATÁLOGO PÚBLICO
+// ============================================
+
+/**
+ * Obtener todos los productos del catálogo
+ */
+export const getCatalogItems = async (): Promise<CatalogItem[]> => {
+  const company = getCurrentCompany();
+
+  try {
+    const { data, error } = await supabase
+      .from('public_catalogs')
+      .select('*')
+      .eq('company', company)
+      .order('display_order', { ascending: true });
+
+    if (error) {
+      console.error('Error fetching catalog items:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching catalog items:', error);
+    return [];
+  }
+};
+
+/**
+ * Agregar un producto al catálogo
+ */
+export const addCatalogItem = async (
+  item: Omit<CatalogItem, 'id' | 'created_at' | 'updated_at'>
+): Promise<CatalogItem | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('public_catalogs')
+      .insert([item])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error adding catalog item:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error adding catalog item:', error);
+    return null;
+  }
+};
+
+/**
+ * Actualizar un producto del catálogo
+ */
+export const updateCatalogItem = async (
+  catalogId: string,
+  updates: Partial<Omit<CatalogItem, 'id' | 'created_at' | 'updated_at'>>
+): Promise<CatalogItem | null> => {
+  try {
+    const { data, error } = await supabase
+      .from('public_catalogs')
+      .update({
+        ...updates,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', catalogId)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error updating catalog item:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error updating catalog item:', error);
+    return null;
+  }
+};
+
+/**
+ * Eliminar un producto del catálogo
+ */
+export const deleteCatalogItem = async (catalogId: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase
+      .from('public_catalogs')
+      .delete()
+      .eq('id', catalogId);
+
+    if (error) {
+      console.error('Error deleting catalog item:', error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error deleting catalog item:', error);
+    return false;
   }
 };
