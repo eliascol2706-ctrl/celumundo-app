@@ -77,8 +77,8 @@ export function ProductSelectionModal({
     setCurrentPage(1);
   }, [searchTerm, selectedDepartment]);
 
-  // Use searched products if available, otherwise use all products
-  const baseProducts = searchedProducts !== null ? searchedProducts : products;
+  // Only use searched products if user has performed a search
+  const baseProducts = searchedProducts !== null ? searchedProducts : [];
 
   // Filter products (apply department/category filter on client side)
   const filteredProducts = baseProducts.filter((product) => {
@@ -242,13 +242,26 @@ export function ProductSelectionModal({
         <div className="flex-1 overflow-y-auto py-4">
           {currentProducts.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
-              <Package className="h-12 w-12 text-muted-foreground mb-3" />
-              <h3 className="text-lg font-medium text-muted-foreground mb-1">
-                No se encontraron productos
-              </h3>
-              <p className="text-sm text-muted-foreground">
-                Intenta con otro término de búsqueda o filtro
-              </p>
+              <Search className="h-16 w-16 text-muted-foreground mb-4" />
+              {!searchTerm && searchedProducts === null ? (
+                <>
+                  <h3 className="text-lg font-medium text-foreground mb-2">
+                    Ingresa el nombre del producto que deseas buscar
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Escribe en el campo de búsqueda y presiona "Buscar Producto"
+                  </p>
+                </>
+              ) : (
+                <>
+                  <h3 className="text-lg font-medium text-muted-foreground mb-1">
+                    No se encontraron productos
+                  </h3>
+                  <p className="text-sm text-muted-foreground">
+                    Intenta con otro término de búsqueda o filtro
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

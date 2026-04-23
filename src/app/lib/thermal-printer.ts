@@ -40,19 +40,16 @@ const generateThermalInvoiceHTML = (
           .join(' | ');
 
         idsHTML = `
-          <div style="font-size: 7pt; margin-top: 1mm; padding: 1mm; background: #f5f5f5; border: 1px solid #ddd;">
-            <div style="font-weight: bold; margin-bottom: 0.5mm;">IDs:</div>
-            <div>${idsWithNotes}</div>
+          <div style="font-size: 7px; margin-top: 1mm; padding: 1mm; background: #f5f5f5;">
+            <div>IDs: ${idsWithNotes}</div>
           </div>
         `;
       }
 
       return `
-        <div style="margin-bottom: 2mm; font-size: 8pt;">
-          <div style="font-weight: bold; margin-bottom: 1mm; font-size: 9pt;">${item.productName}</div>
-          <div style="margin-bottom: 1mm;">
-            ${item.quantity} x ${formatCOP(item.price)} = ${formatCOP(item.total)}
-          </div>
+        <div class="product-item">
+          <div style="margin-bottom: 1mm;">${item.productName}</div>
+          <div>${item.quantity} x ${formatCOP(item.price)} = ${formatCOP(item.total)}</div>
           ${idsHTML}
         </div>
       `;
@@ -65,49 +62,36 @@ const generateThermalInvoiceHTML = (
     let paymentsHTML = '';
     if (creditPayments && creditPayments.length > 0) {
       paymentsHTML = `
-        <div style="font-weight: bold; margin-bottom: 1mm; font-size: 9pt;">Abonos:</div>
+        <div style="margin-bottom: 2mm; font-size: 9px;">ABONOS:</div>
         ${creditPayments
           .map(
             (payment: any) => `
-          <div style="margin-bottom: 2mm; padding-bottom: 1mm; border-bottom: 1px dotted #ccc;">
-            <div style="display: flex; justify-content: space-between;">
-              <span>${new Date(payment.date).toLocaleDateString('es-ES')}</span>
-              <span>${formatCOP(payment.amount)}</span>
-            </div>
-            <div style="font-size: 7pt; margin-top: 0.5mm;">
-              ${
-                payment.payment_method === 'cash'
-                  ? 'Efectivo'
-                  : payment.payment_method === 'transfer'
-                  ? 'Transferencia'
-                  : 'Otro'
-              }
-            </div>
+          <div style="margin-bottom: 2mm; padding-bottom: 1mm; border-bottom: 1px solid black; font-size: 8px;">
+            <div>${new Date(payment.date).toLocaleDateString('es-ES')}</div>
+            <div>${formatCOP(payment.amount)} - ${
+              payment.payment_method === 'cash'
+                ? 'Efectivo'
+                : payment.payment_method === 'transfer'
+                ? 'Transferencia'
+                : 'Otro'
+            }</div>
           </div>
         `
           )
           .join('')}
-        <div style="font-weight: bold; margin-top: 2mm; font-size: 9pt;">
-          <div style="display: flex; justify-content: space-between;">
-            <span>Total Abonado:</span>
-            <span>${formatCOP(creditPayments.reduce((sum: number, p: any) => sum + p.amount, 0))}</span>
-          </div>
+        <div style="margin-top: 2mm; font-size: 9px; border-top: 1px solid black; padding-top: 2mm;">
+          <div>TOTAL ABONADO: ${formatCOP(creditPayments.reduce((sum: number, p: any) => sum + p.amount, 0))}</div>
         </div>
       `;
     }
 
     creditHTML = `
-      <div style="margin-bottom: 3mm; font-size: 8pt; border-bottom: 1px dashed black; padding-bottom: 2mm;">
-        <div style="font-weight: bold; text-align: center; margin-bottom: 2mm; font-size: 10pt;">FACTURA A CRÉDITO</div>
+      <div style="margin-bottom: 3mm; font-size: 8px; border: 2px solid black; padding: 2mm; background: #f5f5f5;">
+        <div style="text-align: center; margin-bottom: 2mm; font-size: 11px;">FACTURA A CREDITO</div>
         ${paymentsHTML}
-        <div style="font-weight: bold; margin-top: 2mm; font-size: 9pt;">
-          <div style="display: flex; justify-content: space-between;">
-            <span>Saldo Pendiente:</span>
-            <span>${formatCOP(invoice.credit_balance || invoice.total)}</span>
-          </div>
-        </div>
-        <div style="margin-top: 1mm; font-size: 8pt;">
-          Estado: ${invoice.status === 'paid' ? 'PAGADO' : 'PENDIENTE'}
+        <div style="margin-top: 2mm; font-size: 9px; border-top: 2px solid black; padding-top: 2mm;">
+          <div style="margin-bottom: 1mm;">SALDO PENDIENTE: ${formatCOP(invoice.credit_balance || invoice.total)}</div>
+          <div>ESTADO: ${invoice.status === 'paid' ? 'PAGADO' : 'PENDIENTE'}</div>
         </div>
       </div>
     `;
@@ -129,8 +113,8 @@ const generateThermalInvoiceHTML = (
     }
 
     paymentHTML = `
-      <div style="margin-bottom: 3mm; font-size: 8pt; border-bottom: 1px dashed black; padding-bottom: 2mm;">
-        <div style="font-weight: bold; margin-bottom: 1mm; font-size: 9pt;">Método de Pago:</div>
+      <div style="margin-bottom: 3mm; font-size: 8px; border-bottom: 1px solid black; padding-bottom: 2mm;">
+        <div style="margin-bottom: 1mm; font-size: 9px;">METODO DE PAGO:</div>
         ${paymentDetails}
       </div>
     `;
@@ -145,105 +129,121 @@ const generateThermalInvoiceHTML = (
           @page {
             size: 80mm auto;
             margin: 0;
+            padding: 0;
           }
           * {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
           }
           body {
-            width: 72mm;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 9pt;
-            padding: 2mm 4mm 4mm 4mm;
+            width: 70mm;
+            max-width: 70mm;
+            font-family: 'Arial', 'Helvetica', sans-serif;
+            font-size: 9px;
+            font-weight: 900;
+            padding: 2mm 3mm;
             background: white;
             color: black;
-            margin: 0 auto;
-            line-height: 1.2;
+            margin: 0;
+            line-height: 1.4;
+          }
+          div, span, p, b, strong {
+            font-weight: 900 !important;
+          }
+          .header {
+            text-align: center;
+            margin-bottom: 3mm;
+            border-bottom: 2px solid black;
+            padding-bottom: 2mm;
+          }
+          .info {
+            margin-bottom: 3mm;
+            font-size: 8px;
+            border-bottom: 1px solid black;
+            padding-bottom: 2mm;
+          }
+          .products {
+            margin-bottom: 3mm;
+            border-bottom: 1px solid black;
+            padding-bottom: 2mm;
+          }
+          .product-item {
+            margin-bottom: 2mm;
+            font-size: 8px;
+          }
+          .total-section {
+            margin: 3mm 0;
+            border-top: 2px solid black;
+            border-bottom: 2px solid black;
+            padding: 3mm 0;
+            text-align: center;
+            background: #f0f0f0;
+          }
+          .total-label {
+            font-size: 11px;
+            margin-bottom: 2mm;
+          }
+          .total-amount {
+            font-size: 14px;
+          }
+          .footer {
+            text-align: center;
+            font-size: 8px;
+            margin-top: 3mm;
+            padding-top: 2mm;
           }
         </style>
       </head>
       <body>
-        <!-- Header -->
-        <div style="text-align: center; margin-bottom: 3mm; border-bottom: 1px dashed black; padding-bottom: 2mm;">
-          <div style="font-size: 12pt; font-weight: bold; margin-bottom: 1mm;">${companyName}</div>
-          <div style="font-size: 10pt; font-weight: bold; margin-bottom: 1mm;">FACTURA DE VENTA</div>
-          <div style="font-size: 9pt; font-weight: bold;">No. ${invoice.number}</div>
+        <div class="header">
+          <div style="font-size: 12px; margin-bottom: 2mm;">${companyName}</div>
+          <div style="font-size: 10px; margin-bottom: 1mm;">FACTURA</div>
+          <div style="font-size: 9px;">No. ${invoice.number}</div>
         </div>
 
-        <!-- Info -->
-        <div style="margin-bottom: 3mm; font-size: 8pt; border-bottom: 1px dashed black; padding-bottom: 2mm;">
-          <div style="margin-bottom: 1mm;">
-            <span style="font-weight: bold;">Cliente: </span>
-            <span>${invoice.customer_name || 'Consumidor Final'}</span>
-          </div>
+        <div class="info">
+          <div style="margin-bottom: 1mm;">Cliente: ${invoice.customer_name || 'Consumidor Final'}</div>
           ${
             invoice.customer_document
-              ? `
-          <div style="margin-bottom: 1mm;">
-            <span style="font-weight: bold;">Documento: </span>
-            <span>${invoice.customer_document}</span>
-          </div>
-          `
+              ? `<div style="margin-bottom: 1mm;">Doc: ${invoice.customer_document}</div>`
               : ''
           }
-          <div style="margin-bottom: 1mm;">
-            <span style="font-weight: bold;">Fecha: </span>
-            <span>${new Date(invoice.date).toLocaleString('es-ES', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit',
-            })}</span>
-          </div>
-          <div style="margin-bottom: 1mm;">
-            <span style="font-weight: bold;">Tipo: </span>
-            <span>${invoice.type === 'regular' ? 'Regular' : 'Al Mayor'}</span>
-          </div>
+          <div style="margin-bottom: 1mm;">Fecha: ${new Date(invoice.date).toLocaleString('es-ES', {
+            day: '2-digit',
+            month: '2-digit',
+            year: 'numeric',
+            hour: '2-digit',
+            minute: '2-digit',
+          })}</div>
           ${
             invoice.attended_by
-              ? `
-          <div style="margin-bottom: 1mm;">
-            <span style="font-weight: bold;">Atendido: </span>
-            <span>${invoice.attended_by}</span>
-          </div>
-          `
+              ? `<div>Vendedor: ${invoice.attended_by}</div>`
               : ''
           }
         </div>
 
-        <!-- Products -->
-        <div style="margin-bottom: 3mm; border-bottom: 1px dashed black; padding-bottom: 2mm;">
-          <div style="font-size: 9pt; font-weight: bold; text-align: center; margin-bottom: 2mm;">PRODUCTOS</div>
+        <div class="products">
+          <div style="text-align: center; font-size: 9px; margin-bottom: 2mm;">PRODUCTOS</div>
           ${productsHTML}
         </div>
 
-        <!-- Total -->
-        <div style="margin-bottom: 3mm; font-size: 9pt;">
-          <div style="font-size: 11pt; font-weight: bold; border-top: 2px solid black; padding-top: 2mm; margin-top: 1mm; display: flex; justify-content: space-between;">
-            <span>TOTAL:</span>
-            <span>${formatCOP(invoice.total)}</span>
-          </div>
+        <div class="total-section">
+          <div class="total-label">TOTAL</div>
+          <div class="total-amount">${formatCOP(invoice.total)}</div>
         </div>
 
         ${paymentHTML}
         ${creditHTML}
 
-        <!-- Footer -->
-        <div style="text-align: center; font-size: 8pt; margin-top: 3mm; padding-top: 2mm; padding-bottom: 3mm;">
-          <div style="margin-bottom: 2mm;">================================</div>
-          <div style="font-weight: bold; margin-top: 2mm; margin-bottom: 2mm; font-size: 10pt;">
-            ¡GRACIAS POR SU COMPRA!
-          </div>
-          <div style="margin-top: 2mm; margin-bottom: 1mm; font-size: 9pt; font-weight: bold;">
-            ${companyName}
-          </div>
-          <div style="margin-bottom: 1mm; font-size: 8pt;">
-            www.celumundovip.com
-          </div>
-          <div style="font-size: 7pt; margin-top: 1mm; margin-bottom: 2mm;">
-            ${new Date().toLocaleString('es-ES')}
-          </div>
+        <div class="footer">
+          <div style="margin: 2mm 0; border-top: 1px solid black; padding-top: 2mm;"></div>
+          <div style="font-size: 10px; margin-bottom: 2mm;">GRACIAS POR SU COMPRA</div>
+          <div style="font-size: 9px; margin-bottom: 1mm;">${companyName}</div>
+          <div style="margin-bottom: 1mm;">www.celumundovip.com</div>
+          <div style="font-size: 7px;">${new Date().toLocaleString('es-ES')}</div>
         </div>
 
         <!-- Espacio adicional para que la factura salga completa -->
