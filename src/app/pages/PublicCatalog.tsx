@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'react-router';
-import { Search, ShoppingCart, Phone, MessageCircle, X, Percent, ExternalLink } from 'lucide-react';
+import { Search, ShoppingCart, Phone, MessageCircle, X, Percent, ExternalLink, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
@@ -17,6 +17,7 @@ export function PublicCatalog() {
   const [searchTerm, setSearchTerm] = useState('');
   const [showContactModal, setShowContactModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<string>('');
+  const [expandedReferences, setExpandedReferences] = useState<Set<string>>(new Set());
 
   const companyName = company === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
   const whatsappNumber = '+573145537596';
@@ -78,6 +79,18 @@ export function PublicCatalog() {
     );
     window.open(`https://wa.me/${whatsappNumber.replace(/[^0-9]/g, '')}?text=${message}`, '_blank');
     setShowContactModal(false);
+  };
+
+  const toggleReferences = (itemId: string) => {
+    setExpandedReferences(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
   };
 
   const filteredItems = catalogItems.filter(item => {
@@ -212,17 +225,41 @@ export function PublicCatalog() {
                       </p>
                     )}
 
-                    {/* References */}
+                    {/* References Button */}
                     {item.show_references && item.product_references && item.product_references.length > 0 && (
                       <div className="mb-3">
-                        <p className="text-xs text-gray-500 font-semibold mb-1">Referencias:</p>
-                        <div className="flex flex-wrap gap-1">
-                          {item.product_references.map((ref, idx) => (
-                            <Badge key={idx} variant="outline" className="text-xs">
-                              {ref}
-                            </Badge>
-                          ))}
-                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => toggleReferences(item.id)}
+                          className="w-full border-emerald-200 hover:border-emerald-400 hover:bg-emerald-50 text-emerald-700 font-semibold transition-all"
+                        >
+                          {expandedReferences.has(item.id) ? (
+                            <>
+                              <ChevronUp className="w-4 h-4 mr-2" />
+                              Ocultar Referencias ({item.product_references.length})
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="w-4 h-4 mr-2" />
+                              Referencias Disponibles ({item.product_references.length})
+                            </>
+                          )}
+                        </Button>
+
+                        {/* Referencias expandidas */}
+                        {expandedReferences.has(item.id) && (
+                          <div className="mt-2 p-3 bg-emerald-50 rounded-lg border border-emerald-200">
+                            <p className="text-xs text-emerald-700 font-semibold mb-2">Referencias compatibles:</p>
+                            <div className="flex flex-wrap gap-1">
+                              {item.product_references.map((ref, idx) => (
+                                <Badge key={idx} variant="outline" className="text-xs bg-white border-emerald-300 text-emerald-700">
+                                  {ref}
+                                </Badge>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
 

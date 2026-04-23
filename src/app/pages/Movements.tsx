@@ -20,6 +20,7 @@ import {
   getCurrentUser,
   updateProduct,
   searchProductsForInvoice,
+  supabase,
   type Movement,
   type Product,
 } from "../lib/supabase";
@@ -442,8 +443,19 @@ export default function Movements() {
       const processedItems: any[] = [];
 
       for (const item of movementItems) {
-        const product = products.find((p) => p.id === item.productId);
-        if (!product) continue;
+        // Obtener el producto actualizado directamente de la base de datos
+        const { data: productData, error: productError } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', item.productId)
+          .single();
+
+        if (productError || !productData) {
+          toast.error(`Error al obtener el producto ${item.productName}`);
+          continue;
+        }
+
+        const product = productData as Product;
 
         const newStock =
           formData.type === "entry"
@@ -461,7 +473,7 @@ export default function Movements() {
         // Actualizar IDs registradas
         if (item.useUnitIds) {
           let updatedIds = [...(product.registered_ids || [])];
-          
+
           if (formData.type === "entry") {
             // Agregar nuevas IDs con sus notas
             const newIdsWithNotes = item.unitIds.map(id => ({
@@ -473,7 +485,7 @@ export default function Movements() {
             // Remover IDs vendidas/salidas
             updatedIds = updatedIds.filter(idObj => !item.unitIds.includes(idObj.id));
           }
-          
+
           updates.registered_ids = updatedIds;
         }
 
@@ -539,7 +551,6 @@ export default function Movements() {
       setSelectedProduct(null);
 
       loadMovements();
-      loadProducts();
     } catch (error) {
       toast.error(
         error instanceof Error
