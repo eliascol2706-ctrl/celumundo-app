@@ -13,7 +13,7 @@ const InvoicesMenu = React.lazy(() => import('./pages/InvoicesMenu').then(m => (
 const RegularInvoice = React.lazy(() => import('./pages/RegularInvoice').then(m => ({ default: m.RegularInvoice })));
 const CreditInvoice = React.lazy(() => import('./pages/CreditInvoice').then(m => ({ default: m.CreditInvoice })));
 const FinancialManagement = React.lazy(() => import('./pages/FinancialManagement').then(m => ({ default: m.FinancialManagement })));
-const Movements = React.lazy(() => import('./pages/Movements').then(m => ({ default: m.Movements })));
+const Movements = React.lazy(() => import('./pages/Movements'));
 const Expenses = React.lazy(() => import('./pages/Expenses').then(m => ({ default: m.Expenses })));
 const Reports = React.lazy(() => import('./pages/Reports').then(m => ({ default: m.Reports })));
 const Closures = React.lazy(() => import('./pages/Closures').then(m => ({ default: m.Closures })));

@@ -19,6 +19,7 @@ import {
   addMovement,
   getCurrentUser,
   updateProduct,
+  searchProductsForInvoice,
   type Movement,
   type Product,
 } from "../lib/supabase";
@@ -76,7 +77,7 @@ interface MovementItem {
   availableIds?: string[]; // Para salidas: IDs disponibles del producto
 }
 
-export function Movements() {
+export default function Movements() {
   const [movements, setMovements] = useState<Movement[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<"all" | "entry" | "exit">("all");
@@ -116,6 +117,7 @@ export function Movements() {
   const [productSortFilter, setProductSortFilter] = useState<"price-desc" | "price-asc" | "stock-asc" | "stock-desc">("price-desc");
   const [productSearchDialogOpen, setProductSearchDialogOpen] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
 
   const [formData, setFormData] = useState({
     type: "entry" as "entry" | "exit",
@@ -128,7 +130,6 @@ export function Movements() {
 
   useEffect(() => {
     loadMovements();
-    loadProducts();
   }, []);
 
   const loadMovements = async () => {
@@ -141,8 +142,8 @@ export function Movements() {
     );
   };
 
-  const loadProducts = async () => {
-    const data = await getAllProducts();
+  const loadProducts = async (searchTerm: string) => {
+    const data = await searchProductsForInvoice(searchTerm);
     setProducts(data);
   };
 
@@ -188,6 +189,7 @@ export function Movements() {
     });
     setProductSearchDialogOpen(false);
     setProductSearchTerm("");
+    setProducts([]); // Limpiar productos al cerrar
     toast.success(`Producto seleccionado: ${product.name}`);
   };
 
@@ -217,6 +219,30 @@ export function Movements() {
   useEffect(() => {
     setCurrentPage(1);
   }, [searchTerm, filterType]);
+
+  // Búsqueda dinámica de productos cuando el usuario escribe
+  useEffect(() => {
+    if (!productSearchDialogOpen) {
+      // Limpiar productos cuando se cierra el diálogo
+      setProducts([]);
+      return;
+    }
+
+    // Solo buscar si hay al menos 2 caracteres
+    if (productSearchTerm.length < 2) {
+      setProducts([]);
+      return;
+    }
+
+    // Debounce: esperar 300ms después de que el usuario deje de escribir
+    const timeoutId = setTimeout(async () => {
+      setIsLoadingProducts(true);
+      await loadProducts(productSearchTerm);
+      setIsLoadingProducts(false);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [productSearchTerm, productSearchDialogOpen]);
 
   const handleAddItem = () => {
     if (!formData.productId || !selectedProduct) {
@@ -1904,9 +1930,9 @@ export function Movements() {
                           onClick={() => setProductSearchDialogOpen(true)}
                         >
                           <Search className="h-4 w-4 mr-2" />
-                          {selectedProduct 
-                            ? `${selectedProduct.code} - ${selectedProduct.name}` 
-                            : "Buscar Producto"
+                          {selectedProduct
+                            ? `${selectedProduct.code} - ${selectedProduct.name}`
+                            : "Buscar producto a ingresar o retirar"
                           }
                         </Button>
                         
@@ -2605,7 +2631,7 @@ export function Movements() {
           <DialogHeader>
             <DialogTitle>Buscar Producto</DialogTitle>
             <DialogDescription>
-              Usa el buscador y filtros para encontrar el producto que deseas agregar al movimiento.
+              Escribe el nombre o código del producto que deseas ingresar o retirar del inventario.
             </DialogDescription>
           </DialogHeader>
 
@@ -2615,7 +2641,7 @@ export function Movements() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
                 type="text"
-                placeholder="Buscar por nombre o código..."
+                placeholder="Escribe para buscar productos (mínimo 2 caracteres)..."
                 value={productSearchTerm}
                 onChange={(e) => setProductSearchTerm(e.target.value)}
                 className="pl-10"
@@ -2645,7 +2671,20 @@ export function Movements() {
             {/* Lista de productos */}
             <div className="border border-border rounded-lg overflow-hidden">
               <div className="max-h-[50vh] overflow-y-auto">
-                {getFilteredAndSortedProducts().length > 0 ? (
+                {isLoadingProducts ? (
+                  <div className="py-12 text-center">
+                    <div className="inline-block w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mb-3"></div>
+                    <p className="text-muted-foreground">Buscando productos...</p>
+                  </div>
+                ) : productSearchTerm.length < 2 ? (
+                  <div className="py-12 text-center">
+                    <Search className="h-12 w-12 text-gray-300 mx-auto mb-3" />
+                    <p className="text-muted-foreground font-medium">Escribe para buscar productos</p>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Ingresa el nombre o código del producto que deseas agregar
+                    </p>
+                  </div>
+                ) : getFilteredAndSortedProducts().length > 0 ? (
                   <div className="divide-y divide-border">
                     {getFilteredAndSortedProducts().map((product) => (
                       <button
@@ -2667,21 +2706,21 @@ export function Movements() {
                           </div>
                           <p className="font-medium text-base truncate">{product.name}</p>
                         </div>
-                        
+
                         <div className="flex items-center gap-6">
                           <div className="text-right">
                             <p className="text-xs text-muted-foreground">Stock</p>
                             <p className={`font-bold text-lg ${
-                              product.stock <= 5 
-                                ? "text-red-600" 
-                                : product.stock <= 10 
-                                ? "text-yellow-600" 
+                              product.stock <= 5
+                                ? "text-red-600"
+                                : product.stock <= 10
+                                ? "text-yellow-600"
                                 : "text-green-600"
                             }`}>
                               {product.stock}
                             </p>
                           </div>
-                          
+
                           <div className="text-right">
                             <p className="text-xs text-muted-foreground">Costo</p>
                             <p className="font-bold text-lg text-green-600">
@@ -2705,9 +2744,9 @@ export function Movements() {
 
             {/* Contador de resultados */}
             <div className="text-sm text-muted-foreground text-center">
-              {getFilteredAndSortedProducts().length > 0 && (
+              {!isLoadingProducts && productSearchTerm.length >= 2 && getFilteredAndSortedProducts().length > 0 && (
                 <span>
-                  Mostrando {getFilteredAndSortedProducts().length} de {products.length} productos
+                  Mostrando {getFilteredAndSortedProducts().length} resultado{getFilteredAndSortedProducts().length !== 1 ? 's' : ''}
                 </span>
               )}
             </div>
@@ -2720,6 +2759,7 @@ export function Movements() {
               onClick={() => {
                 setProductSearchDialogOpen(false);
                 setProductSearchTerm("");
+                setProducts([]); // Limpiar productos al cerrar
               }}
             >
               Cancelar

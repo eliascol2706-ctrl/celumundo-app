@@ -5,6 +5,7 @@
  * Ejemplo: "Baterías" -> "baterias"
  */
 export function normalizeString(str: string): string {
+  if (!str) return '';
   return str
     .toLowerCase()
     .normalize('NFD')
@@ -16,5 +17,6 @@ export function normalizeString(str: string): string {
  * Ejemplo: "Baterías".includes("baterias") -> true
  */
 export function includesIgnoreAccents(text: string, search: string): boolean {
+  if (!text || !search) return false;
   return normalizeString(text).includes(normalizeString(search));
 }
