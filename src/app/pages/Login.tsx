@@ -30,6 +30,9 @@ export function Login() {
         };
         saveSession(session);
 
+        // Marcar que acaba de iniciar sesión para mostrar splash
+        sessionStorage.setItem('justLoggedIn', 'true');
+
         const companyName = company === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
         const roleLabel = user.role === 'admin' ? 'Administrador' : user.role === 'catalog_admin' ? 'Administrador de Catálogo' : 'Vendedor';
         toast.success(`¡Bienvenido a ${companyName}!`, {

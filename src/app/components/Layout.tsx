@@ -1,4 +1,4 @@
-import { Suspense } from 'react';
+import { Suspense, useMemo } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router';
 import {
   LayoutDashboard,
@@ -113,9 +113,10 @@ export function Layout() {
   const navigate = useNavigate();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isDark, setIsDark] = useState(false);
-  
-  const currentUser = getCurrentUser();
-  const session = getSession();
+
+  // Memoizar getCurrentUser y getSession para evitar re-ejecución innecesaria
+  const currentUser = useMemo(() => getCurrentUser(), []);
+  const session = useMemo(() => getSession(), []);
   const companyName = session?.company === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
   
   // Estado para controlar qué secciones están abiertas/cerradas

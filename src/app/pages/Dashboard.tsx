@@ -80,7 +80,10 @@ export function Dashboard() {
 
         const customers = await getCustomers();
 
-        const lowStock = products.filter(p => p.stock <= p.min_stock);
+        const lowStock = products.filter(p => {
+          const minStock = p.min_stock || 0;
+          return p.stock <= minStock && minStock > 0;
+        });
 
         // Calcular ingresos netos (considerando devoluciones y cambios)
         const netRevenue = calculateNetRevenue(invoices, returns, exchanges);
@@ -155,9 +158,88 @@ export function Dashboard() {
       {isLoading ? (
         <div className="flex items-center justify-center py-20">
           <div className="text-center">
-            <div className="animate-spin h-12 w-12 border-4 border-green-600 border-t-transparent rounded-full mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Cargando datos del dashboard...</p>
-            <p className="text-xs text-muted-foreground mt-1">Esto puede tardar unos segundos con muchos productos</p>
+            {/* Título animado */}
+            <h2 className="text-2xl font-semibold text-zinc-700 mb-8 animate-pulse">
+              Estructurando y Analizando
+            </h2>
+
+            {/* Grid de barras animadas simulando datos */}
+            <div className="flex gap-2 justify-center mb-8">
+              {[0, 1, 2, 3, 4, 5, 6].map((index) => (
+                <div
+                  key={index}
+                  className="w-3 bg-emerald-600 rounded-full"
+                  style={{
+                    height: '80px',
+                    animation: `barAnimation 1.5s ease-in-out ${index * 0.15}s infinite`,
+                  }}
+                />
+              ))}
+            </div>
+
+            {/* Indicadores de progreso */}
+            <div className="space-y-3 max-w-md mx-auto">
+              <div className="flex items-center justify-between text-sm text-zinc-600">
+                <div className="flex items-center gap-2">
+                  <Package className="w-4 h-4 text-emerald-600 animate-pulse" />
+                  <span>Cargando productos</span>
+                </div>
+                <div className="w-24 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-emerald-600 rounded-full animate-[progressBar_2s_ease-in-out_infinite]" />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-sm text-zinc-600">
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-blue-600 animate-pulse" style={{ animationDelay: '0.3s' }} />
+                  <span>Procesando facturas</span>
+                </div>
+                <div className="w-24 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-600 rounded-full animate-[progressBar_2s_ease-in-out_0.3s_infinite]" />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between text-sm text-zinc-600">
+                <div className="flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-purple-600 animate-pulse" style={{ animationDelay: '0.6s' }} />
+                  <span>Generando estadísticas</span>
+                </div>
+                <div className="w-24 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
+                  <div className="h-full bg-purple-600 rounded-full animate-[progressBar_2s_ease-in-out_0.6s_infinite]" />
+                </div>
+              </div>
+            </div>
+
+            {/* Mensaje informativo */}
+            <p className="text-xs text-muted-foreground mt-6">
+              Esto puede tardar unos segundos con muchos productos
+            </p>
+
+            {/* Estilos CSS inline para las animaciones */}
+            <style>{`
+              @keyframes barAnimation {
+                0%, 100% {
+                  transform: scaleY(0.3);
+                  opacity: 0.4;
+                }
+                50% {
+                  transform: scaleY(1);
+                  opacity: 1;
+                }
+              }
+
+              @keyframes progressBar {
+                0% {
+                  width: 0%;
+                }
+                50% {
+                  width: 100%;
+                }
+                100% {
+                  width: 0%;
+                }
+              }
+            `}</style>
           </div>
         </div>
       ) : (

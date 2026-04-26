@@ -901,7 +901,90 @@ export function FinancialManagement() {
   if (isLoading) {
     return (
       <div className="min-h-screen bg-zinc-50 flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+        <div className="text-center">
+          {/* Título animado */}
+          <h2 className="text-2xl font-semibold text-zinc-700 mb-8 animate-pulse">
+            Estructurando y Analizando
+          </h2>
+
+          {/* Grid de barras animadas simulando datos */}
+          <div className="flex gap-2 justify-center mb-8">
+            {[0, 1, 2, 3, 4, 5, 6].map((index) => (
+              <div
+                key={index}
+                className="w-3 bg-emerald-600 rounded-full"
+                style={{
+                  height: '80px',
+                  animation: `barAnimation 1.5s ease-in-out ${index * 0.15}s infinite`,
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Indicadores de progreso */}
+          <div className="space-y-3 max-w-md mx-auto">
+            <div className="flex items-center justify-between text-sm text-zinc-600">
+              <div className="flex items-center gap-2">
+                <Receipt className="w-4 h-4 text-emerald-600 animate-pulse" />
+                <span>Procesando facturas</span>
+              </div>
+              <div className="w-24 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
+                <div className="h-full bg-emerald-600 rounded-full animate-[progressBar_2s_ease-in-out_infinite]" />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-sm text-zinc-600">
+              <div className="flex items-center gap-2">
+                <DollarSign className="w-4 h-4 text-blue-600 animate-pulse" style={{ animationDelay: '0.3s' }} />
+                <span>Calculando ingresos</span>
+              </div>
+              <div className="w-24 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
+                <div className="h-full bg-blue-600 rounded-full animate-[progressBar_2s_ease-in-out_0.3s_infinite]" />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-sm text-zinc-600">
+              <div className="flex items-center gap-2">
+                <BarChart3 className="w-4 h-4 text-purple-600 animate-pulse" style={{ animationDelay: '0.6s' }} />
+                <span>Generando estadísticas</span>
+              </div>
+              <div className="w-24 h-1.5 bg-zinc-200 rounded-full overflow-hidden">
+                <div className="h-full bg-purple-600 rounded-full animate-[progressBar_2s_ease-in-out_0.6s_infinite]" />
+              </div>
+            </div>
+          </div>
+
+          {/* Animación de spinner circular de respaldo */}
+          <div className="mt-8 flex justify-center">
+            <Loader2 className="w-6 h-6 animate-spin text-emerald-600 opacity-50" />
+          </div>
+
+          {/* Estilos CSS inline para las animaciones */}
+          <style>{`
+            @keyframes barAnimation {
+              0%, 100% {
+                transform: scaleY(0.3);
+                opacity: 0.4;
+              }
+              50% {
+                transform: scaleY(1);
+                opacity: 1;
+              }
+            }
+
+            @keyframes progressBar {
+              0% {
+                width: 0%;
+              }
+              50% {
+                width: 100%;
+              }
+              100% {
+                width: 0%;
+              }
+            }
+          `}</style>
+        </div>
       </div>
     );
   }

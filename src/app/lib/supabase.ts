@@ -540,7 +540,7 @@ export const getAllProducts = async (): Promise<Product[]> => {
         while (hasMore) {
           const { data, error } = await supabase
             .from('products')
-            .select('id, code, name, description, price1, price2, final_price, stock, registered_ids, created_at, updated_at, company, current_cost')
+            .select('id, code, name, description, price1, price2, final_price, stock, min_stock, category, registered_ids, created_at, updated_at, company, current_cost')
             .eq('company', company)
             .order('name')
             .range(page * pageSize, (page + 1) * pageSize - 1);
@@ -669,30 +669,40 @@ export const addProduct = async (product: Omit<Product, 'id' | 'company' | 'crea
     .insert([{ ...product, company }])
     .select()
     .single();
-  
+
   if (error) {
     console.error('Error adding product:', error);
     return null;
   }
+
+  // Invalidar caché de productos
+  invalidateCache.products(company);
+
   return data;
 };
 
 export const updateProduct = async (id: string, updates: Partial<Product>): Promise<Product | null> => {
+  const company = getCurrentCompany();
   const { data, error } = await supabase
     .from('products')
     .update(updates)
     .eq('id', id)
     .select()
     .single();
-  
+
   if (error) {
     console.error('Error updating product:', error);
     return null;
   }
+
+  // Invalidar caché de productos
+  invalidateCache.products(company);
+
   return data;
 };
 
 export const deleteProduct = async (id: string): Promise<boolean> => {
+  const company = getCurrentCompany();
   const { error } = await supabase
     .from('products')
     .delete()
@@ -702,6 +712,10 @@ export const deleteProduct = async (id: string): Promise<boolean> => {
     console.error('Error deleting product:', error);
     return false;
   }
+
+  // Invalidar caché de productos
+  invalidateCache.products(company);
+
   return true;
 };
 

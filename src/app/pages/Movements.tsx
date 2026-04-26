@@ -109,6 +109,7 @@ export default function Movements() {
   const [selectedMovement, setSelectedMovement] = useState<Movement | null>(null);
   const [reprintSelection, setReprintSelection] = useState<'all' | 'specific'>('all');
   const [selectedIdsForReprint, setSelectedIdsForReprint] = useState<string[]>([]);
+  const [reprintQuantity, setReprintQuantity] = useState<number>(1); // Para productos sin IDs únicas
 
   // Prevenir doble clic
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -1259,27 +1260,48 @@ export default function Movements() {
       return;
     }
 
-    const product = products.find(p => p.id === selectedMovement.product_id);
-    if (!product) {
-      toast.error("Producto no encontrado");
+    // Buscar el producto directamente en Supabase en lugar del array local
+    const { data: product, error } = await supabase
+      .from('products')
+      .select('*')
+      .eq('id', selectedMovement.product_id)
+      .single();
+
+    if (error || !product) {
+      toast.error("Producto no encontrado en la base de datos");
+      console.error('Error buscando producto:', error);
       return;
     }
 
-    // Determinar qué IDs imprimir
-    const idsToPrint = reprintSelection === 'all'
-      ? selectedMovement.unit_ids
-      : selectedIdsForReprint;
+    // Verificar si el producto usa IDs únicas
+    const hasUnitIds = selectedMovement.unit_ids && selectedMovement.unit_ids.length > 0;
 
-    if (!idsToPrint || idsToPrint.length === 0) {
-      toast.error("No hay IDs seleccionadas para imprimir");
-      return;
+    let idsToPrint: string[] = [];
+    let quantityToPrint = 0;
+
+    if (hasUnitIds) {
+      // Producto con IDs únicas
+      idsToPrint = reprintSelection === 'all'
+        ? selectedMovement.unit_ids!
+        : selectedIdsForReprint;
+
+      if (idsToPrint.length === 0) {
+        toast.error("No hay IDs seleccionadas para imprimir");
+        return;
+      }
+    } else {
+      // Producto sin IDs únicas - usar cantidad
+      quantityToPrint = reprintQuantity;
+      if (quantityToPrint <= 0) {
+        toast.error("La cantidad debe ser mayor a 0");
+        return;
+      }
     }
 
-    // Obtener las notas desde el producto
+    // Obtener las notas desde el producto (solo para productos con IDs únicas)
     let notesMap: { [id: string]: string } = {};
 
-    // Obtener del producto actual
-    if (product.registered_ids && Array.isArray(product.registered_ids)) {
+    if (hasUnitIds && product.registered_ids && Array.isArray(product.registered_ids)) {
       product.registered_ids.forEach((idObj: any) => {
         if (typeof idObj === 'object' && idObj.id && idObj.note) {
           notesMap[idObj.id] = idObj.note;
@@ -1289,56 +1311,77 @@ export default function Movements() {
 
     let labelsHTML = "";
     let pageLabels: string[] = [];
+    const productName = product.name || selectedMovement.product_name || 'Producto';
+    const escapedProductName = productName
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
 
-    idsToPrint.forEach((unitId, index) => {
-      // Construir el código completo
-      const displayCode = `${product.code}-${unitId}A`;
-      const cleanDisplayCode = displayCode.replace(/A/g, '');
-      const numericCode = displayCode.replace(/[^0-9]/g, "");
-      const barcodeId = `barcode-reprint-${index}`;
+    if (hasUnitIds) {
+      // Generar etiquetas con IDs únicas
+      idsToPrint.forEach((unitId, index) => {
+        const displayCode = `${product.code}-${unitId}A`;
+        const cleanDisplayCode = displayCode.replace(/A/g, '');
+        const numericCode = displayCode.replace(/[^0-9]/g, "");
+        const barcodeId = `barcode-reprint-${index}`;
 
-      // Obtener últimos 4 dígitos de la nota
-      let noteDisplay = '';
-      if (notesMap[unitId]) {
-        const note = notesMap[unitId];
-        const last4Digits = note.slice(-4);
-        if (last4Digits) {
-          noteDisplay = last4Digits;
+        let noteDisplay = '';
+        if (notesMap[unitId]) {
+          const note = notesMap[unitId];
+          const last4Digits = note.slice(-4);
+          if (last4Digits) {
+            noteDisplay = last4Digits;
+          }
+        }
+
+        const labelHTML = `
+          <div class="label">
+            <div class="label-product-name">${escapedProductName}</div>
+            <div class="label-barcode-container">
+              <svg id="${barcodeId}"></svg>
+            </div>
+            <div class="label-numeric-code">${cleanDisplayCode}</div>
+            ${noteDisplay ? `<div class="label-note">${noteDisplay}</div>` : ''}
+            <div class="label-reference">${selectedMovement.reference.substring(0, 2).toUpperCase()}</div>
+          </div>
+        `;
+
+        pageLabels.push(labelHTML);
+
+        if (pageLabels.length === 3) {
+          labelsHTML += `<div class="label-page">${pageLabels.join("")}</div>`;
+          pageLabels = [];
+        }
+      });
+    } else {
+      // Generar etiquetas simples sin IDs únicas
+      for (let i = 0; i < quantityToPrint; i++) {
+        const displayCode = product.code;
+        const cleanDisplayCode = displayCode.replace(/A/g, '');
+        const numericCode = displayCode.replace(/[^0-9]/g, "");
+        const barcodeId = `barcode-reprint-${i}`;
+
+        const labelHTML = `
+          <div class="label">
+            <div class="label-product-name">${escapedProductName}</div>
+            <div class="label-barcode-container">
+              <svg id="${barcodeId}"></svg>
+            </div>
+            <div class="label-numeric-code">${cleanDisplayCode}</div>
+            <div class="label-reference">${selectedMovement.reference.substring(0, 2).toUpperCase()}</div>
+          </div>
+        `;
+
+        pageLabels.push(labelHTML);
+
+        if (pageLabels.length === 3) {
+          labelsHTML += `<div class="label-page">${pageLabels.join("")}</div>`;
+          pageLabels = [];
         }
       }
-
-      // Usar el nombre del producto desde el objeto product o del movimiento
-      const productName = product.name || selectedMovement.product_name || 'Producto';
-
-      // Escapar caracteres HTML para evitar problemas
-      const escapedProductName = productName
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
-
-      console.log(`[Reprint] ID: ${unitId}, Producto: ${productName}, Nota completa: ${notesMap[unitId]}, Últimos 4: ${noteDisplay}`);
-
-      const labelHTML = `
-        <div class="label">
-          <div class="label-product-name">${escapedProductName}</div>
-          <div class="label-barcode-container">
-            <svg id="${barcodeId}"></svg>
-          </div>
-          <div class="label-numeric-code">${cleanDisplayCode}</div>
-          ${noteDisplay ? `<div class="label-note">${noteDisplay}</div>` : ''}
-          <div class="label-reference">${selectedMovement.reference.substring(0, 2).toUpperCase()}</div>
-        </div>
-      `;
-
-      pageLabels.push(labelHTML);
-
-      if (pageLabels.length === 3) {
-        labelsHTML += `<div class="label-page">${pageLabels.join("")}</div>`;
-        pageLabels = [];
-      }
-    });
+    }
 
     if (pageLabels.length > 0) {
       while (pageLabels.length < 3) {
@@ -1516,26 +1559,48 @@ export default function Movements() {
               }
 
               try {
-                ${idsToPrint.map((unitId, index) => {
-                  const displayCode = `${product.code}-${unitId}A`;
-                  const numericCode = displayCode.replace(/[^0-9]/g, "");
+                ${hasUnitIds
+                  ? idsToPrint.map((unitId, index) => {
+                      const displayCode = `${product.code}-${unitId}A`;
+                      const numericCode = displayCode.replace(/[^0-9]/g, "");
 
-                  return `
-                  (function() {
-                    var elem = document.getElementById("barcode-reprint-${index}");
-                    if (elem) {
-                      JsBarcode(elem, "${numericCode}", {
-                        format: "CODE128",
-                        width: 1.8,
-                        height: 38,
-                        displayValue: false,
-                        margin: 0,
-                        fontSize: 0
-                      });
-                    }
-                  })();
-                  `;
-                }).join('\n')}
+                      return `
+                      (function() {
+                        var elem = document.getElementById("barcode-reprint-${index}");
+                        if (elem) {
+                          JsBarcode(elem, "${numericCode}", {
+                            format: "CODE128",
+                            width: 1.8,
+                            height: 38,
+                            displayValue: false,
+                            margin: 0,
+                            fontSize: 0
+                          });
+                        }
+                      })();
+                      `;
+                    }).join('\n')
+                  : Array.from({ length: quantityToPrint }).map((_, index) => {
+                      const displayCode = product.code;
+                      const numericCode = displayCode.replace(/[^0-9]/g, "");
+
+                      return `
+                      (function() {
+                        var elem = document.getElementById("barcode-reprint-${index}");
+                        if (elem) {
+                          JsBarcode(elem, "${numericCode}", {
+                            format: "CODE128",
+                            width: 1.8,
+                            height: 38,
+                            displayValue: false,
+                            margin: 0,
+                            fontSize: 0
+                          });
+                        }
+                      })();
+                      `;
+                    }).join('\n')
+                }
 
                 setTimeout(function() {
                   window.print();
@@ -1773,7 +1838,7 @@ export default function Movements() {
                       {movement.user_name}
                     </td>
                     <td className="py-3 px-4 text-center">
-                      {movement.type === 'entry' && movement.unit_ids && movement.unit_ids.length > 0 ? (
+                      {movement.type === 'entry' ? (
                         <Button
                           size="sm"
                           variant="outline"
@@ -1781,6 +1846,7 @@ export default function Movements() {
                             setSelectedMovement(movement);
                             setReprintSelection('all');
                             setSelectedIdsForReprint([]);
+                            setReprintQuantity(movement.quantity || 1);
                             setReprintDialogOpen(true);
                           }}
                           disabled={!isPrintingAvailable()}
@@ -2814,92 +2880,124 @@ export default function Movements() {
                 <p className="font-semibold">{selectedMovement.product_name}</p>
                 <p className="text-sm text-gray-600 mt-2">Referencia</p>
                 <p className="font-mono text-sm">{selectedMovement.reference}</p>
-                <p className="text-sm text-gray-600 mt-2">Total de IDs</p>
-                <p className="font-semibold">{selectedMovement.unit_ids?.length || 0}</p>
+                {selectedMovement.unit_ids && selectedMovement.unit_ids.length > 0 ? (
+                  <>
+                    <p className="text-sm text-gray-600 mt-2">Total de IDs</p>
+                    <p className="font-semibold">{selectedMovement.unit_ids.length}</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="text-sm text-gray-600 mt-2">Cantidad</p>
+                    <p className="font-semibold">{selectedMovement.quantity}</p>
+                  </>
+                )}
               </div>
 
-              {/* Selector de modo de impresión */}
-              <div className="space-y-3">
-                <Label>Opciones de impresión</Label>
-                <div className="space-y-2">
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="radio"
-                      id="reprint-all"
-                      name="reprint-mode"
-                      checked={reprintSelection === 'all'}
-                      onChange={() => setReprintSelection('all')}
-                      className="w-4 h-4 text-blue-600"
-                    />
-                    <Label htmlFor="reprint-all" className="cursor-pointer">
-                      Imprimir todas las IDs ({selectedMovement.unit_ids?.length || 0} etiquetas)
-                    </Label>
+              {selectedMovement.unit_ids && selectedMovement.unit_ids.length > 0 ? (
+                <>
+                  {/* Selector de modo de impresión para productos CON IDs únicas */}
+                  <div className="space-y-3">
+                    <Label>Opciones de impresión</Label>
+                    <div className="space-y-2">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="radio"
+                          id="reprint-all"
+                          name="reprint-mode"
+                          checked={reprintSelection === 'all'}
+                          onChange={() => setReprintSelection('all')}
+                          className="w-4 h-4 text-blue-600"
+                        />
+                        <Label htmlFor="reprint-all" className="cursor-pointer">
+                          Imprimir todas las IDs ({selectedMovement.unit_ids.length} etiquetas)
+                        </Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="radio"
+                          id="reprint-specific"
+                          name="reprint-mode"
+                          checked={reprintSelection === 'specific'}
+                          onChange={() => setReprintSelection('specific')}
+                          className="w-4 h-4 text-blue-600"
+                        />
+                        <Label htmlFor="reprint-specific" className="cursor-pointer">
+                          Seleccionar IDs específicas
+                        </Label>
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <input
-                      type="radio"
-                      id="reprint-specific"
-                      name="reprint-mode"
-                      checked={reprintSelection === 'specific'}
-                      onChange={() => setReprintSelection('specific')}
-                      className="w-4 h-4 text-blue-600"
-                    />
-                    <Label htmlFor="reprint-specific" className="cursor-pointer">
-                      Seleccionar IDs específicas
-                    </Label>
-                  </div>
-                </div>
-              </div>
 
-              {/* Lista de IDs para selección específica */}
-              {reprintSelection === 'specific' && (
-                <div className="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-3">
-                  <Label className="text-sm font-semibold">Seleccione las IDs a reimprimir:</Label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {selectedMovement.unit_ids?.map((unitId, idx) => {
-                      // Obtener nota del producto actual
-                      const product = products.find(p => p.id === selectedMovement.product_id);
-                      let noteDisplay = '';
-                      if (product?.registered_ids && Array.isArray(product.registered_ids)) {
-                        const idObj = product.registered_ids.find((obj: any) => obj.id === unitId);
-                        if (idObj && idObj.note) {
-                          noteDisplay = idObj.note.slice(-4);
-                        }
-                      }
+                  {/* Lista de IDs para selección específica */}
+                  {reprintSelection === 'specific' && (
+                    <div className="space-y-2 max-h-64 overflow-y-auto border rounded-lg p-3">
+                      <Label className="text-sm font-semibold">Seleccione las IDs a reimprimir:</Label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {selectedMovement.unit_ids.map((unitId, idx) => {
+                          // Obtener nota del producto actual
+                          const product = products.find(p => p.id === selectedMovement.product_id);
+                          let noteDisplay = '';
+                          if (product?.registered_ids && Array.isArray(product.registered_ids)) {
+                            const idObj = product.registered_ids.find((obj: any) => obj.id === unitId);
+                            if (idObj && idObj.note) {
+                              noteDisplay = idObj.note.slice(-4);
+                            }
+                          }
 
-                      return (
-                        <div key={`reprint-${selectedMovement.id}-${unitId}-${idx}`} className="flex items-center space-x-2">
-                          <input
-                            type="checkbox"
-                            id={`id-${unitId}`}
-                            checked={selectedIdsForReprint.includes(unitId)}
-                            onChange={(e) => {
-                              if (e.target.checked) {
-                                setSelectedIdsForReprint([...selectedIdsForReprint, unitId]);
-                              } else {
-                                setSelectedIdsForReprint(selectedIdsForReprint.filter(id => id !== unitId));
-                              }
-                            }}
-                            className="w-4 h-4 text-blue-600"
-                          />
-                          <Label htmlFor={`id-${unitId}`} className="cursor-pointer font-mono text-sm">
-                            {unitId}
-                            {noteDisplay && (
-                              <span className="ml-2 text-xs text-gray-500">
-                                ({noteDisplay})
-                              </span>
-                            )}
-                          </Label>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {selectedIdsForReprint.length > 0 && (
-                    <p className="text-sm text-gray-600 mt-2">
-                      {selectedIdsForReprint.length} ID(s) seleccionada(s)
-                    </p>
+                          return (
+                            <div key={`reprint-${selectedMovement.id}-${unitId}-${idx}`} className="flex items-center space-x-2">
+                              <input
+                                type="checkbox"
+                                id={`id-${unitId}`}
+                                checked={selectedIdsForReprint.includes(unitId)}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedIdsForReprint([...selectedIdsForReprint, unitId]);
+                                  } else {
+                                    setSelectedIdsForReprint(selectedIdsForReprint.filter(id => id !== unitId));
+                                  }
+                                }}
+                                className="w-4 h-4 text-blue-600"
+                              />
+                              <Label htmlFor={`id-${unitId}`} className="cursor-pointer font-mono text-sm">
+                                {unitId}
+                                {noteDisplay && (
+                                  <span className="ml-2 text-xs text-gray-500">
+                                    ({noteDisplay})
+                                  </span>
+                                )}
+                              </Label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {selectedIdsForReprint.length > 0 && (
+                        <p className="text-sm text-gray-600 mt-2">
+                          {selectedIdsForReprint.length} ID(s) seleccionada(s)
+                        </p>
+                      )}
+                    </div>
                   )}
-                </div>
+                </>
+              ) : (
+                <>
+                  {/* Selector de cantidad para productos SIN IDs únicas */}
+                  <div className="space-y-3">
+                    <Label htmlFor="reprint-quantity">Cantidad de etiquetas a imprimir</Label>
+                    <Input
+                      id="reprint-quantity"
+                      type="number"
+                      min="1"
+                      max="100"
+                      value={reprintQuantity}
+                      onChange={(e) => setReprintQuantity(parseInt(e.target.value) || 1)}
+                      className="w-full"
+                    />
+                    <p className="text-xs text-gray-500">
+                      Se imprimirán {reprintQuantity} etiqueta(s) con el código del producto
+                    </p>
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -2918,16 +3016,19 @@ export default function Movements() {
             <Button
               onClick={handleReprintLabels}
               disabled={
-                (reprintSelection === 'specific' && selectedIdsForReprint.length === 0) ||
+                (selectedMovement?.unit_ids && selectedMovement.unit_ids.length > 0 && reprintSelection === 'specific' && selectedIdsForReprint.length === 0) ||
+                (!selectedMovement?.unit_ids && reprintQuantity <= 0) ||
                 !isPrintingAvailable()
               }
             >
               <Printer className="h-4 w-4 mr-2" />
               Imprimir Etiquetas
-              {reprintSelection === 'all' && selectedMovement
-                ? ` (${selectedMovement.unit_ids?.length || 0})`
-                : reprintSelection === 'specific'
-                ? ` (${selectedIdsForReprint.length})`
+              {selectedMovement && selectedMovement.unit_ids && selectedMovement.unit_ids.length > 0
+                ? (reprintSelection === 'all'
+                    ? ` (${selectedMovement.unit_ids.length})`
+                    : ` (${selectedIdsForReprint.length})`)
+                : selectedMovement
+                ? ` (${reprintQuantity})`
                 : ''}
             </Button>
           </DialogFooter>

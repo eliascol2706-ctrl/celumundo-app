@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { Search, Plus, Package, Clock, Send, RotateCcw, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Barcode } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -9,7 +9,7 @@ import { Textarea } from '../components/ui/textarea';
 import { Checkbox } from '../components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { formatCOP } from '../lib/currency';
-import { getWarranties, getAllProducts, addWarranty, getCurrentUser, getWarrantiesStats, updateWarrantyStatus, type Warranty, type Product } from '../lib/supabase';
+import { getWarranties, searchProductsForInvoice, addWarranty, getCurrentUser, getWarrantiesStats, updateWarrantyStatus, type Warranty, type Product } from '../lib/supabase';
 import { toast } from 'sonner';
 
 export default function Warranties() {
@@ -26,6 +26,8 @@ export default function Warranties() {
   const [productSelectorOpen, setProductSelectorOpen] = useState(false);
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [barcodeInput, setBarcodeInput] = useState('');
+  const [isSearchingProducts, setIsSearchingProducts] = useState(false);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Estadísticas
   const [stats, setStats] = useState({
@@ -61,13 +63,11 @@ export default function Warranties() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [warrantiesData, productsData, statsData] = await Promise.all([
+      const [warrantiesData, statsData] = await Promise.all([
         getWarranties(),
-        getAllProducts(),
         getWarrantiesStats()
       ]);
       setWarranties(warrantiesData);
-      setProducts(productsData);
       setStats(statsData);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -76,6 +76,46 @@ export default function Warranties() {
       setIsLoading(false);
     }
   };
+
+  // Búsqueda optimizada de productos con debounce
+  const performProductSearch = useCallback(async (searchTerm: string) => {
+    if (!searchTerm || searchTerm.trim().length < 2) {
+      setProducts([]);
+      return;
+    }
+
+    setIsSearchingProducts(true);
+    try {
+      const results = await searchProductsForInvoice(searchTerm);
+      setProducts(results);
+    } catch (error) {
+      console.error('Error searching products:', error);
+      toast.error('Error al buscar productos');
+    } finally {
+      setIsSearchingProducts(false);
+    }
+  }, []);
+
+  // Efecto para búsqueda con debounce
+  useEffect(() => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    if (productSearchTerm.trim().length >= 2) {
+      searchTimeoutRef.current = setTimeout(() => {
+        performProductSearch(productSearchTerm);
+      }, 300);
+    } else {
+      setProducts([]);
+    }
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [productSearchTerm, performProductSearch]);
 
   const handleOpenDialog = () => {
     resetForm();
@@ -105,20 +145,31 @@ export default function Warranties() {
     }
   };
 
-  const handleBarcodeSearch = () => {
+  const handleBarcodeSearch = async () => {
     if (!barcodeInput.trim()) return;
 
-    const product = products.find(p => 
-      p.code.toLowerCase() === barcodeInput.toLowerCase().trim()
-    );
+    setIsSearchingProducts(true);
+    try {
+      // Buscar por código exacto
+      const results = await searchProductsForInvoice(barcodeInput.trim());
+      const product = results.find(p =>
+        p.code.toLowerCase() === barcodeInput.toLowerCase().trim()
+      );
 
-    if (product) {
-      handleSelectProduct(product.id);
-      setProductSelectorOpen(false);
-      setBarcodeInput('');
-      toast.success(`Producto encontrado: ${product.name}`);
-    } else {
-      toast.error('Producto no encontrado');
+      if (product) {
+        handleSelectProduct(product.id);
+        setProductSelectorOpen(false);
+        setBarcodeInput('');
+        setProducts([]);
+        toast.success(`Producto encontrado: ${product.name}`);
+      } else {
+        toast.error('Producto no encontrado');
+      }
+    } catch (error) {
+      console.error('Error searching product:', error);
+      toast.error('Error al buscar el producto');
+    } finally {
+      setIsSearchingProducts(false);
     }
   };
 
@@ -631,7 +682,15 @@ export default function Warranties() {
       </Dialog>
 
       {/* Modal de Selección de Productos */}
-      <Dialog open={productSelectorOpen} onOpenChange={setProductSelectorOpen}>
+      <Dialog open={productSelectorOpen} onOpenChange={(open) => {
+        setProductSelectorOpen(open);
+        if (!open) {
+          // Limpiar búsqueda al cerrar
+          setProductSearchTerm('');
+          setBarcodeInput('');
+          setProducts([]);
+        }
+      }}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Seleccionar Producto</DialogTitle>
@@ -666,7 +725,7 @@ export default function Warranties() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
               <Input
-                placeholder="O busca manualmente por nombre, código o categoría..."
+                placeholder="Busca por nombre, código o categoría (mín. 2 caracteres)..."
                 value={productSearchTerm}
                 onChange={(e) => setProductSearchTerm(e.target.value)}
                 className="pl-10"
@@ -676,16 +735,29 @@ export default function Warranties() {
             {/* Lista de productos */}
             <div className="flex-1 overflow-y-auto border border-border rounded-lg">
               {(() => {
-                const filtered = products.filter(product => {
-                  const search = productSearchTerm.toLowerCase();
+                // Mostrar mensaje inicial
+                if (productSearchTerm.trim().length < 2 && barcodeInput.trim().length === 0) {
                   return (
-                    product.code.toLowerCase().includes(search) ||
-                    product.name.toLowerCase().includes(search) ||
-                    product.category.toLowerCase().includes(search)
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p className="font-medium">Busca productos</p>
+                      <p className="text-sm mt-2">Escribe al menos 2 caracteres para buscar</p>
+                    </div>
                   );
-                });
+                }
 
-                if (filtered.length === 0) {
+                // Mostrar loading
+                if (isSearchingProducts) {
+                  return (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <div className="w-12 h-12 border-4 border-green-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                      <p>Buscando productos...</p>
+                    </div>
+                  );
+                }
+
+                // Sin resultados
+                if (products.length === 0) {
                   return (
                     <div className="text-center py-12 text-muted-foreground">
                       <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
@@ -696,12 +768,14 @@ export default function Warranties() {
 
                 return (
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
-                    {filtered.map((product) => (
+                    {products.map((product) => (
                       <button
                         key={product.id}
                         onClick={() => {
                           handleSelectProduct(product.id);
                           setProductSelectorOpen(false);
+                          setProductSearchTerm('');
+                          setProducts([]);
                         }}
                         className="p-4 border border-border rounded-lg hover:border-green-500 dark:hover:border-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 transition-all text-left group"
                       >
@@ -758,14 +832,11 @@ export default function Warranties() {
               })()}
             </div>
 
-            <p className="text-sm text-muted-foreground text-center">
-              Mostrando {products.filter(p => {
-                const search = productSearchTerm.toLowerCase();
-                return p.code.toLowerCase().includes(search) ||
-                  p.name.toLowerCase().includes(search) ||
-                  p.category.toLowerCase().includes(search);
-              }).length} de {products.length} productos
-            </p>
+            {products.length > 0 && (
+              <p className="text-sm text-muted-foreground text-center">
+                Mostrando {products.length} producto{products.length !== 1 ? 's' : ''}
+              </p>
+            )}
           </div>
 
           <div className="flex justify-end pt-4 border-t">

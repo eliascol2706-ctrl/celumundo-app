@@ -13,19 +13,19 @@ const InvoicesMenu = React.lazy(() => import('./pages/InvoicesMenu').then(m => (
 const RegularInvoice = React.lazy(() => import('./pages/RegularInvoice').then(m => ({ default: m.RegularInvoice })));
 const CreditInvoice = React.lazy(() => import('./pages/CreditInvoice').then(m => ({ default: m.CreditInvoice })));
 const FinancialManagement = React.lazy(() => import('./pages/FinancialManagement').then(m => ({ default: m.FinancialManagement })));
-const Movements = React.lazy(() => import('./pages/Movements'));
+const Movements = React.lazy(() => import('./pages/Movements').then(m => ({ default: m.default || m.Movements })));
 const Expenses = React.lazy(() => import('./pages/Expenses').then(m => ({ default: m.Expenses })));
-const Reports = React.lazy(() => import('./pages/Reports').then(m => ({ default: m.Reports })));
+const Reports = React.lazy(() => import('./pages/Reports').then(m => ({ default: m.default || m.Reports })));
 const Closures = React.lazy(() => import('./pages/Closures').then(m => ({ default: m.Closures })));
 const Departments = React.lazy(() => import('./pages/Departments').then(m => ({ default: m.Departments })));
 const Returns = React.lazy(() => import('./pages/Returns').then(m => ({ default: m.Returns })));
 const Customers = React.lazy(() => import('./pages/Customers').then(m => ({ default: m.Customers })));
 const CustomersNew = React.lazy(() => import('./pages/CustomersNew').then(m => ({ default: m.CustomersNew })));
 const CustomerProfile = React.lazy(() => import('./pages/CustomerProfile').then(m => ({ default: m.CustomerProfile })));
-const Exchanges = React.lazy(() => import('./pages/Exchanges'));
-const Warranties = React.lazy(() => import('./pages/Warranties'));
-const ServiceOrders = React.lazy(() => import('./pages/ServiceOrders'));
-const TrackingPage = React.lazy(() => import('./pages/TrackingPage'));
+const Exchanges = React.lazy(() => import('./pages/Exchanges').then(m => ({ default: m.default || m.Exchanges })));
+const Warranties = React.lazy(() => import('./pages/Warranties').then(m => ({ default: m.default || m.Warranties })));
+const ServiceOrders = React.lazy(() => import('./pages/ServiceOrders').then(m => ({ default: m.default || m.ServiceOrders })));
+const TrackingPage = React.lazy(() => import('./pages/TrackingPage').then(m => ({ default: m.default || m.TrackingPage })));
 const CatalogAdmin = React.lazy(() => import('./pages/CatalogAdmin').then(m => ({ default: m.CatalogAdmin })));
 const PublicCatalog = React.lazy(() => import('./pages/PublicCatalog').then(m => ({ default: m.PublicCatalog })));
 
@@ -47,8 +47,8 @@ function SuspenseWrapper({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Componente para proteger rutas
-function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: string[] }) {
+// Componente para proteger rutas (memoizado para evitar re-renders)
+const ProtectedRoute = React.memo(({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: string[] }) => {
   const currentUser = getCurrentUser();
 
   if (!currentUser) {
@@ -65,7 +65,7 @@ function ProtectedRoute({ children, allowedRoles }: { children: React.ReactNode;
   }
 
   return <>{children}</>;
-}
+});
 
 export const router = createBrowserRouter([
   {
@@ -92,43 +92,53 @@ export const router = createBrowserRouter([
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'productos', 
+      {
+        path: 'productos',
         element: (
           <ProtectedRoute allowedRoles={['admin']}>
-            <Products />
+            <SuspenseWrapper>
+              <Products />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'garantias', 
+      {
+        path: 'garantias',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <Warranties />
+            <SuspenseWrapper>
+              <Warranties />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'facturacion', 
+      {
+        path: 'facturacion',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <InvoicesMenu />
+            <SuspenseWrapper>
+              <InvoicesMenu />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'facturacion/regular', 
+      {
+        path: 'facturacion/regular',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <RegularInvoice />
+            <SuspenseWrapper>
+              <RegularInvoice />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'facturacion/credito', 
+      {
+        path: 'facturacion/credito',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <CreditInvoice />
+            <SuspenseWrapper>
+              <CreditInvoice />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
@@ -136,47 +146,59 @@ export const router = createBrowserRouter([
         path: 'facturacion/historial',
         element: (
           <ProtectedRoute allowedRoles={['admin']}>
-            <FinancialManagement />
+            <SuspenseWrapper>
+              <FinancialManagement />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'movimientos', 
+      {
+        path: 'movimientos',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <Movements />
+            <SuspenseWrapper>
+              <Movements />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'gastos', 
+      {
+        path: 'gastos',
         element: (
           <ProtectedRoute allowedRoles={['admin']}>
-            <Expenses />
+            <SuspenseWrapper>
+              <Expenses />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'reportes', 
+      {
+        path: 'reportes',
         element: (
           <ProtectedRoute allowedRoles={['admin']}>
-            <Reports />
+            <SuspenseWrapper>
+              <Reports />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'cierres', 
+      {
+        path: 'cierres',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <Closures />
+            <SuspenseWrapper>
+              <Closures />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'clientes', 
+      {
+        path: 'clientes',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <CustomersNew />
+            <SuspenseWrapper>
+              <CustomersNew />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
@@ -184,31 +206,39 @@ export const router = createBrowserRouter([
         path: 'clientes/:document',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <CustomerProfile />
+            <SuspenseWrapper>
+              <CustomerProfile />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'departamentos', 
+      {
+        path: 'departamentos',
         element: (
           <ProtectedRoute allowedRoles={['admin']}>
-            <Departments />
+            <SuspenseWrapper>
+              <Departments />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'devoluciones', 
+      {
+        path: 'devoluciones',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <Returns />
+            <SuspenseWrapper>
+              <Returns />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
-      { 
-        path: 'cambios', 
+      {
+        path: 'cambios',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <Exchanges />
+            <SuspenseWrapper>
+              <Exchanges />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
@@ -216,7 +246,9 @@ export const router = createBrowserRouter([
         path: 'ordenes-servicio',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <ServiceOrders />
+            <SuspenseWrapper>
+              <ServiceOrders />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },
@@ -224,7 +256,9 @@ export const router = createBrowserRouter([
         path: 'catalogo',
         element: (
           <ProtectedRoute allowedRoles={['catalog_admin']}>
-            <CatalogAdmin />
+            <SuspenseWrapper>
+              <CatalogAdmin />
+            </SuspenseWrapper>
           </ProtectedRoute>
         )
       },

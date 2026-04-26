@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List, X, Printer, Eye, Loader2, FileText } from 'lucide-react';
 import { getProducts, getAllProducts, searchProducts, addProduct, updateProduct, deleteProduct, getDepartments, type Product, type Department, supabase } from '../lib/supabase';
-import { extractIds } from '../lib/unit-ids-utils';
+import { extractIds, type UnitIdWithNote } from '../lib/unit-ids-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -39,6 +39,8 @@ export function Products() {
   const [isUnitIdsDialogOpen, setIsUnitIdsDialogOpen] = useState(false);
   const [selectedProductForIds, setSelectedProductForIds] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false); // Prevenir doble clic
+  const [activeIdTab, setActiveIdTab] = useState<'available' | 'sold'>('available'); // Tab activa en modal de IDs
+  const [selectedIdForNote, setSelectedIdForNote] = useState<{ id: string; note: string } | null>(null); // ID seleccionada para ver nota
 
   // Estados para el sistema de impresión
   const [isPrintOptionsOpen, setIsPrintOptionsOpen] = useState(false);
@@ -875,7 +877,7 @@ export function Products() {
                         <p className="text-xs text-gray-500 dark:text-gray-400">Mín: {product.min_stock}</p>
                         {product.use_unit_ids && product.registered_ids && (
                           <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">
-                            IDs: {product.registered_ids.length}
+                            IDs: {product.registered_ids.filter((id: UnitIdWithNote) => !id.disabled).length}
                           </p>
                         )}
                       </td>
@@ -1211,90 +1213,124 @@ export function Products() {
               IDs Únicas Registradas
             </DialogTitle>
             <DialogDescription>
-              Lista de todas las IDs únicas registradas para este producto
+              Gestiona las IDs disponibles y vendidas de este producto
             </DialogDescription>
           </DialogHeader>
-          
+
           {selectedProductForIds && (
             <div className="mt-2 mb-4">
-              <p className="font-medium text-gray-900">{selectedProductForIds.name}</p>
-              <p className="text-sm text-gray-600">Código: {selectedProductForIds.code}</p>
+              <p className="font-medium text-gray-900 dark:text-gray-100">{selectedProductForIds.name}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">Código: {selectedProductForIds.code}</p>
             </div>
           )}
-          
+
           {selectedProductForIds && selectedProductForIds.use_unit_ids && (
             <div className="space-y-4 py-4">
               {selectedProductForIds.registered_ids && selectedProductForIds.registered_ids.length > 0 ? (
                 <>
-                  <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 p-4 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold text-blue-900 dark:text-blue-100">
-                          Total de IDs Registradas
-                        </p>
-                        <p className="text-sm text-blue-700 dark:text-blue-300">
-                          Unidades individuales con seguimiento
-                        </p>
-                      </div>
-                      <div className="text-4xl font-bold text-blue-600">
-                        {selectedProductForIds.registered_ids.length}
-                      </div>
-                    </div>
+                  {/* Botones de pestañas */}
+                  <div className="flex gap-2 border-b border-gray-200 dark:border-gray-700">
+                    <button
+                      onClick={() => setActiveIdTab('available')}
+                      className={`px-4 py-2 font-medium transition-colors ${
+                        activeIdTab === 'available'
+                          ? 'border-b-2 border-green-600 text-green-600'
+                          : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                      }`}
+                    >
+                      ID's Disponibles ({selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => !id.disabled).length})
+                    </button>
+                    <button
+                      onClick={() => setActiveIdTab('sold')}
+                      className={`px-4 py-2 font-medium transition-colors ${
+                        activeIdTab === 'sold'
+                          ? 'border-b-2 border-red-600 text-red-600'
+                          : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                      }`}
+                    >
+                      ID's Vendidas ({selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => id.disabled).length})
+                    </button>
                   </div>
 
-                  <div>
-                    <Label className="text-sm font-medium text-gray-700 mb-3 block">
-                      Listado de IDs (Click para copiar / Botón rojo para eliminar)
-                    </Label>
-                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg max-h-80 overflow-y-auto">
-                      {selectedProductForIds.registered_ids
-                        .sort((a, b) => parseInt(a.id) - parseInt(b.id))
-                        .map((item) => {
-                          const fullCode = `${selectedProductForIds.code.slice(0, -1)}-${item.id}A`;
-                          return (
-                            <div
-                              key={item.id}
-                              className="relative group"
-                              title={item.note || 'Sin nota'}
-                            >
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  const success = await copyToClipboard(fullCode);
-                                  if (success) {
-                                    toast.success(`Copiado: ${fullCode}`);
-                                  } else {
-                                    toast.error('No se pudo copiar al portapapeles');
-                                  }
-                                }}
-                                className="w-full px-3 py-2 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900 dark:to-green-800 hover:from-green-200 hover:to-green-300 dark:hover:from-green-800 dark:hover:to-green-700 text-green-800 dark:text-green-200 text-sm font-mono rounded-lg border-2 border-green-300 dark:border-green-700 transition-all hover:scale-105 cursor-pointer shadow-sm hover:shadow-md flex flex-col items-center gap-0.5"
-                                title={`Click para copiar: ${fullCode}${item.note ? ` - ${item.note}` : ''}`}
+                  {/* Contenido según la pestaña activa */}
+                  {activeIdTab === 'available' ? (
+                    <div>
+                      <Label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 block">
+                        IDs Disponibles (Click para ver nota / Botón rojo para eliminar)
+                      </Label>
+                      <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg max-h-80 overflow-y-auto">
+                        {selectedProductForIds.registered_ids
+                          .filter((id: UnitIdWithNote) => !id.disabled)
+                          .sort((a, b) => parseInt(a.id) - parseInt(b.id))
+                          .map((item: UnitIdWithNote) => {
+                            const fullCode = `${selectedProductForIds.code.slice(0, -1)}-${item.id}A`;
+                            return (
+                              <div
+                                key={item.id}
+                                className="relative group"
                               >
-                                <span>{item.id}</span>
-                                {item.note && <span className="text-[9px] opacity-60 text-center line-clamp-1">{item.note}</span>}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteUnitId(selectedProductForIds.id, item.id)}
-                                className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
-                                title={`Eliminar ID ${item.id}`}
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            </div>
-                          );
-                        })}
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedIdForNote({ id: item.id, note: item.note })}
+                                  className="w-full px-3 py-2 bg-gradient-to-br from-green-100 to-green-200 dark:from-green-900 dark:to-green-800 hover:from-green-200 hover:to-green-300 dark:hover:from-green-800 dark:hover:to-green-700 text-green-800 dark:text-green-200 text-sm font-mono rounded-lg border-2 border-green-300 dark:border-green-700 transition-all hover:scale-105 cursor-pointer shadow-sm hover:shadow-md flex flex-col items-center gap-0.5"
+                                  title="Click para ver nota"
+                                >
+                                  <span>{item.id}</span>
+                                  {item.note && <span className="text-[9px] opacity-60 text-center line-clamp-1">{item.note}</span>}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteUnitId(selectedProductForIds.id, item.id)}
+                                  className="absolute -top-2 -right-2 bg-red-500 hover:bg-red-600 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity shadow-md"
+                                  title={`Eliminar ID ${item.id}`}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                      {selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => !id.disabled).length === 0 && (
+                        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                          No hay IDs disponibles
+                        </div>
+                      )}
                     </div>
-                  </div>
-
-                  <div className="bg-amber-50 dark:bg-amber-950 border border-amber-200 dark:border-amber-800 p-4 rounded-lg">
-                    <p className="text-sm text-amber-800 dark:text-amber-200">
-                      💡 <strong>Tip:</strong> Haz clic en cualquier ID para copiar el código completo al portapapeles. Pasa el mouse sobre una ID y presiona el botón rojo para eliminarla.
-                    </p>
-                    <p className="text-xs text-amber-700 dark:text-amber-300 mt-2">
-                      Ejemplo: Click en "0001" copia "{selectedProductForIds.code.slice(0, -1)}-0001A"
-                    </p>
-                  </div>
+                  ) : (
+                    <div>
+                      <Label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 block">
+                        IDs Vendidas (Click para ver nota)
+                      </Label>
+                      <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg max-h-80 overflow-y-auto">
+                        {selectedProductForIds.registered_ids
+                          .filter((id: UnitIdWithNote) => id.disabled)
+                          .sort((a, b) => parseInt(a.id) - parseInt(b.id))
+                          .map((item: UnitIdWithNote) => {
+                            return (
+                              <div
+                                key={item.id}
+                                className="relative"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedIdForNote({ id: item.id, note: item.note })}
+                                  className="w-full px-3 py-2 bg-gradient-to-br from-red-100 to-red-200 dark:from-red-900 dark:to-red-800 hover:from-red-200 hover:to-red-300 dark:hover:from-red-800 dark:hover:to-red-700 text-red-800 dark:text-red-200 text-sm font-mono rounded-lg border-2 border-red-300 dark:border-red-700 transition-all hover:scale-105 cursor-pointer shadow-sm hover:shadow-md flex flex-col items-center gap-0.5"
+                                  title="Click para ver nota"
+                                >
+                                  <span>{item.id}</span>
+                                  {item.note && <span className="text-[9px] opacity-60 text-center line-clamp-1">{item.note}</span>}
+                                </button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                      {selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => id.disabled).length === 0 && (
+                        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                          No hay IDs vendidas
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </>
               ) : (
                 <div className="text-center py-12">
@@ -1311,13 +1347,41 @@ export function Products() {
               )}
             </div>
           )}
-          
+
           <DialogFooter>
             <Button
               type="button"
               variant="outline"
               onClick={() => setIsUnitIdsDialogOpen(false)}
             >
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Mini modal para mostrar la nota de una ID */}
+      <Dialog open={selectedIdForNote !== null} onOpenChange={(open) => !open && setSelectedIdForNote(null)}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              ID: {selectedIdForNote?.id}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            {selectedIdForNote?.note ? (
+              <div className="bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 p-4 rounded-lg">
+                <p className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">Nota registrada:</p>
+                <p className="text-gray-700 dark:text-gray-300">{selectedIdForNote.note}</p>
+              </div>
+            ) : (
+              <div className="bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-4 rounded-lg text-center">
+                <p className="text-gray-600 dark:text-gray-400">Esta ID no tiene datos adicionales</p>
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setSelectedIdForNote(null)}>
               Cerrar
             </Button>
           </DialogFooter>
