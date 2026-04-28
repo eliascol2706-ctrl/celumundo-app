@@ -444,7 +444,7 @@ export function CreditInvoice() {
           const lastItem = items[lastIndex];
           console.log('Último producto:', lastItem);
 
-          const newPrice = window.prompt(`Nuevo precio para ${lastItem.productName}:`, lastItem.price.toString());
+          const newPrice = window.prompt(`Nuevo precio para ${lastItem.productName}:`, (lastItem.price ?? 0).toString());
           console.log('Precio ingresado:', newPrice);
 
           if (newPrice !== null && newPrice.trim() !== '') {
@@ -470,7 +470,7 @@ export function CreditInvoice() {
           const lastItem = items[lastIndex];
           console.log('Último producto:', lastItem);
 
-          const newQty = window.prompt(`Nueva cantidad para ${lastItem.productName}:`, lastItem.quantity.toString());
+          const newQty = window.prompt(`Nueva cantidad para ${lastItem.productName}:`, (lastItem.quantity ?? 1).toString());
           console.log('Cantidad ingresada:', newQty);
 
           if (newQty !== null && newQty.trim() !== '') {
@@ -562,12 +562,15 @@ export function CreditInvoice() {
 
   const calculatePaymentTerm = () => {
     if (selectedCustomer) {
-      setPaymentTerm(selectedCustomer.payment_term.toString());
-      const days = selectedCustomer.payment_term;
+      const term = selectedCustomer.payment_term ?? 30;
+      setPaymentTerm(term.toString());
+      const days = term;
       const date = new Date();
       date.setDate(date.getDate() + days);
       setDueDate(date.toISOString().split('T')[0]);
+      return date.toISOString().split('T')[0];
     }
+    return '';
   };
 
   const analyzeCreditStatus = async () => {
