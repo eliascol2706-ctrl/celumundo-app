@@ -30,14 +30,13 @@ import {
   Wrench,
   Printer
 } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
-import { getCurrentUser, logoutUser, getSession, getProducts, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession, canCreateInvoice } from '../lib/supabase';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { getCurrentUser, logoutUser, getSession, searchProductsForInvoice, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession, canCreateInvoice } from '../lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
 import { Label } from '../components/ui/label';
 import { formatCOP } from '../lib/currency';
-import { includesIgnoreAccents } from '../lib/string-utils';
 import { getPrinterConfig, savePrinterConfig, getAvailablePrinters, getLabelPrinterSettings, saveLabelPrinterSettings, type LabelPrinterSettings, defaultLabelSettings } from '../lib/printer-config';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { isPrintingAvailable } from '../lib/platform-detector';
@@ -151,7 +150,9 @@ export function Layout() {
   const [productSearchTerm, setProductSearchTerm] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [isSearchingProducts, setIsSearchingProducts] = useState(false);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
+  const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Estados para configuración (solo para admin)
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
@@ -173,10 +174,9 @@ export function Layout() {
   const [labelPrinterConfigDialogOpen, setLabelPrinterConfigDialogOpen] = useState(false);
   const [labelPrinterSettings, setLabelPrinterSettings] = useState<LabelPrinterSettings>(defaultLabelSettings);
 
-  // Cargar productos cuando se abre el diálogo
+  // Enfocar input cuando se abre el diálogo
   useEffect(() => {
     if (productSearchDialogOpen && currentUser?.role === 'seller') {
-      loadProducts();
       // Enfocar el input cuando se abre el diálogo
       setTimeout(() => {
         barcodeInputRef.current?.focus();
@@ -352,17 +352,53 @@ export function Layout() {
     }
   };
 
-  const loadProducts = async () => {
-    const data = await getProducts();
-    setProducts(data);
-  };
+  // Búsqueda optimizada de productos con debounce
+  const performProductSearch = useCallback(async (searchTerm: string) => {
+    if (!searchTerm || searchTerm.trim().length < 2) {
+      setProducts([]);
+      return;
+    }
 
-  // Filtrar productos por código, nombre o categoría (ignorando acentos)
-  const filteredProducts = products.filter(product =>
-    includesIgnoreAccents(product.name, productSearchTerm) ||
-    includesIgnoreAccents(product.code, productSearchTerm) ||
-    includesIgnoreAccents(product.category, productSearchTerm)
-  );
+    setIsSearchingProducts(true);
+    try {
+      const results = await searchProductsForInvoice(searchTerm);
+      setProducts(results);
+
+      // Si hay un producto exacto por código, seleccionarlo automáticamente
+      const exactMatch = results.find(
+        p => p.code.toLowerCase() === searchTerm.toLowerCase()
+      );
+      if (exactMatch) {
+        setSelectedProduct(exactMatch);
+      }
+    } catch (error) {
+      console.error('Error searching products:', error);
+    } finally {
+      setIsSearchingProducts(false);
+    }
+  }, []);
+
+  // Efecto para búsqueda con debounce de 500ms
+  useEffect(() => {
+    if (searchTimeoutRef.current) {
+      clearTimeout(searchTimeoutRef.current);
+    }
+
+    if (productSearchTerm.trim().length >= 2) {
+      searchTimeoutRef.current = setTimeout(() => {
+        performProductSearch(productSearchTerm);
+      }, 500);
+    } else {
+      setProducts([]);
+      setSelectedProduct(null);
+    }
+
+    return () => {
+      if (searchTimeoutRef.current) {
+        clearTimeout(searchTimeoutRef.current);
+      }
+    };
+  }, [productSearchTerm, performProductSearch]);
   
   // Redirigir a login si no hay usuario
   useEffect(() => {
@@ -687,17 +723,10 @@ export function Layout() {
                     value={productSearchTerm}
                     onChange={(e) => {
                       setProductSearchTerm(e.target.value);
-                      // Si hay un producto exacto, seleccionarlo automáticamente
-                      const exactMatch = products.find(
-                        p => p.code.toLowerCase() === e.target.value.toLowerCase()
-                      );
-                      if (exactMatch) {
-                        setSelectedProduct(exactMatch);
-                      }
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' && filteredProducts.length === 1) {
-                        setSelectedProduct(filteredProducts[0]);
+                      if (e.key === 'Enter' && products.length === 1) {
+                        setSelectedProduct(products[0]);
                       }
                     }}
                     className="pl-10"
@@ -705,7 +734,7 @@ export function Layout() {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  💡 Tip: Usa el lector de código de barras para búsqueda rápida
+                  💡 Tip: La búsqueda se realiza automáticamente 500ms después de dejar de escribir
                 </p>
               </div>
 
@@ -845,9 +874,14 @@ export function Layout() {
               {!selectedProduct && productSearchTerm && (
                 <div className="border border-border rounded-lg overflow-hidden">
                   <div className="max-h-[400px] overflow-y-auto">
-                    {filteredProducts.length > 0 ? (
+                    {isSearchingProducts ? (
+                      <div className="py-12 text-center">
+                        <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+                        <p className="text-muted-foreground">Buscando productos...</p>
+                      </div>
+                    ) : products.length > 0 ? (
                       <div className="divide-y divide-border">
-                        {filteredProducts.slice(0, 10).map((product) => (
+                        {products.map((product) => (
                           <button
                             key={product.id}
                             type="button"
@@ -911,7 +945,15 @@ export function Layout() {
               {!selectedProduct && !productSearchTerm && (
                 <div className="text-center py-12">
                   <Search className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-muted-foreground">Escribe o escanea un código para buscar</p>
+                  <p className="text-muted-foreground">Escribe al menos 2 caracteres para buscar</p>
+                  <p className="text-xs text-muted-foreground mt-1">O escanea un código de barras</p>
+                </div>
+              )}
+
+              {!selectedProduct && productSearchTerm && productSearchTerm.trim().length < 2 && !isSearchingProducts && (
+                <div className="text-center py-12">
+                  <Search className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-muted-foreground">Escribe al menos 2 caracteres para buscar</p>
                 </div>
               )}
             </div>

@@ -39,7 +39,7 @@ export function Products() {
   const [isUnitIdsDialogOpen, setIsUnitIdsDialogOpen] = useState(false);
   const [selectedProductForIds, setSelectedProductForIds] = useState<Product | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false); // Prevenir doble clic
-  const [activeIdTab, setActiveIdTab] = useState<'available' | 'sold'>('available'); // Tab activa en modal de IDs
+  const [activeIdTab, setActiveIdTab] = useState<'available' | 'sold' | 'warranty'>('available'); // Tab activa en modal de IDs
   const [selectedIdForNote, setSelectedIdForNote] = useState<{ id: string; note: string } | null>(null); // ID seleccionada para ver nota
 
   // Estados para el sistema de impresión
@@ -877,7 +877,7 @@ export function Products() {
                         <p className="text-xs text-gray-500 dark:text-gray-400">Mín: {product.min_stock}</p>
                         {product.use_unit_ids && product.registered_ids && (
                           <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">
-                            IDs: {product.registered_ids.filter((id: UnitIdWithNote) => !id.disabled).length}
+                            IDs: {product.registered_ids.filter((id: UnitIdWithNote) => !id.disabled && id.reservationType !== 'warranty').length}
                           </p>
                         )}
                       </td>
@@ -1238,7 +1238,7 @@ export function Products() {
                           : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
                       }`}
                     >
-                      ID's Disponibles ({selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => !id.disabled).length})
+                      ID's Disponibles ({selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => !id.disabled && id.reservationType !== 'warranty').length})
                     </button>
                     <button
                       onClick={() => setActiveIdTab('sold')}
@@ -1248,7 +1248,17 @@ export function Products() {
                           : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
                       }`}
                     >
-                      ID's Vendidas ({selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => id.disabled).length})
+                      ID's Vendidas ({selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => id.disabled && !id.reservedBy && !id.reservationType).length})
+                    </button>
+                    <button
+                      onClick={() => setActiveIdTab('warranty')}
+                      className={`px-4 py-2 font-medium transition-colors ${
+                        activeIdTab === 'warranty'
+                          ? 'border-b-2 border-orange-600 text-orange-600'
+                          : 'text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300'
+                      }`}
+                    >
+                      ID's en Garantías ({selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => id.reservationType === 'warranty').length})
                     </button>
                   </div>
 
@@ -1260,7 +1270,7 @@ export function Products() {
                       </Label>
                       <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg max-h-80 overflow-y-auto">
                         {selectedProductForIds.registered_ids
-                          .filter((id: UnitIdWithNote) => !id.disabled)
+                          .filter((id: UnitIdWithNote) => !id.disabled && id.reservationType !== 'warranty')
                           .sort((a, b) => parseInt(a.id) - parseInt(b.id))
                           .map((item: UnitIdWithNote) => {
                             const fullCode = `${selectedProductForIds.code.slice(0, -1)}-${item.id}A`;
@@ -1290,20 +1300,20 @@ export function Products() {
                             );
                           })}
                       </div>
-                      {selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => !id.disabled).length === 0 && (
+                      {selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => !id.disabled && id.reservationType !== 'warranty').length === 0 && (
                         <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                           No hay IDs disponibles
                         </div>
                       )}
                     </div>
-                  ) : (
+                  ) : activeIdTab === 'sold' ? (
                     <div>
                       <Label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 block">
                         IDs Vendidas (Click para ver nota)
                       </Label>
                       <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg max-h-80 overflow-y-auto">
                         {selectedProductForIds.registered_ids
-                          .filter((id: UnitIdWithNote) => id.disabled)
+                          .filter((id: UnitIdWithNote) => id.disabled && !id.reservedBy && !id.reservationType)
                           .sort((a, b) => parseInt(a.id) - parseInt(b.id))
                           .map((item: UnitIdWithNote) => {
                             return (
@@ -1324,9 +1334,43 @@ export function Products() {
                             );
                           })}
                       </div>
-                      {selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => id.disabled).length === 0 && (
+                      {selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => id.disabled && !id.reservedBy && !id.reservationType).length === 0 && (
                         <div className="text-center py-8 text-gray-500 dark:text-gray-400">
                           No hay IDs vendidas
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div>
+                      <Label className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3 block">
+                        IDs en Garantías (Click para ver nota)
+                      </Label>
+                      <div className="grid grid-cols-4 sm:grid-cols-6 gap-2 p-4 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg max-h-80 overflow-y-auto">
+                        {selectedProductForIds.registered_ids
+                          .filter((id: UnitIdWithNote) => id.reservationType === 'warranty')
+                          .sort((a, b) => parseInt(a.id) - parseInt(b.id))
+                          .map((item: UnitIdWithNote) => {
+                            return (
+                              <div
+                                key={item.id}
+                                className="relative"
+                              >
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedIdForNote({ id: item.id, note: item.note })}
+                                  className="w-full px-3 py-2 bg-gradient-to-br from-orange-100 to-orange-200 dark:from-orange-900 dark:to-orange-800 hover:from-orange-200 hover:to-orange-300 dark:hover:from-orange-800 dark:hover:to-orange-700 text-orange-800 dark:text-orange-200 text-sm font-mono rounded-lg border-2 border-orange-300 dark:border-orange-700 transition-all hover:scale-105 cursor-pointer shadow-sm hover:shadow-md flex flex-col items-center gap-0.5"
+                                  title="Click para ver nota"
+                                >
+                                  <span>{item.id}</span>
+                                  {item.note && <span className="text-[9px] opacity-60 text-center line-clamp-1">{item.note}</span>}
+                                </button>
+                              </div>
+                            );
+                          })}
+                      </div>
+                      {selectedProductForIds.registered_ids.filter((id: UnitIdWithNote) => id.reservationType === 'warranty').length === 0 && (
+                        <div className="text-center py-8 text-gray-500 dark:text-gray-400">
+                          No hay IDs en garantías
                         </div>
                       )}
                     </div>

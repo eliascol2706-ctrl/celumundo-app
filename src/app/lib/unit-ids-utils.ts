@@ -6,8 +6,8 @@ export type UnitIdWithNote = {
   id: string;
   note: string;
   disabled?: boolean; // Para facturas en confirmación o cambios en espera
-  reservedBy?: string; // ID de la factura/cambio que la reservó
-  reservationType?: 'invoice' | 'exchange'; // Tipo de reserva
+  reservedBy?: string; // ID de la factura/cambio/garantía que la reservó
+  reservationType?: 'invoice' | 'exchange' | 'warranty'; // Tipo de reserva
 };
 
 /**
@@ -80,10 +80,10 @@ export function createNotesMap(registeredIds: UnitIdWithNote[]): { [id: string]:
 }
 
 /**
- * Filtra solo las IDs disponibles (no inhabilitadas)
+ * Filtra solo las IDs disponibles (no inhabilitadas y no en garantía)
  */
 export function getAvailableIds(registeredIds: UnitIdWithNote[]): UnitIdWithNote[] {
-  return registeredIds.filter(item => !item.disabled);
+  return registeredIds.filter(item => !item.disabled && item.reservationType !== 'warranty');
 }
 
 /**
@@ -172,4 +172,61 @@ export function restoreReturnedIds(registeredIds: UnitIdWithNote[], idsToRestore
     }
     return item;
   });
+}
+
+/**
+ * Marca IDs como en garantía
+ * Se usa al registrar una garantía - las IDs quedan marcadas con reservationType: 'warranty'
+ */
+export function markIdsAsWarranty(registeredIds: UnitIdWithNote[], idsToMark: string[], warrantyId: string): UnitIdWithNote[] {
+  return registeredIds.map(item => {
+    if (idsToMark.includes(item.id)) {
+      return {
+        ...item,
+        disabled: true,
+        reservedBy: warrantyId,
+        reservationType: 'warranty' as const
+      };
+    }
+    return item;
+  });
+}
+
+/**
+ * Libera IDs de garantía cuando se resuelve o cancela
+ * Opcionalmente puede restaurarlas como disponibles o marcarlas como vendidas
+ */
+export function releaseWarrantyIds(
+  registeredIds: UnitIdWithNote[],
+  warrantyId: string,
+  markAsSold: boolean = false
+): UnitIdWithNote[] {
+  return registeredIds.map(item => {
+    if (item.reservedBy === warrantyId && item.reservationType === 'warranty') {
+      if (markAsSold) {
+        // Marcar como vendida (mantener disabled pero sin reserva)
+        const { reservedBy, reservationType, ...rest } = item;
+        return { ...rest, disabled: true };
+      } else {
+        // Restaurar como disponible
+        const { disabled, reservedBy, reservationType, ...rest } = item;
+        return rest;
+      }
+    }
+    return item;
+  });
+}
+
+/**
+ * Obtiene las IDs que están en garantía
+ */
+export function getWarrantyIds(registeredIds: UnitIdWithNote[]): UnitIdWithNote[] {
+  return registeredIds.filter(item => item.reservationType === 'warranty');
+}
+
+/**
+ * Obtiene las IDs vendidas (disabled sin reserva)
+ */
+export function getSoldIds(registeredIds: UnitIdWithNote[]): UnitIdWithNote[] {
+  return registeredIds.filter(item => item.disabled && !item.reservedBy && !item.reservationType);
 }

@@ -629,12 +629,22 @@ export function CreditInvoice() {
   const addProductToList = (product: any) => {
     // Verificar si el producto usa IDs y tiene IDs disponibles
     if (product.use_unit_ids) {
-      const availableIds = product.registered_ids || [];
+      // Filtrar IDs disponibles: excluir las que están disabled o en garantía
+      const availableIds = (product.registered_ids || []).filter((idObj: any) =>
+        !idObj.disabled && idObj.reservationType !== 'warranty'
+      );
       if (availableIds.length === 0) {
-        toast.error(`${product.name} no tiene IDs registradas disponibles`);
+        toast.error(`${product.name} no tiene IDs disponibles para facturar`);
         return;
       }
     }
+
+    // Filtrar IDs disponibles para el item
+    const availableIds = product.use_unit_ids
+      ? (product.registered_ids || []).filter((idObj: any) =>
+          !idObj.disabled && idObj.reservationType !== 'warranty'
+        )
+      : [];
 
     // Agregar nuevo item con el producto seleccionado
     const newItem: InvoiceItem = {
@@ -646,10 +656,10 @@ export function CreditInvoice() {
       total: product.price2,
       useUnitIds: product.use_unit_ids,
       unitIds: [],
-      availableIds: product.registered_ids || [],
+      availableIds: availableIds,
       unitIdNotes: {}
     };
-    
+
     setItems([...items, newItem]);
     setShowProductSearch(false);
 
@@ -662,13 +672,20 @@ export function CreditInvoice() {
   };
 
   const selectProduct = (index: number, product: Product) => {
+    // Filtrar IDs disponibles: excluir las que están disabled o en garantía
+    const availableIds = product.use_unit_ids
+      ? (product.registered_ids || []).filter((idObj: any) =>
+          !idObj.disabled && idObj.reservationType !== 'warranty'
+        )
+      : [];
+
     updateItem(index, 'productId', product.id);
     updateItem(index, 'productName', product.name);
     updateItem(index, 'productCode', product.code);
     updateItem(index, 'price', product.price2);
     updateItem(index, 'total', product.price2 * items[index].quantity);
     updateItem(index, 'useUnitIds', product.use_unit_ids);
-    updateItem(index, 'availableIds', product.registered_ids || []);
+    updateItem(index, 'availableIds', availableIds);
     setShowProductSearch(false);
     setProductSearch('');
   };

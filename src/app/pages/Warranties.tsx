@@ -135,13 +135,9 @@ export default function Warranties() {
     const product = products.find(p => p.id === productId);
     if (product) {
       setSelectedProduct(product);
-      
-      // Si el producto usa IDs únicas, seleccionar automáticamente las primeras disponibles
-      if (product.use_unit_ids && product.registered_ids) {
-        setUnitIds(product.registered_ids.slice(0, quantity));
-      } else {
-        setUnitIds([]);
-      }
+
+      // Limpiar IDs seleccionadas
+      setUnitIds([]);
     }
   };
 
@@ -176,10 +172,10 @@ export default function Warranties() {
   const handleQuantityChange = (qty: number) => {
     if (!selectedProduct) return;
     setQuantity(qty);
-    
-    // Ajustar IDs únicas si aplica
-    if (selectedProduct.use_unit_ids && selectedProduct.registered_ids) {
-      setUnitIds(selectedProduct.registered_ids.slice(0, qty));
+
+    // Ajustar IDs únicas si se excede la cantidad
+    if (selectedProduct.use_unit_ids && unitIds.length > qty) {
+      setUnitIds(unitIds.slice(0, qty));
     }
   };
 
@@ -194,11 +190,11 @@ export default function Warranties() {
     }
     
     // Validar IDs únicas si aplica
-    if (selectedProduct.use_unit_ids) {
-      if (discountFromStock && (!selectedProduct.registered_ids || selectedProduct.registered_ids.length < quantity)) {
-        return `No hay suficientes IDs únicas disponibles`;
+    if (selectedProduct.use_unit_ids && discountFromStock) {
+      if (!selectedProduct.registered_ids || selectedProduct.registered_ids.length < quantity) {
+        return `No hay suficientes IDs únicas registradas en el producto`;
       }
-      if (discountFromStock && unitIds.length !== quantity) {
+      if (unitIds.length !== quantity) {
         return `Debes seleccionar ${quantity} ID(s) única(s)`;
       }
     }
@@ -624,14 +620,80 @@ export default function Warranties() {
 
                 {selectedProduct.use_unit_ids && discountFromStock && (
                   <div className="space-y-2">
-                    <Label>IDs Únicas</Label>
-                    <Input
-                      value={unitIds.join(',')}
-                      readOnly
-                      className="bg-muted"
-                    />
+                    <Label>IDs Únicas ({unitIds.length} de {quantity} seleccionadas)</Label>
+                    <div className="border rounded-lg p-3 max-h-48 overflow-y-auto bg-muted/30">
+                      <div className="grid grid-cols-3 gap-2">
+                        {selectedProduct.registered_ids && selectedProduct.registered_ids.length > 0 ? (
+                          selectedProduct.registered_ids.map((idObj: any) => {
+                            const isSelected = unitIds.includes(idObj.id);
+                            const isDisabled = idObj.disabled && idObj.reservationType !== 'warranty';
+                            const isInWarranty = idObj.reservationType === 'warranty';
+
+                            let statusLabel = '';
+                            let statusColor = '';
+
+                            if (isInWarranty) {
+                              statusLabel = 'En garantía';
+                              statusColor = 'text-orange-600 dark:text-orange-400';
+                            } else if (isDisabled) {
+                              statusLabel = 'Vendida';
+                              statusColor = 'text-red-600 dark:text-red-400';
+                            } else {
+                              statusLabel = 'Disponible';
+                              statusColor = 'text-green-600 dark:text-green-400';
+                            }
+
+                            return (
+                              <div
+                                key={idObj.id}
+                                className={`flex items-center space-x-2 p-2 rounded border cursor-pointer transition-colors ${
+                                  isSelected
+                                    ? 'bg-blue-50 dark:bg-blue-950 border-blue-500'
+                                    : 'bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700'
+                                }`}
+                                onClick={() => {
+                                  if (isSelected) {
+                                    setUnitIds(unitIds.filter(id => id !== idObj.id));
+                                  } else {
+                                    if (unitIds.length < quantity) {
+                                      setUnitIds([...unitIds, idObj.id]);
+                                    } else {
+                                      toast.warning(`Solo puedes seleccionar ${quantity} IDs`);
+                                    }
+                                  }
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  readOnly
+                                  className="w-4 h-4 text-blue-600"
+                                />
+                                <div className="flex-1 min-w-0">
+                                  <div className="font-mono text-sm font-semibold truncate">
+                                    {idObj.id}
+                                  </div>
+                                  <div className={`text-xs ${statusColor}`}>
+                                    {statusLabel}
+                                  </div>
+                                  {idObj.note && (
+                                    <div className="text-xs text-gray-500 truncate">
+                                      {idObj.note.slice(-4)}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <p className="text-sm text-muted-foreground col-span-3 text-center py-4">
+                            No hay IDs registradas para este producto
+                          </p>
+                        )}
+                      </div>
+                    </div>
                     <p className="text-xs text-muted-foreground">
-                      IDs seleccionadas automáticamente: {unitIds.length} de {quantity} requeridas
+                      💡 Puedes seleccionar IDs en cualquier estado. Al registrar la garantía, cambiarán a estado "En garantía"
                     </p>
                   </div>
                 )}

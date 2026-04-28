@@ -3659,12 +3659,14 @@ export const addWarranty = async (warrantyData: Omit<Warranty, 'id' | 'warranty_
     if (product) {
       const newStock = product.stock - warrantyData.quantity;
       let newRegisteredIds = product.registered_ids || [];
-      
+
       if (product.use_unit_ids && warrantyData.unit_ids && warrantyData.unit_ids.length > 0) {
-        newRegisteredIds = newRegisteredIds.filter(id => !warrantyData.unit_ids?.includes(id));
+        // No eliminar las IDs, solo marcarlas como en garantía
+        const { markIdsAsWarranty } = await import('./unit-ids-utils');
+        newRegisteredIds = markIdsAsWarranty(newRegisteredIds, warrantyData.unit_ids, data.id);
       }
-      
-      await updateProduct(warrantyData.product_id, { 
+
+      await updateProduct(warrantyData.product_id, {
         stock: newStock,
         registered_ids: newRegisteredIds
       });
@@ -3709,40 +3711,54 @@ export const updateWarrantyStatus = async (
     return null;
   }
   
-  if (status === 'resolved') {
+  // Manejar cambios en stock e IDs para garantías resueltas o canceladas
+  if (status === 'resolved' || status === 'cancelled') {
     const { data: warranty } = await supabase
       .from('warranties')
       .select('*')
       .eq('id', id)
       .single();
-    
+
     if (warranty && warranty.discount_from_stock) {
-      await addMovement({
-        type: 'entry',
-        product_id: warranty.product_id,
-        product_name: warranty.product_name,
-        quantity: warranty.quantity,
-        reason: 'Garantía - Producto devuelto',
-        reference: warranty.warranty_number,
-        user_name: updatedBy || 'Sistema',
-        unit_ids: warranty.unit_ids || []
-      });
-      
+      // Solo añadir movimiento de entrada si se resolvió (producto devuelto)
+      if (status === 'resolved') {
+        await addMovement({
+          type: 'entry',
+          product_id: warranty.product_id,
+          product_name: warranty.product_name,
+          quantity: warranty.quantity,
+          reason: 'Garantía - Producto devuelto',
+          reference: warranty.warranty_number,
+          user_name: updatedBy || 'Sistema',
+          unit_ids: warranty.unit_ids || []
+        });
+      }
+
       const { data: product } = await supabase
         .from('products')
         .select('*')
         .eq('id', warranty.product_id)
         .single();
-      
+
       if (product) {
-        const newStock = product.stock + warranty.quantity;
+        let newStock = product.stock;
         let newRegisteredIds = product.registered_ids || [];
-        
-        if (product.use_unit_ids && warranty.unit_ids && warranty.unit_ids.length > 0) {
-          newRegisteredIds = [...warranty.unit_ids, ...newRegisteredIds];
+
+        // Solo incrementar stock si se resolvió (producto devuelto al inventario)
+        if (status === 'resolved') {
+          newStock = product.stock + warranty.quantity;
         }
-        
-        await updateProduct(warranty.product_id, { 
+
+        if (product.use_unit_ids && warranty.unit_ids && warranty.unit_ids.length > 0) {
+          const { releaseWarrantyIds } = await import('./unit-ids-utils');
+
+          // Si se resolvió, liberar como disponibles
+          // Si se canceló, liberar como vendidas (el producto no volvió)
+          const markAsSold = status === 'cancelled';
+          newRegisteredIds = releaseWarrantyIds(newRegisteredIds, id, markAsSold);
+        }
+
+        await updateProduct(warranty.product_id, {
           stock: newStock,
           registered_ids: newRegisteredIds
         });
