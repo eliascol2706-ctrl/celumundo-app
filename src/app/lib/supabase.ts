@@ -2463,18 +2463,61 @@ export const getCustomers = async (): Promise<Customer[]> => {
 
 export const getCustomerByDocument = async (document: string): Promise<Customer | null> => {
   const company = getCurrentCompany();
-  const { data, error } = await supabase
+
+  // Limpiar el documento de espacios en blanco
+  const cleanDocument = document.trim();
+
+  console.log('Buscando cliente:', { company, document: cleanDocument });
+
+  // Primero, intentar encontrar el cliente con búsqueda exacta
+  let { data, error } = await supabase
     .from('customers')
     .select('*')
     .eq('company', company)
-    .eq('document', document)
+    .eq('document', cleanDocument)
     .single();
-  
+
+  if (error && error.code === 'PGRST116') {
+    // Si no se encuentra, hacer una búsqueda de diagnóstico
+    console.log('Cliente no encontrado con búsqueda exacta. Buscando todos los clientes...');
+
+    const { data: allCustomers, error: allError } = await supabase
+      .from('customers')
+      .select('id, name, document')
+      .eq('company', company)
+      .limit(50);
+
+    if (!allError && allCustomers) {
+      console.log('Todos los clientes de la empresa:', allCustomers);
+      console.log('Documentos disponibles:', allCustomers.map(c => `"${c.document}"`));
+
+      // Intentar buscar de forma flexible (case-insensitive, eliminando espacios)
+      const found = allCustomers.find(c =>
+        c.document.trim().toLowerCase() === cleanDocument.toLowerCase()
+      );
+
+      if (found) {
+        console.log('Cliente encontrado con búsqueda flexible:', found);
+        // Obtener el cliente completo
+        const { data: fullData } = await supabase
+          .from('customers')
+          .select('*')
+          .eq('id', found.id)
+          .single();
+        return fullData || null;
+      }
+    }
+
+    console.log('Cliente no encontrado con documento:', cleanDocument);
+    return null;
+  }
+
   if (error) {
-    if (error.code === 'PGRST116') return null; // No encontrado
     console.error('Error fetching customer:', error);
     return null;
   }
+
+  console.log('Cliente encontrado:', data);
   return data;
 };
 
@@ -2485,26 +2528,36 @@ export const addCustomer = async (customer: Omit<Customer, 'id' | 'company' | 'c
     .insert([{ ...customer, company }])
     .select()
     .single();
-  
+
   if (error) {
     console.error('Error adding customer:', error);
     return null;
   }
+
+  // Invalidar caché de clientes para forzar recarga
+  invalidateCache.customers(company);
+
   return data;
 };
 
 export const updateCustomer = async (id: string, updates: Partial<Customer>): Promise<Customer | null> => {
+  const company = getCurrentCompany();
+
   const { data, error } = await supabase
     .from('customers')
     .update(updates)
     .eq('id', id)
     .select()
     .single();
-  
+
   if (error) {
     console.error('Error updating customer:', error);
     return null;
   }
+
+  // Invalidar caché de clientes para forzar recarga
+  invalidateCache.customers(company);
+
   return data;
 };
 
@@ -4059,6 +4112,108 @@ export const deleteCatalogItem = async (catalogId: string): Promise<boolean> => 
     return true;
   } catch (error) {
     console.error('Error deleting catalog item:', error);
+    return false;
+  }
+};
+
+// ==================== FACTURAS GUARDADAS ====================
+
+export interface InvoiceSave {
+  id: string;
+  company: string;
+  invoice_type: 'regular' | 'credito';
+  save_name?: string;
+  invoice_data: any; // JSON con todos los datos de la factura
+  created_at: string;
+  updated_at: string;
+  created_by?: string;
+}
+
+/**
+ * Guardar una factura en progreso
+ */
+export const saveInvoiceDraft = async (
+  invoiceType: 'regular' | 'credito',
+  invoiceData: any,
+  saveName?: string
+): Promise<InvoiceSave | null> => {
+  try {
+    const company = getCurrentCompany();
+    const currentUserData = getCurrentUser();
+
+    const { data, error } = await supabase
+      .from('invoice_saves')
+      .insert([{
+        company,
+        invoice_type: invoiceType,
+        save_name: saveName,
+        invoice_data: invoiceData,
+        created_by: currentUserData?.username
+      }])
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Error saving invoice draft:', error);
+      return null;
+    }
+
+    return data;
+  } catch (error) {
+    console.error('Error saving invoice draft:', error);
+    return null;
+  }
+};
+
+/**
+ * Obtener todas las facturas guardadas
+ */
+export const getInvoiceSaves = async (invoiceType?: 'regular' | 'credito'): Promise<InvoiceSave[]> => {
+  try {
+    const company = getCurrentCompany();
+
+    let query = supabase
+      .from('invoice_saves')
+      .select('*')
+      .eq('company', company)
+      .order('created_at', { ascending: false });
+
+    if (invoiceType) {
+      query = query.eq('invoice_type', invoiceType);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error fetching invoice saves:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error fetching invoice saves:', error);
+    return [];
+  }
+};
+
+/**
+ * Eliminar una factura guardada
+ */
+export const deleteInvoiceSave = async (saveId: string): Promise<boolean> => {
+  try {
+    const { error } = await supabase
+      .from('invoice_saves')
+      .delete()
+      .eq('id', saveId);
+
+    if (error) {
+      console.error('Error deleting invoice save:', error);
+      return false;
+    }
+
+    return true;
+  } catch (error) {
+    console.error('Error deleting invoice save:', error);
     return false;
   }
 };

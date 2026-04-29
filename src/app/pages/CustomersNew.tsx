@@ -565,7 +565,11 @@ export function CustomersNew() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => navigate(`/clientes/${customer.document}`)}
+                              onClick={() => {
+                                console.log('Navegando al perfil del cliente:', customer.document);
+                                console.log('Datos completos del cliente:', customer);
+                                navigate(`/clientes/${encodeURIComponent(customer.document)}`);
+                              }}
                               className="hover:bg-emerald-50 hover:border-emerald-300"
                             >
                               <Eye className="w-4 h-4" />

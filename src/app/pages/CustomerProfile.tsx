@@ -63,20 +63,27 @@ export function CustomerProfile() {
 
     setLoading(true);
     try {
+      // Decodificar el documento de la URL por si tiene caracteres especiales
+      const decodedDocument = decodeURIComponent(document);
+      console.log('Cargando perfil del cliente con documento:', decodedDocument);
+
       const [customerData, allInvoices, historyData] = await Promise.all([
-        getCustomerByDocument(document),
+        getCustomerByDocument(decodedDocument),
         getInvoices(),
-        getCreditHistory(document)
+        getCreditHistory(decodedDocument)
       ]);
 
       if (!customerData) {
+        console.error('Cliente no encontrado con documento:', decodedDocument);
         toast.error('Cliente no encontrado');
         navigate('/clientes');
         return;
       }
 
+      console.log('Datos del cliente cargados:', customerData);
+
       const customerInvoices = allInvoices.filter(
-        (inv) => inv.customer_document === document && inv.is_credit
+        (inv) => inv.customer_document === decodedDocument && inv.is_credit
       );
 
       // Calcular el estado correcto del cliente basándose en sus facturas

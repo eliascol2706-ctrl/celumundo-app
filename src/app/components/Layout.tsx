@@ -420,6 +420,35 @@ export function Layout() {
     }
   }, []);
 
+  // Atajo CTRL+F para crear nueva factura
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      // Detectar CTRL+F (o CMD+F en Mac)
+      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+        // Verificar que no estemos ya en una página de facturación activa
+        const isInInvoicePage = location.pathname === '/facturacion/regular' || location.pathname === '/facturacion/credito';
+
+        if (!isInInvoicePage) {
+          e.preventDefault(); // Prevenir el comportamiento por defecto del navegador
+
+          // Verificar si se puede crear factura
+          const validation = await canCreateInvoice();
+
+          if (!validation.canCreate) {
+            alert(validation.message || 'No se pueden crear facturas en este momento.');
+            return;
+          }
+
+          // Ir directo a factura regular
+          navigate('/facturacion/regular');
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [location, navigate]);
+
   const toggleTheme = () => {
     if (isDark) {
       document.documentElement.classList.remove('dark');
@@ -638,7 +667,7 @@ export function Layout() {
       {/* Botón de tema fijo en esquina inferior izquierda */}
       <button
         onClick={toggleTheme}
-        className="fixed top-4 right-4 lg:top-6 lg:right-6 z-50 p-3 lg:p-4 bg-green-600 hover:bg-green-700 text-white rounded-full shadow-lg transition-all duration-300 hover:scale-110"
+        className="fixed bottom-4 left-4 lg:bottom-6 lg:left-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-full shadow-lg transition-all duration-300 hover:scale-110"
         aria-label="Toggle theme"
       >
         {isDark ? <Sun className="h-5 w-5 lg:h-6 lg:w-6" /> : <Moon className="h-5 w-5 lg:h-6 lg:w-6" />}

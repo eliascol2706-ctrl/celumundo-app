@@ -24,7 +24,9 @@ import {
   Scan,
   Printer,
   Download,
-  FileText
+  FileText,
+  Save,
+  FolderOpen
 } from 'lucide-react';
 import { isElectron, onGlobalShortcut, removeGlobalShortcutListener } from '../lib/electron-utils';
 import {
@@ -41,7 +43,11 @@ import {
   getColombiaDateTime,
   type Customer,
   getCurrentUser,
-  getInvoices
+  getInvoices,
+  saveInvoiceDraft,
+  getInvoiceSaves,
+  deleteInvoiceSave,
+  type InvoiceSave
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -123,6 +129,14 @@ export function CreditInvoice() {
     overdueDays: 0,
     totalDebt: 0
   });
+
+  // Estados para guardar/cargar facturas
+  const [showSaveDialog, setShowSaveDialog] = useState(false);
+  const [showLoadDialog, setShowLoadDialog] = useState(false);
+  const [saveName, setSaveName] = useState('');
+  const [savedInvoices, setSavedInvoices] = useState<InvoiceSave[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isLoadingList, setIsLoadingList] = useState(false);
 
 
   useEffect(() => {
@@ -751,6 +765,95 @@ export function CreditInvoice() {
     setProductSearch('');
   };
 
+  // Guardar factura
+  const handleSaveInvoice = async () => {
+    if (items.length === 0) {
+      toast.error('No hay productos para guardar');
+      return;
+    }
+
+    if (!selectedCustomer) {
+      toast.error('Selecciona un cliente primero');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      const invoiceData = {
+        items,
+        selectedCustomer,
+        paymentTerm,
+        dueDate,
+        total: calculateTotal()
+      };
+
+      const result = await saveInvoiceDraft('credito', invoiceData, saveName || undefined);
+
+      if (result) {
+        toast.success('Factura guardada exitosamente');
+        setShowSaveDialog(false);
+        setSaveName('');
+        // Limpiar la factura actual
+        setItems([]);
+        setSelectedCustomer(null);
+        setPaymentTerm('30');
+        setDueDate('');
+      } else {
+        toast.error('Error al guardar la factura');
+      }
+    } catch (error) {
+      console.error('Error saving invoice:', error);
+      toast.error('Error al guardar la factura');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Cargar lista de facturas guardadas
+  const loadSavedInvoices = async () => {
+    setIsLoadingList(true);
+    try {
+      const saves = await getInvoiceSaves('credito');
+      setSavedInvoices(saves);
+    } catch (error) {
+      console.error('Error loading saved invoices:', error);
+      toast.error('Error al cargar facturas guardadas');
+    } finally {
+      setIsLoadingList(false);
+    }
+  };
+
+  // Cargar factura guardada
+  const handleLoadInvoice = (save: InvoiceSave) => {
+    const data = save.invoice_data;
+    setItems(data.items || []);
+    setSelectedCustomer(data.selectedCustomer || null);
+    setPaymentTerm(data.paymentTerm || '30');
+    setDueDate(data.dueDate || '');
+    setShowLoadDialog(false);
+    toast.success('Factura cargada exitosamente');
+  };
+
+  // Eliminar factura guardada
+  const handleDeleteSave = async (saveId: string) => {
+    if (!confirm('¿Estás seguro de eliminar esta factura guardada?')) return;
+
+    const success = await deleteInvoiceSave(saveId);
+    if (success) {
+      toast.success('Factura eliminada');
+      loadSavedInvoices(); // Recargar lista
+    } else {
+      toast.error('Error al eliminar');
+    }
+  };
+
+  // Cargar facturas guardadas cuando se abre el diálogo
+  useEffect(() => {
+    if (showLoadDialog) {
+      loadSavedInvoices();
+    }
+  }, [showLoadDialog]);
+
   const filteredProducts = products.filter(
     (p) =>
       includesIgnoreAccents(p.name, productSearch) ||
@@ -857,10 +960,29 @@ export function CreditInvoice() {
       {/* Header */}
       <div className="bg-white border-b border-zinc-200">
         <div className="p-6">
-          <Button variant="ghost" onClick={() => navigate('/facturacion')} className="mb-4">
-            <ArrowLeft className="w-4 h-4 mr-2" />
-            Volver al Menú
-          </Button>
+          <div className="flex items-center gap-2 mb-4">
+            <Button variant="ghost" onClick={() => navigate('/facturacion')}>
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Volver al Menú
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowSaveDialog(true)}
+              disabled={items.length === 0 || !selectedCustomer}
+              className="border-blue-300 text-blue-700 hover:bg-blue-50"
+            >
+              <Save className="w-4 h-4 mr-2" />
+              Guardar
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowLoadDialog(true)}
+              className="border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+            >
+              <FolderOpen className="w-4 h-4 mr-2" />
+              Cargar
+            </Button>
+          </div>
 
           <div className="flex items-center justify-between">
             <div>
@@ -1503,6 +1625,146 @@ export function CreditInvoice() {
           isSubmitting={isSubmitting}
         />
       )}
+
+      {/* Diálogo para Guardar Factura */}
+      <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Guardar Factura a Crédito</DialogTitle>
+            <DialogDescription>
+              Guarda esta factura para continuarla más tarde
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div>
+              <Label htmlFor="save-name">Nombre (opcional)</Label>
+              <Input
+                id="save-name"
+                placeholder="Ej: Factura cliente Juan..."
+                value={saveName}
+                onChange={(e) => setSaveName(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Dale un nombre descriptivo para identificarla fácilmente
+              </p>
+            </div>
+
+            <div className="bg-muted/50 p-3 rounded-lg text-sm">
+              <p className="font-medium mb-1">Se guardará:</p>
+              <ul className="space-y-1 text-muted-foreground">
+                <li>• {items.length} producto(s)</li>
+                <li>• Total: {formatCOP(calculateTotal())}</li>
+                {selectedCustomer && <li>• Cliente: {selectedCustomer.name}</li>}
+              </ul>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSaveDialog(false)}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveInvoice}
+              disabled={isSaving}
+              className="bg-blue-600 hover:bg-blue-700"
+            >
+              {isSaving ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Guardando...
+                </>
+              ) : (
+                <>
+                  <Save className="w-4 h-4 mr-2" />
+                  Guardar
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Diálogo para Cargar Factura */}
+      <Dialog open={showLoadDialog} onOpenChange={setShowLoadDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>Cargar Factura Guardada</DialogTitle>
+            <DialogDescription>
+              Selecciona una factura guardada para continuar trabajando en ella
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 max-h-[500px] overflow-y-auto">
+            {isLoadingList ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+              </div>
+            ) : savedInvoices.length === 0 ? (
+              <div className="text-center py-12 text-muted-foreground">
+                <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                <p>No hay facturas guardadas</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {savedInvoices.map((save) => {
+                  const data = save.invoice_data;
+                  return (
+                    <div
+                      key={save.id}
+                      className="border rounded-lg p-4 hover:bg-muted/50 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <h4 className="font-medium">
+                            {save.save_name || `Factura sin nombre`}
+                          </h4>
+                          <div className="text-sm text-muted-foreground mt-1 space-y-0.5">
+                            <p>• {data.items?.length || 0} producto(s)</p>
+                            <p>• Total: {formatCOP(data.total || 0)}</p>
+                            {data.selectedCustomer && <p>• Cliente: {data.selectedCustomer.name}</p>}
+                            <p className="text-xs">
+                              Guardada: {new Date(save.created_at).toLocaleString('es-CO')}
+                            </p>
+                            {save.created_by && (
+                              <p className="text-xs">Por: {save.created_by}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <Button
+                            size="sm"
+                            onClick={() => handleLoadInvoice(save)}
+                            className="bg-emerald-600 hover:bg-emerald-700"
+                          >
+                            <FolderOpen className="w-4 h-4 mr-1" />
+                            Cargar
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDeleteSave(save.id)}
+                            className="text-red-600 border-red-300 hover:bg-red-50"
+                          >
+                            <Trash2 className="w-4 h-4 mr-1" />
+                            Eliminar
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowLoadDialog(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
     </div>
   );

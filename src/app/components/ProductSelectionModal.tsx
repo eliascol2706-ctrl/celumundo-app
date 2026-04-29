@@ -145,6 +145,18 @@ export function ProductSelectionModal({
         setSelectedIndex((prev) => Math.min(currentProducts.length - 1, prev + 1));
       }
 
+      // Flecha Izquierda - Página anterior
+      if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setCurrentPage((p) => Math.max(1, p - 1));
+      }
+
+      // Flecha Derecha - Página siguiente
+      if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setCurrentPage((p) => Math.min(totalPages, p + 1));
+      }
+
       // Enter - Seleccionar producto resaltado
       if (e.key === 'Enter' && currentProducts.length > 0 && !isInputFocused) {
         e.preventDefault();
@@ -163,7 +175,7 @@ export function ProductSelectionModal({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [open, selectedIndex, currentProducts]);
+  }, [open, selectedIndex, currentProducts, totalPages]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -429,11 +441,16 @@ export function ProductSelectionModal({
         {/* Keyboard hints */}
         {currentProducts.length > 0 && (
           <div className="border-t border-border pt-3 mt-2">
-            <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground">
+            <div className="flex items-center justify-center gap-4 text-xs text-muted-foreground flex-wrap">
               <span className="flex items-center gap-1">
                 <kbd className="px-2 py-1 bg-muted rounded text-[10px] font-mono">↑</kbd>
                 <kbd className="px-2 py-1 bg-muted rounded text-[10px] font-mono">↓</kbd>
                 Navegar
+              </span>
+              <span className="flex items-center gap-1">
+                <kbd className="px-2 py-1 bg-muted rounded text-[10px] font-mono">←</kbd>
+                <kbd className="px-2 py-1 bg-muted rounded text-[10px] font-mono">→</kbd>
+                Páginas
               </span>
               <span className="flex items-center gap-1">
                 <kbd className="px-2 py-1 bg-muted rounded text-[10px] font-mono">Enter</kbd>
