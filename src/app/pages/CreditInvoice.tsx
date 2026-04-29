@@ -883,38 +883,35 @@ export function CreditInvoice() {
 
   const toggleUnitId = (unitId: string) => {
     if (currentItemIndex === null) return;
-    const item = items[currentItemIndex];
-    
+
     if (selectedUnitIds.includes(unitId)) {
       setSelectedUnitIds(selectedUnitIds.filter(id => id !== unitId));
     } else {
-      if (selectedUnitIds.length >= item.quantity) {
-        toast.error(`Solo puedes seleccionar ${item.quantity} IDs`);
-        return;
-      }
       setSelectedUnitIds([...selectedUnitIds, unitId]);
     }
   };
 
   const handleSaveUnitIds = () => {
     if (currentItemIndex === null) return;
-    
-    const item = items[currentItemIndex];
-    
-    if (selectedUnitIds.length !== item.quantity) {
-      toast.error(`Debes seleccionar exactamente ${item.quantity} IDs`);
+
+    // Validar que se haya seleccionado al menos 1 ID
+    if (selectedUnitIds.length === 0) {
+      toast.error('Debes seleccionar al menos 1 ID');
       return;
     }
-    
+
     const updated = [...items];
     updated[currentItemIndex].unitIds = selectedUnitIds;
     updated[currentItemIndex].unitIdNotes = unitIdNotes;
+    // Actualizar cantidad automáticamente según IDs seleccionadas
+    updated[currentItemIndex].quantity = selectedUnitIds.length;
+    updated[currentItemIndex].total = selectedUnitIds.length * updated[currentItemIndex].price;
     setItems(updated);
     setUnitIdDialogOpen(false);
     setCurrentItemIndex(null);
     setSelectedUnitIds([]);
     setUnitIdNotes({});
-    toast.success('IDs seleccionadas correctamente');
+    toast.success(`${selectedUnitIds.length} ID(s) seleccionadas correctamente`);
   };
 
   const getRiskBadge = () => {
@@ -1482,9 +1479,7 @@ export function CreditInvoice() {
           <DialogHeader>
             <DialogTitle className="text-zinc-900 dark:text-zinc-100">Seleccionar IDs de Unidades</DialogTitle>
             <DialogDescription className="text-zinc-600 dark:text-zinc-400">
-              Selecciona exactamente{' '}
-              {currentItemIndex !== null && items[currentItemIndex]?.quantity}{' '}
-              IDs para esta venta.
+              Selecciona las IDs que deseas vender. La cantidad se ajustará automáticamente.
             </DialogDescription>
           </DialogHeader>
 
@@ -1495,8 +1490,7 @@ export function CreditInvoice() {
                   {items[currentItemIndex].productName}
                 </p>
                 <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                  Seleccionadas: {selectedUnitIds.length} /{' '}
-                  {items[currentItemIndex].quantity}
+                  IDs seleccionadas: {selectedUnitIds.length} {selectedUnitIds.length === 1 ? 'unidad' : 'unidades'}
                 </p>
               </div>
 
