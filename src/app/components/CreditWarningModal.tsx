@@ -99,7 +99,7 @@ export function CreditWarningModal({
 
         <DialogFooter className="flex-col sm:flex-col gap-2">
           {!isBlocked && (
-            <Button onClick={onRegisterPayment} className="w-full bg-emerald-600 hover:bg-emerald-700">
+            <Button onClick={onRegisterPayment} className="w-full bg-emerald-600 hover:bg-emerald-700" autoFocus>
               <DollarSign className="w-4 h-4 mr-2" />
               Registrar Pago
             </Button>

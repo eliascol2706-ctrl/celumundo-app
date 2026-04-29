@@ -638,7 +638,7 @@ export function Layout() {
       {/* Botón de tema fijo en esquina inferior izquierda */}
       <button
         onClick={toggleTheme}
-        className="fixed bottom-4 left-4 lg:bottom-6 lg:left-6 z-50 p-3 lg:p-4 bg-green-600 hover:bg-green-700 text-white rounded-full shadow-lg transition-all duration-300 hover:scale-110"
+        className="fixed top-4 right-4 lg:top-6 lg:right-6 z-50 p-3 lg:p-4 bg-green-600 hover:bg-green-700 text-white rounded-full shadow-lg transition-all duration-300 hover:scale-110"
         aria-label="Toggle theme"
       >
         {isDark ? <Sun className="h-5 w-5 lg:h-6 lg:w-6" /> : <Moon className="h-5 w-5 lg:h-6 lg:w-6" />}

@@ -2447,7 +2447,7 @@ export const getCustomers = async (): Promise<Customer[]> => {
     async () => {
       const { data, error } = await supabase
         .from('customers')
-        .select('id, name, document, email, phone, address, company, created_at')
+        .select('*')
         .eq('company', company)
         .order('name');
 

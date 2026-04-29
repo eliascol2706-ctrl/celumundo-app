@@ -51,6 +51,8 @@ export function Products() {
     stockOrder: 'asc' as 'asc' | 'desc',
     includeZeroStock: true
   });
+  const [printProductsCount, setPrintProductsCount] = useState(0);
+  const [printPreviewProducts, setPrintPreviewProducts] = useState<Product[]>([]);
 
   // Estado para el sistema de pedidos
   const [isOrderDialogOpen, setIsOrderDialogOpen] = useState(false);
@@ -180,6 +182,28 @@ export function Products() {
     loadCategories();
   }, []);
 
+  // Actualizar conteo de productos para impresión cuando cambian los filtros
+  useEffect(() => {
+    const updatePrintCount = async () => {
+      const productsForPrint = await getProductsForPrint();
+      setPrintProductsCount(productsForPrint.length);
+    };
+    if (isPrintOptionsOpen) {
+      updatePrintCount();
+    }
+  }, [printOptions, isPrintOptionsOpen]);
+
+  // Cargar productos para vista previa cuando se abre el modal
+  useEffect(() => {
+    const loadPreviewProducts = async () => {
+      const productsForPrint = await getProductsForPrint();
+      setPrintPreviewProducts(productsForPrint);
+    };
+    if (isPrintPreviewOpen) {
+      loadPreviewProducts();
+    }
+  }, [isPrintPreviewOpen, printOptions]);
+
   // Calcular paginación del lado del servidor
   const totalPages = Math.ceil(totalProducts / itemsPerPage);
 
@@ -251,8 +275,9 @@ export function Products() {
   };
 
   // Obtener productos para impresión con filtros y ordenamiento
-  const getProductsForPrint = () => {
-    let productsToShow = [...products];
+  const getProductsForPrint = async (): Promise<Product[]> => {
+    // Cargar TODOS los productos de la base de datos
+    let productsToShow = await getAllProducts();
 
     // Filtrar por nombre (búsqueda)
     if (printOptions.nameFilter.trim()) {
@@ -300,7 +325,7 @@ export function Products() {
         return;
       }
 
-      const productsToShow = getProductsForPrint();
+      const productsToShow = await getProductsForPrint();
 
       if (productsToShow.length === 0) {
         toast.error('No hay productos para imprimir');
@@ -1572,7 +1597,7 @@ export function Products() {
                     )}
                     <li className="truncate">• Stock ordenado: <strong>{printOptions.stockOrder === 'asc' ? 'Menor a Mayor ↑' : 'Mayor a Menor ↓'}</strong></li>
                     <li className="truncate">• {printOptions.includeZeroStock ? 'Incluye' : 'Excluye'} stock 0</li>
-                    <li className="truncate font-semibold">• Total: <strong className="text-base">{getProductsForPrint().length}</strong> productos</li>
+                    <li className="truncate font-semibold">• Total: <strong className="text-base">{printProductsCount}</strong> productos</li>
                   </ul>
                 </div>
               </div>
@@ -1613,7 +1638,7 @@ export function Products() {
                 handlePrintToPDF();
               }}
               className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={getProductsForPrint().length === 0 || !isPrintingAvailable()}
+              disabled={printProductsCount === 0 || !isPrintingAvailable()}
             >
               <Printer className="h-4 w-4 mr-2" />
               Imprimir PDF
@@ -1679,7 +1704,7 @@ export function Products() {
                   </div>
                 </div>
                 <div className="text-xs sm:text-sm font-semibold whitespace-nowrap">
-                  Total: {getProductsForPrint().length}
+                  Total: {printPreviewProducts.length}
                 </div>
               </div>
             </div>
@@ -1699,7 +1724,7 @@ export function Products() {
                     </tr>
                   </thead>
                   <tbody>
-                    {getProductsForPrint().map((product, index) => (
+                    {printPreviewProducts.map((product, index) => (
                       <tr
                         key={product.id}
                         className="border-t hover:bg-muted/30 transition-colors"
@@ -1761,7 +1786,6 @@ export function Products() {
       <OrderDialog
         open={isOrderDialogOpen}
         onOpenChange={setIsOrderDialogOpen}
-        products={products}
       />
     </div>
   );

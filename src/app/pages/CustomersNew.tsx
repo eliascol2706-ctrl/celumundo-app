@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
-import { 
-  Plus, 
-  Search, 
-  User, 
-  Phone, 
-  Mail, 
+import {
+  Plus,
+  Search,
+  User,
+  Phone,
+  Mail,
   MapPin,
   CreditCard,
   TrendingUp,
@@ -16,8 +16,8 @@ import {
   Edit,
   Trash2
 } from 'lucide-react';
-import { 
-  getCustomers, 
+import {
+  getCustomers,
   addCustomer,
   updateCustomer,
   deleteCustomer,
@@ -33,7 +33,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Badge } from '../components/ui/badge';
 import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
-import { useNavigate } from 'react-router';
+import { useNavigate, useSearchParams } from 'react-router';
 import { CreditDashboard } from './CreditDashboard';
 import { Textarea } from '../components/ui/textarea';
 
@@ -41,7 +41,9 @@ type ViewMode = 'dashboard' | 'list';
 
 export function CustomersNew() {
   const navigate = useNavigate();
-  const [viewMode, setViewMode] = useState<ViewMode>('dashboard');
+  const [searchParams] = useSearchParams();
+  const initialMode = (searchParams.get('mode') as ViewMode) || 'dashboard';
+  const [viewMode, setViewMode] = useState<ViewMode>(initialMode);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -65,6 +67,11 @@ export function CustomersNew() {
   useEffect(() => {
     loadCustomers();
   }, []);
+
+  useEffect(() => {
+    const mode = (searchParams.get('mode') as ViewMode) || 'dashboard';
+    setViewMode(mode);
+  }, [searchParams]);
 
   const loadCustomers = async () => {
     const data = await getCustomers();
@@ -151,9 +158,10 @@ export function CustomersNew() {
     const paymentTerm = parseInt(customerForm.payment_term) || 30;
 
     setIsSubmitting(true);
-    
+
     // Verificar si cambió el cupo de crédito
-    const creditLimitChanged = creditLimit !== selectedCustomer.credit_limit;
+    const previousCreditLimit = selectedCustomer.credit_limit ?? 0;
+    const creditLimitChanged = creditLimit !== previousCreditLimit;
 
     const updates: Partial<Customer> = {
       name: customerForm.name,
@@ -173,7 +181,7 @@ export function CustomersNew() {
         await addCreditHistory({
           customer_document: result.document,
           event_type: 'credit_limit_change',
-          description: `Cupo de crédito modificado de ${formatCOP(selectedCustomer.credit_limit)} a ${formatCOP(creditLimit)}`,
+          description: `Cupo de crédito modificado de ${formatCOP(previousCreditLimit)} a ${formatCOP(creditLimit)}`,
           amount: creditLimit,
           registered_by: getCurrentUser()?.username || 'Sistema'
         });
@@ -212,27 +220,28 @@ export function CustomersNew() {
       phone: customer.phone || '',
       email: customer.email || '',
       address: customer.address || '',
-      credit_limit: customer.credit_limit.toString(),
-      payment_term: customer.payment_term.toString(),
+      credit_limit: (customer.credit_limit ?? 0).toString(),
+      payment_term: (customer.payment_term ?? 30).toString(),
       notes: customer.notes || ''
     });
     setIsEditDialogOpen(true);
   };
 
   const getStatusBadge = (customer: Customer) => {
-    const styles = {
+    const status = customer.status || 'active';
+    const styles: Record<string, string> = {
       active: 'bg-emerald-100 text-emerald-700 border-emerald-200',
       overdue: 'bg-amber-100 text-amber-700 border-amber-200',
       blocked: 'bg-red-100 text-red-700 border-red-200'
     };
-    const labels = {
+    const labels: Record<string, string> = {
       active: 'Activo',
       overdue: 'Vencido',
       blocked: 'Bloqueado'
     };
     return (
-      <Badge variant="outline" className={styles[customer.status]}>
-        {labels[customer.status]}
+      <Badge variant="outline" className={styles[status] || styles.active}>
+        {labels[status] || labels.active}
       </Badge>
     );
   };
@@ -256,15 +265,21 @@ export function CustomersNew() {
       <div>
         <div className="bg-white border-b border-zinc-200 px-6 py-4 flex items-center justify-between">
           <div className="flex gap-2">
-            <Button 
-              onClick={() => setViewMode('dashboard')}
+            <Button
+              onClick={() => {
+                setViewMode('dashboard');
+                navigate('/clientes?mode=dashboard');
+              }}
               className="bg-emerald-600 hover:bg-emerald-700"
             >
               <BarChart3 className="w-4 h-4 mr-2" />
               Dashboard
             </Button>
-            <Button 
-              onClick={() => setViewMode('list')}
+            <Button
+              onClick={() => {
+                setViewMode('list');
+                navigate('/clientes?mode=list');
+              }}
               variant="outline"
             >
               <User className="w-4 h-4 mr-2" />
@@ -407,15 +422,21 @@ export function CustomersNew() {
           <p className="text-sm text-zinc-500 mt-1">Gestión completa de clientes de crédito</p>
         </div>
         <div className="flex gap-2">
-          <Button 
-            onClick={() => setViewMode('dashboard')}
+          <Button
+            onClick={() => {
+              setViewMode('dashboard');
+              navigate('/clientes?mode=dashboard');
+            }}
             variant="outline"
           >
             <BarChart3 className="w-4 h-4 mr-2" />
             Dashboard
           </Button>
-          <Button 
-            onClick={() => setViewMode('list')}
+          <Button
+            onClick={() => {
+              setViewMode('list');
+              navigate('/clientes?mode=list');
+            }}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
             <User className="w-4 h-4 mr-2" />
@@ -491,8 +512,11 @@ export function CustomersNew() {
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
                   {paginatedCustomers.map((customer) => {
-                    const usedCredit = customer.total_credit - customer.total_paid;
-                    const availableCredit = customer.credit_limit - usedCredit;
+                    const totalCredit = customer.total_credit ?? 0;
+                    const totalPaid = customer.total_paid ?? 0;
+                    const creditLimit = customer.credit_limit ?? 0;
+                    const usedCredit = totalCredit - totalPaid;
+                    const availableCredit = creditLimit - usedCredit;
 
                     return (
                       <tr key={customer.id} className="hover:bg-zinc-50 transition-colors">
@@ -524,14 +548,14 @@ export function CustomersNew() {
                           </div>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <p className="font-medium text-zinc-900">{formatCOP(customer.credit_limit)}</p>
+                          <p className="font-medium text-zinc-900">{formatCOP(creditLimit)}</p>
                           <p className="text-xs text-emerald-600">
                             Disponible: {formatCOP(availableCredit)}
                           </p>
                         </td>
                         <td className="px-6 py-4 text-right">
                           <p className="font-medium text-zinc-900">{formatCOP(usedCredit)}</p>
-                          <p className="text-xs text-zinc-500">{customer.payment_term} días</p>
+                          <p className="text-xs text-zinc-500">{customer.payment_term ?? 30} días</p>
                         </td>
                         <td className="px-6 py-4 text-center">
                           {getStatusBadge(customer)}

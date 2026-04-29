@@ -10,14 +10,14 @@ import { toast } from 'sonner';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { formatCOP } from '../lib/currency';
-import { getInvoices, extractColombiaDate, getColombiaDate, type Product } from '../lib/supabase';
+import { getInvoices, extractColombiaDate, getColombiaDate, getAllProducts, type Product } from '../lib/supabase';
 import { isPrintingAvailable } from '../lib/platform-detector';
 import { getPrinterConfig, printDirect } from '../lib/printer-config';
 
 interface OrderDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  products: Product[];
+  products?: Product[]; // Ahora es opcional ya que cargaremos todos los productos internamente
 }
 
 type Phase = 'filters' | 'order';
@@ -35,7 +35,7 @@ interface OrderItem {
   finalQuantity: number;
 }
 
-export function OrderDialog({ open, onOpenChange, products }: OrderDialogProps) {
+export function OrderDialog({ open, onOpenChange, products: _unusedProducts }: OrderDialogProps) {
   const [phase, setPhase] = useState<Phase>('filters');
   const [filters, setFilters] = useState<OrderFilters>({
     category: 'all',
@@ -45,12 +45,33 @@ export function OrderDialog({ open, onOpenChange, products }: OrderDialogProps) 
   });
   const [orderItems, setOrderItems] = useState<OrderItem[]>([]);
   const [showPdfPreview, setShowPdfPreview] = useState(false);
+  const [allProducts, setAllProducts] = useState<Product[]>([]);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(false);
+
+  // Cargar todos los productos cuando se abra el diálogo
+  useEffect(() => {
+    const loadAllProducts = async () => {
+      if (open && allProducts.length === 0) {
+        setIsLoadingProducts(true);
+        try {
+          const products = await getAllProducts();
+          setAllProducts(products);
+        } catch (error) {
+          console.error('Error loading products:', error);
+          toast.error('Error al cargar productos');
+        } finally {
+          setIsLoadingProducts(false);
+        }
+      }
+    };
+    loadAllProducts();
+  }, [open]);
 
   // Obtener categorías únicas
   const categories = useMemo(() => {
-    const uniqueCategories = Array.from(new Set(products.map(p => p.category).filter(Boolean)));
+    const uniqueCategories = Array.from(new Set(allProducts.map(p => p.category).filter(Boolean)));
     return ['Todas las categorías', ...uniqueCategories.sort()];
-  }, [products]);
+  }, [allProducts]);
 
   // Calcular ventas mensuales de cada producto
   const calculateMonthlySales = async (): Promise<Map<string, number>> => {
@@ -80,7 +101,17 @@ export function OrderDialog({ open, onOpenChange, products }: OrderDialogProps) 
 
   // Generar pedido basado en filtros
   const generateOrder = async () => {
-    let filteredProducts = products;
+    if (isLoadingProducts) {
+      toast.error('Espera a que se carguen los productos');
+      return;
+    }
+
+    if (allProducts.length === 0) {
+      toast.error('No hay productos disponibles');
+      return;
+    }
+
+    let filteredProducts = allProducts;
     
     // Filtrar por categoría
     if (filters.category !== 'all' && filters.category !== 'Todas las categorías') {
@@ -541,6 +572,17 @@ export function OrderDialog({ open, onOpenChange, products }: OrderDialogProps) 
           {/* Fase 1: Filtros */}
           {phase === 'filters' && (
             <div className="space-y-6">
+              {/* Indicador de carga */}
+              {isLoadingProducts && (
+                <div className="bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                    <p className="text-sm text-blue-900 dark:text-blue-100">
+                      Cargando todos los productos de la base de datos...
+                    </p>
+                  </div>
+                </div>
+              )}
               <Card>
                 <CardContent className="pt-6 space-y-4">
                   {/* Categoría */}
@@ -637,9 +679,13 @@ export function OrderDialog({ open, onOpenChange, products }: OrderDialogProps) 
                 <Button variant="outline" onClick={handleClose}>
                   Cancelar
                 </Button>
-                <Button onClick={generateOrder} className="bg-green-600 hover:bg-green-700">
+                <Button
+                  onClick={generateOrder}
+                  className="bg-green-600 hover:bg-green-700"
+                  disabled={isLoadingProducts || allProducts.length === 0}
+                >
                   <ChevronRight className="h-4 w-4 mr-2" />
-                  Generar Pedido
+                  {isLoadingProducts ? 'Cargando productos...' : 'Generar Pedido'}
                 </Button>
               </div>
             </div>

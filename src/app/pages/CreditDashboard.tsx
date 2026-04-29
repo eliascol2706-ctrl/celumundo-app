@@ -130,8 +130,8 @@ export function CreditDashboard() {
           <h1 className="text-3xl font-semibold text-zinc-900">Gestión de Crédito</h1>
           <p className="text-sm text-zinc-500 mt-1">Panel de control de cartera de clientes</p>
         </div>
-        <Button 
-          onClick={() => navigate('/clientes')}
+        <Button
+          onClick={() => navigate('/clientes?mode=list')}
           className="bg-emerald-600 hover:bg-emerald-700"
         >
           <Users className="w-4 h-4 mr-2" />

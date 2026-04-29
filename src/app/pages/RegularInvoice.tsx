@@ -574,10 +574,10 @@ export function RegularInvoice() {
         return;
       }
 
-      // Enter: Finalizar factura
+      // Enter: Finalizar factura (solo si no hay modales abiertos)
       if (key === 'Enter') {
         console.log('✅ Enter - Finalizar factura');
-        if (items.length > 0 && !isSubmitting) {
+        if (items.length > 0 && !isSubmitting && !showPreview && !unitIdDialogOpen) {
           handleSubmit();
         }
         return;
@@ -622,7 +622,7 @@ export function RegularInvoice() {
         removeGlobalShortcutListener();
       }
     };
-  }, [items, isSubmitting, addItem, removeItem, updateItem, handleSubmit, setPaymentMethod]);
+  }, [items, isSubmitting, showPreview, unitIdDialogOpen, addItem, removeItem, updateItem, handleSubmit, setPaymentMethod]);
 
   const addProductToList = async (product: any) => {
     // Verificar si el producto usa IDs y tiene IDs disponibles
@@ -1227,7 +1227,15 @@ export function RegularInvoice() {
 
       {/* Preview Modal */}
       <Dialog open={showPreview} onOpenChange={setShowPreview}>
-        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className="sm:max-w-2xl max-h-[90vh] overflow-y-auto"
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !isSubmitting) {
+              e.preventDefault();
+              handleConfirmCreate();
+            }
+          }}
+        >
           <DialogHeader>
             <DialogTitle className="text-2xl flex items-center gap-2">
               <Receipt className="w-6 h-6 text-emerald-600" />
@@ -1405,6 +1413,7 @@ export function RegularInvoice() {
               onClick={handleConfirmCreate}
               disabled={isSubmitting}
               className="flex-1 bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-600 dark:hover:bg-emerald-700"
+              autoFocus
             >
               {isSubmitting ? (
                 <>

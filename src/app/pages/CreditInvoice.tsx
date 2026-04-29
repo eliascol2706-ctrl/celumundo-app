@@ -54,6 +54,7 @@ import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
 import { includesIgnoreAccents } from '../lib/string-utils';
 import { CreditWarningModal } from '../components/CreditWarningModal';
+import { CreditLimitExceededModal } from '../components/CreditLimitExceededModal';
 import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
 import { ProductSelectionModal } from '../components/ProductSelectionModal';
 
@@ -93,6 +94,7 @@ export function CreditInvoice() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
   const [showWarningModal, setShowWarningModal] = useState(false);
+  const [showCreditLimitModal, setShowCreditLimitModal] = useState(false);
   const [warningData, setWarningData] = useState({
     overdueDays: 0,
     totalDebt: 0
@@ -276,6 +278,54 @@ export function CreditInvoice() {
     setItems(newItems);
   };
 
+  const handleCreditLimitExceededConfirm = async () => {
+    if (!selectedCustomer) return;
+
+    try {
+      setIsSubmitting(true);
+
+      // Calcular nuevo límite necesario (deuda actual + total de esta factura)
+      const invoiceTotal = calculateTotal();
+      const newCreditLimit = creditAnalysis.usedCredit + invoiceTotal;
+
+      // Actualizar límite del cliente
+      const updateResult = await updateCustomer(selectedCustomer.id, {
+        credit_limit: newCreditLimit
+      });
+
+      if (!updateResult) {
+        toast.error('Error al actualizar el límite de crédito');
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Registrar cambio en historial
+      await addCreditHistory({
+        customer_document: selectedCustomer.document,
+        event_type: 'credit_limit_change',
+        description: `Límite de crédito aumentado de ${formatCOP(selectedCustomer.credit_limit ?? 0)} a ${formatCOP(newCreditLimit)} por venta que excede el límite`,
+        amount: newCreditLimit,
+        registered_by: getCurrentUser()?.username || 'Sistema'
+      });
+
+      // Actualizar el cliente seleccionado con el nuevo límite
+      setSelectedCustomer({
+        ...selectedCustomer,
+        credit_limit: newCreditLimit
+      });
+
+      // Cerrar modal
+      setShowCreditLimitModal(false);
+
+      // Continuar con la creación de factura sin verificar límite
+      await createInvoice();
+    } catch (error) {
+      console.error('Error updating credit limit:', error);
+      toast.error('Error al actualizar el límite de crédito');
+      setIsSubmitting(false);
+    }
+  };
+
   const handleSubmit = async () => {
     // Validaciones
     if (!selectedCustomer) {
@@ -319,9 +369,16 @@ export function CreditInvoice() {
 
     // Verificar crédito disponible
     if (!creditAnalysis.hasEnoughCredit) {
-      toast.error('El cliente no tiene crédito suficiente para esta venta');
+      setShowCreditLimitModal(true);
       return;
     }
+
+    // Si pasa todas las validaciones, crear la factura
+    await createInvoice();
+  };
+
+  const createInvoice = async () => {
+    if (!selectedCustomer) return;
 
     // Verificar si se pueden crear facturas (no hay cierre)
     setIsValidating(true);
@@ -499,10 +556,10 @@ export function CreditInvoice() {
         return;
       }
 
-      // Enter: Finalizar factura
+      // Enter: Finalizar factura (solo si no hay modales abiertos)
       if (key === 'Enter') {
         console.log('✅ Enter - Finalizar factura');
-        if (items.length > 0 && selectedCustomer && !isSubmitting) {
+        if (items.length > 0 && selectedCustomer && !isSubmitting && !showWarningModal && !showCreditLimitModal && !unitIdDialogOpen) {
           handleSubmit();
         }
         return;
@@ -547,7 +604,7 @@ export function CreditInvoice() {
         removeGlobalShortcutListener();
       }
     };
-  }, [items, selectedCustomer, isSubmitting, handleSubmit, addItem, updateItem, removeItem]);
+  }, [items, selectedCustomer, isSubmitting, showWarningModal, showCreditLimitModal, unitIdDialogOpen, handleSubmit, addItem, updateItem, removeItem]);
 
   const loadData = async () => {
     const [customersData, productsData, departmentsData] = await Promise.all([
@@ -583,8 +640,9 @@ export function CreditInvoice() {
       );
 
       const totalDebt = customerInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+      const creditLimit = selectedCustomer.credit_limit ?? 0;
       const usedCredit = totalDebt;
-      const availableCredit = selectedCustomer.credit_limit - usedCredit;
+      const availableCredit = creditLimit - usedCredit;
       const invoiceTotal = calculateTotal();
       const creditAfterSale = availableCredit - invoiceTotal;
 
@@ -904,7 +962,7 @@ export function CreditInvoice() {
                       <div>
                         <p className="text-xs text-zinc-600">Cupo de Crédito</p>
                         <p className="text-sm font-bold text-zinc-900">
-                          {formatCOP(selectedCustomer.credit_limit)}
+                          {formatCOP(selectedCustomer.credit_limit ?? 0)}
                         </p>
                       </div>
                       <div>
@@ -1228,8 +1286,7 @@ export function CreditInvoice() {
                     isValidating ||
                     !selectedCustomer ||
                     items.length === 0 ||
-                    selectedCustomer.blocked ||
-                    !creditAnalysis.hasEnoughCredit
+                    selectedCustomer.blocked
                   }
                   className="w-full bg-emerald-600 hover:bg-emerald-700 h-12 text-base"
                 >
@@ -1417,16 +1474,33 @@ export function CreditInvoice() {
             setShowWarningModal(false);
             navigate(`/clientes/${selectedCustomer.document}`);
           }}
-          onContinueAnyway={() => {
+          onContinueAnyway={async () => {
             // Solo admin puede continuar
             const user = getCurrentUser();
             if (user?.role === 'admin') {
               setShowWarningModal(false);
-              // Continuar con la creación aunque tenga advertencias
               toast.warning('Continuando con la venta (modo administrador)');
+              // Continuar con la creación aunque tenga advertencias
+              await createInvoice();
             }
           }}
           userRole={getCurrentUser()?.role || 'seller'}
+        />
+      )}
+
+      {/* Credit Limit Exceeded Modal */}
+      {selectedCustomer && (
+        <CreditLimitExceededModal
+          isOpen={showCreditLimitModal}
+          onClose={() => setShowCreditLimitModal(false)}
+          customerName={selectedCustomer.name}
+          currentLimit={selectedCustomer.credit_limit ?? 0}
+          invoiceTotal={calculateTotal()}
+          currentDebt={creditAnalysis.usedCredit}
+          suggestedLimit={creditAnalysis.usedCredit + calculateTotal()}
+          exceedAmount={Math.abs(creditAnalysis.creditAfterSale)}
+          onConfirm={handleCreditLimitExceededConfirm}
+          isSubmitting={isSubmitting}
         />
       )}
 

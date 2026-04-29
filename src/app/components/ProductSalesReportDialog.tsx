@@ -26,6 +26,7 @@ interface SoldProduct {
   totalRevenue: number;
   averagePrice: number;
   unitIds: string[];
+  invoiceNumbers: string[]; // Números de factura donde se vendió
   category?: string;
 }
 
@@ -83,17 +84,22 @@ export function ProductSalesReportDialog({
       invoice.items.forEach((item: any) => {
         // Buscar producto en la lista de productos para obtener la categoría
         const productData = products.find(p => p.id === item.productId);
-        
+
         const existing = productMap.get(item.productId);
 
         if (existing) {
           existing.quantitySold += item.quantity;
           existing.totalRevenue += item.total;
           existing.averagePrice = existing.totalRevenue / existing.quantitySold;
-          
+
           // Agregar IDs únicos si existen
           if (item.unitIds && Array.isArray(item.unitIds)) {
             existing.unitIds.push(...item.unitIds);
+          }
+
+          // Agregar número de factura si no está ya incluido
+          if (!existing.invoiceNumbers.includes(invoice.number)) {
+            existing.invoiceNumbers.push(invoice.number);
           }
         } else {
           productMap.set(item.productId, {
@@ -103,6 +109,7 @@ export function ProductSalesReportDialog({
             totalRevenue: item.total,
             averagePrice: item.price,
             unitIds: item.unitIds || [],
+            invoiceNumbers: [invoice.number],
             category: productData?.category || 'Sin categoría'
           });
         }
@@ -227,6 +234,12 @@ export function ProductSalesReportDialog({
 
         // Generar filas de productos
         const productsHTML = filteredProducts.map((product, index) => {
+          const invoicesHTML = product.invoiceNumbers.length > 0
+            ? `<div style="font-size: 8pt; color: #1976d2; margin-top: 4px; padding-left: 10px;">
+                <strong>Facturas:</strong> ${product.invoiceNumbers.join(', ')}
+              </div>`
+            : '';
+
           const idsHTML = product.unitIds.length > 0
             ? `<div style="font-size: 8pt; color: #666; margin-top: 4px; padding-left: 10px;">
                 <strong>IDs:</strong> ${product.unitIds.join(', ')}
@@ -238,6 +251,7 @@ export function ProductSalesReportDialog({
               <td style="padding: 10px; border-bottom: 1px solid #e0e0e0;">
                 <div style="font-weight: 500;">${product.productName}</div>
                 ${product.category ? `<div style="font-size: 9pt; color: #666; margin-top: 2px;">${product.category}</div>` : ''}
+                ${invoicesHTML}
                 ${idsHTML}
               </td>
               <td style="padding: 10px; border-bottom: 1px solid #e0e0e0; text-align: center; font-weight: 500;">
@@ -499,26 +513,26 @@ export function ProductSalesReportDialog({
       }
 
       // Producto (truncar si es muy largo)
-      const productName = product.productName.length > 50 
-        ? product.productName.substring(0, 47) + '...' 
+      const productName = product.productName.length > 50
+        ? product.productName.substring(0, 47) + '...'
         : product.productName;
       doc.text(productName, margin + 2, y);
       doc.text(product.quantitySold.toString(), margin + 100, y, { align: 'right' });
       doc.text(formatCOP(product.averagePrice), margin + 120, y, { align: 'right' });
       doc.text(formatCOP(product.totalRevenue), pageWidth - margin - 2, y, { align: 'right' });
-      
+
       y += 6;
 
-      // Si tiene IDs únicos, agregarlos en la siguiente línea
-      if (product.unitIds.length > 0) {
+      // Si tiene números de factura, agregarlos
+      if (product.invoiceNumbers.length > 0) {
         doc.setFontSize(7);
-        doc.setTextColor(100, 100, 100);
-        const idsText = 'IDs: ' + product.unitIds.join(', ');
-        
-        // Dividir IDs si son muy largos
+        doc.setTextColor(25, 118, 210); // Azul
+        const invoicesText = 'Facturas: ' + product.invoiceNumbers.join(', ');
+
+        // Dividir si son muy largos
         const maxWidth = pageWidth - 2 * margin - 4;
-        const lines = doc.splitTextToSize(idsText, maxWidth);
-        
+        const lines = doc.splitTextToSize(invoicesText, maxWidth);
+
         lines.forEach((line: string) => {
           if (y > pageHeight - 30) {
             doc.addPage();
@@ -527,7 +541,31 @@ export function ProductSalesReportDialog({
           doc.text(line, margin + 2, y);
           y += 4;
         });
-        
+
+        doc.setFontSize(9);
+        doc.setTextColor(0, 0, 0);
+        y += 2;
+      }
+
+      // Si tiene IDs únicos, agregarlos en la siguiente línea
+      if (product.unitIds.length > 0) {
+        doc.setFontSize(7);
+        doc.setTextColor(100, 100, 100);
+        const idsText = 'IDs: ' + product.unitIds.join(', ');
+
+        // Dividir IDs si son muy largos
+        const maxWidth = pageWidth - 2 * margin - 4;
+        const lines = doc.splitTextToSize(idsText, maxWidth);
+
+        lines.forEach((line: string) => {
+          if (y > pageHeight - 30) {
+            doc.addPage();
+            y = 20;
+          }
+          doc.text(line, margin + 2, y);
+          y += 4;
+        });
+
         doc.setFontSize(9);
         doc.setTextColor(0, 0, 0);
         y += 2;
@@ -785,6 +823,12 @@ export function ProductSalesReportDialog({
                             {product.category && (
                               <div className="text-xs text-muted-foreground mt-0.5">
                                 {product.category}
+                              </div>
+                            )}
+                            {product.invoiceNumbers.length > 0 && (
+                              <div className="text-xs text-blue-600 dark:text-blue-400 mt-1 flex items-start gap-1">
+                                <span className="font-medium">Facturas:</span>
+                                <span>{product.invoiceNumbers.join(', ')}</span>
                               </div>
                             )}
                             {product.unitIds.length > 0 && (
