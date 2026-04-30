@@ -94,6 +94,7 @@ export function RegularInvoice() {
   const [isValidating, setIsValidating] = useState(false);
   const [showProductSearch, setShowProductSearch] = useState(false);
   const [selectedProductIndex, setSelectedProductIndex] = useState<number | null>(null);
+  const shouldProceedRef = useRef(false);
 
   // Modal de estado inicial
   const [showStatusModal, setShowStatusModal] = useState(true);
@@ -462,7 +463,10 @@ export function RegularInvoice() {
       // Guardar la factura en localStorage para mostrar modal en InvoicesMenu
       localStorage.setItem('lastCreatedInvoice', JSON.stringify(invoice));
 
-      // Redirigir inmediatamente a facturación
+      // Marcar que debe proceder sin mostrar alerta
+      shouldProceedRef.current = true;
+
+      // Navegar (el blocker procederá automáticamente)
       navigate('/facturacion');
     } catch (error) {
       console.error('Error creating invoice:', error);
@@ -580,6 +584,14 @@ export function RegularInvoice() {
   // Mostrar confirmación al bloqueador de navegación
   useEffect(() => {
     if (blocker.state === "blocked") {
+      // Si se marcó shouldProceed, proceder automáticamente sin alerta
+      if (shouldProceedRef.current) {
+        shouldProceedRef.current = false;
+        blocker.proceed();
+        return;
+      }
+
+      // Si no, mostrar confirmación normal
       const confirmExit = window.confirm(
         "⚠️ Tienes una factura sin terminar con productos agregados.\n\nSi sales, se perderá toda la información.\n\n¿Estás seguro de que deseas salir?"
       );
@@ -901,6 +913,7 @@ export function RegularInvoice() {
         "⚠️ Tienes una factura sin terminar con productos agregados.\n\nSi sales, se perderá toda la información.\n\n¿Estás seguro de que deseas salir?"
       );
       if (confirmExit) {
+        shouldProceedRef.current = true;
         navigate('/facturacion');
       }
     } else {

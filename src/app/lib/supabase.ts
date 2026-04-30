@@ -1394,6 +1394,13 @@ export const deleteInvoice = async (id: string): Promise<boolean> => {
       console.log(`[DeleteInvoice] Restaurando inventario (status: ${invoice.status})`);
 
       for (const item of invoice.items) {
+        console.log('[DeleteInvoice] Procesando item:', {
+          productId: item.productId,
+          productName: item.productName,
+          quantity: item.quantity,
+          quantityType: typeof item.quantity
+        });
+
         // Obtener el producto actual
         const { data: product, error: productError } = await supabase
           .from('products')
@@ -1403,13 +1410,26 @@ export const deleteInvoice = async (id: string): Promise<boolean> => {
           .single();
 
         if (productError || !product) {
-          console.error('Error fetching product:', productError);
+          console.error('[DeleteInvoice] Error fetching product:', productError);
           continue;
         }
 
-        // Restaurar stock
-        const updatedStock = product.stock + item.quantity;
-        console.log(`[DeleteInvoice] Producto ${product.name}: ${product.stock} + ${item.quantity} = ${updatedStock}`);
+        console.log('[DeleteInvoice] Producto encontrado:', {
+          name: product.name,
+          currentStock: product.stock,
+          stockType: typeof product.stock
+        });
+
+        // Restaurar stock - asegurarse de que sean números
+        const currentStock = Number(product.stock) || 0;
+        const itemQuantity = Number(item.quantity) || 0;
+
+        if (itemQuantity === 0) {
+          console.warn('[DeleteInvoice] ADVERTENCIA: cantidad del item es 0');
+        }
+
+        const updatedStock = currentStock + itemQuantity;
+        console.log(`[DeleteInvoice] Calculando nuevo stock: ${currentStock} + ${itemQuantity} = ${updatedStock}`);
 
         // Si el producto usa IDs únicas, re-habilitar las IDs que estaban deshabilitadas
         let updatedRegisteredIds = [...(product.registered_ids || [])];
@@ -1430,17 +1450,21 @@ export const deleteInvoice = async (id: string): Promise<boolean> => {
         }
 
         // Actualizar el producto
-        const { error: updateError } = await supabase
+        console.log(`[DeleteInvoice] Actualizando producto ${item.productId} con stock: ${updatedStock}`);
+        const { data: updateData, error: updateError } = await supabase
           .from('products')
           .update({
             stock: updatedStock,
             registered_ids: updatedRegisteredIds
           })
           .eq('id', item.productId)
-          .eq('company', company);
+          .eq('company', company)
+          .select();
 
         if (updateError) {
-          console.error('Error updating product stock:', updateError);
+          console.error('[DeleteInvoice] Error updating product stock:', updateError);
+        } else {
+          console.log('[DeleteInvoice] Producto actualizado exitosamente:', updateData);
         }
 
         // Registrar movimiento de inventario

@@ -77,18 +77,13 @@ export const revertInvoice = async (invoiceId: string): Promise<RevertInvoiceRes
 
       // Si la factura usó IDs únicas, restaurarlas
       if (item.unitIds && item.unitIds.length > 0) {
-        // Habilitar las IDs que fueron deshabilitadas
-        newRegisteredIds = product.registered_ids.map((regId: any) => {
-          if (item.unitIds.includes(regId.id) && regId.disabled_by === invoiceId) {
-            return {
-              ...regId,
-              disabled: false,
-              disabled_by: null,
-              disabled_at: null,
-            };
-          }
-          return regId;
-        });
+        // Importar función para restaurar IDs
+        const { restoreReturnedIds } = await import('./unit-ids-utils');
+
+        // Restaurar las IDs (quita el flag disabled, conserva notas)
+        // Esto funciona tanto para IDs vendidas (disabled sin reservedBy)
+        // como para IDs deshabilitadas (disabled con reservedBy)
+        newRegisteredIds = restoreReturnedIds(product.registered_ids, item.unitIds);
       }
 
       // Actualizar producto

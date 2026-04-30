@@ -99,6 +99,7 @@ export function CreditInvoice() {
   const [dueDate, setDueDate] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
+  const shouldProceedRef = useRef(false);
   const [showWarningModal, setShowWarningModal] = useState(false);
   const [showCreditLimitModal, setShowCreditLimitModal] = useState(false);
   const [warningData, setWarningData] = useState({
@@ -484,7 +485,10 @@ export function CreditInvoice() {
       // Guardar la factura en localStorage para mostrar modal en InvoicesMenu
       localStorage.setItem('lastCreatedInvoice', JSON.stringify(invoice));
 
-      // Redirigir a facturación
+      // Marcar que debe proceder sin mostrar alerta
+      shouldProceedRef.current = true;
+
+      // Navegar (el blocker procederá automáticamente)
       navigate('/facturacion');
     } catch (error) {
       console.error('Error creating credit invoice:', error);
@@ -864,6 +868,14 @@ export function CreditInvoice() {
   // Mostrar confirmación al bloqueador de navegación
   useEffect(() => {
     if (blocker.state === "blocked") {
+      // Si se marcó shouldProceed, proceder automáticamente sin alerta
+      if (shouldProceedRef.current) {
+        shouldProceedRef.current = false;
+        blocker.proceed();
+        return;
+      }
+
+      // Si no, mostrar confirmación normal
       const confirmExit = window.confirm(
         "⚠️ Tienes una factura sin terminar con productos agregados.\n\nSi sales, se perderá toda la información.\n\n¿Estás seguro de que deseas salir?"
       );
@@ -994,6 +1006,7 @@ export function CreditInvoice() {
         "⚠️ Tienes una factura sin terminar con productos agregados.\n\nSi sales, se perderá toda la información.\n\n¿Estás seguro de que deseas salir?"
       );
       if (confirmExit) {
+        shouldProceedRef.current = true;
         navigate('/facturacion');
       }
     } else {
