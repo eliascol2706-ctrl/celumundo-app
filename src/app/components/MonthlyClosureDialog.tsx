@@ -31,6 +31,7 @@ interface MonthlyClosureDialogProps {
     serviceRevenue?: number; // Ingresos de servicio técnico
     totalCreditPayments?: number; // NUEVO: Total de abonos de créditos del mes
     profitFromCredit?: number; // NUEVO: Ganancias de facturas a crédito del mes
+    ingresosPorFactura?: number; // NUEVO: Ingresos por factura (todas las facturas + impacto cambios)
   };
   onSuccess: () => void;
 }
@@ -89,10 +90,10 @@ export function MonthlyClosureDialog({
         await addMonthlyClosure({
           month: currentMonth,
           year: currentYear,
-          total_revenue: monthlyStats.netRevenue + (monthlyStats.totalCreditPayments || 0), // Ingresos netos (facturas + abonos)
+          total_revenue: monthlyStats.ingresosPorFactura || 0, // NUEVO: Ingresos por factura (dato real a guardar)
           total_invoices: monthlyStats.totalInvoices,
           daily_closures_count: monthlyStats.closures.length,
-          real_profit: monthlyStats.realProfit, // DEPRECATED - mantener por compatibilidad
+          real_profit: monthlyStats.realProfit, // Ganancias reales (calculadas con ingresosPorFactura)
           profit_generated: profitGenerated, // Ganancia de todas las ventas del mes
           profit_collected: profitCollected, // Ganancia de facturas pagadas al 100%
           total_credit_payments: monthlyStats.totalCreditPayments || 0, // Abonos de créditos del mes
@@ -285,6 +286,114 @@ export function MonthlyClosureDialog({
                   </Card>
                 )}
 
+                {/* Ingresos Netos Card - Full Width - CARD MÁS IMPORTANTE */}
+                <Card className="bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-950/30 dark:to-green-950/30 border-emerald-200 dark:border-emerald-800">
+                  <CardHeader className="pb-3">
+                    <CardTitle className="text-base font-semibold text-emerald-900 dark:text-emerald-100">Ingresos del Mes</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                      <div className="flex-1 space-y-6">
+                        {/* NUEVO: Ingresos por Facturas */}
+                        <div className="pb-4 border-b border-emerald-300 dark:border-emerald-700">
+                          <p className="text-xs text-emerald-700 dark:text-emerald-300 mb-2 font-semibold">
+                            💰 Ingresos por Facturas
+                          </p>
+                          <div className="text-3xl font-bold text-cyan-600 dark:text-cyan-400">
+                            COP {formatCOP(monthlyStats.ingresosPorFactura || 0)}
+                          </div>
+                          <p className="text-xs text-emerald-700 dark:text-emerald-300 mt-2">
+                            Todas las facturas del mes (regulares, crédito y parciales) + impacto por cambios
+                          </p>
+                        </div>
+
+                        {/* Ingresos Netos (con abonos) */}
+                        <div>
+                          <p className="text-xs text-emerald-700 dark:text-emerald-300 mb-2 font-semibold">
+                            💵 Ingresos Netos (Efectivo Recibido)
+                          </p>
+                          <div className="text-4xl font-bold text-emerald-600 dark:text-emerald-400">
+                            COP {formatCOP(monthlyStats.netRevenue + (monthlyStats.totalCreditPayments || 0))}
+                          </div>
+                          <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-2">
+                            Facturas pagadas + Abonos de créditos
+                          </p>
+                          <div className="mt-2 space-y-1">
+                            {(monthlyStats.serviceRevenue || 0) > 0 && (
+                              <p className="text-xs text-blue-600 dark:text-blue-400">
+                                • Servicio Técnico: COP {formatCOP(monthlyStats.serviceRevenue || 0)}
+                              </p>
+                            )}
+                            {(monthlyStats.totalCreditPayments || 0) > 0 && (
+                              <p className="text-xs text-purple-600 dark:text-purple-400">
+                                • Abonos de Créditos: COP {formatCOP(monthlyStats.totalCreditPayments || 0)}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Ganancias Reales */}
+                        <div className="pt-4 border-t border-emerald-300 dark:border-emerald-700">
+                          <p className="text-xs text-emerald-700 dark:text-emerald-300 mb-2 font-semibold">
+                            📊 Ganancias Reales
+                          </p>
+                          <div className={`text-3xl font-bold ${
+                            monthlyStats.realProfit >= 0
+                              ? 'text-blue-600 dark:text-blue-400'
+                              : 'text-red-600 dark:text-red-400'
+                          }`}>
+                            COP {formatCOP(monthlyStats.realProfit)}
+                          </div>
+                          <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-2">
+                            Ingresos por factura - Costos - Gastos
+                          </p>
+                          <div className="mt-2 space-y-1 text-xs">
+                            <p className="text-cyan-600 dark:text-cyan-400">
+                              Ingresos por factura: COP {formatCOP(monthlyStats.ingresosPorFactura || 0)}
+                            </p>
+                            <p className="text-orange-600 dark:text-orange-400">
+                              - Costos productos: COP {formatCOP(monthlyStats.totalProductCost)}
+                            </p>
+                            <p className="text-red-600 dark:text-red-400">
+                              - Gastos: COP {formatCOP(monthlyStats.totalExpenses)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex-shrink-0 bg-white/50 dark:bg-zinc-900/50 p-4 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                        <div className="text-sm space-y-3">
+                          <div>
+                            <p className="text-zinc-600 dark:text-zinc-400 font-semibold mb-2">
+                              💰 Ingresos por Facturas:
+                            </p>
+                            <ul className="list-disc list-inside space-y-1 text-zinc-700 dark:text-zinc-300 text-xs">
+                              <li>Todas las facturas del mes</li>
+                              <li>Regulares, a crédito y parciales</li>
+                              <li>Más impacto de cambios</li>
+                            </ul>
+                          </div>
+                          <div className="pt-2 border-t border-emerald-200 dark:border-emerald-800">
+                            <p className="text-zinc-600 dark:text-zinc-400 font-semibold mb-2">
+                              💵 Ingresos Netos:
+                            </p>
+                            <ul className="list-disc list-inside space-y-1 text-zinc-700 dark:text-zinc-300 text-xs">
+                              <li>Facturas pagadas completamente</li>
+                              <li>Facturas con devolución parcial</li>
+                              <li className="text-purple-600 dark:text-purple-400">Abonos de créditos recibidos</li>
+                              {(monthlyStats.serviceRevenue || 0) > 0 && (
+                                <li className="text-blue-600 dark:text-blue-400">Servicio Técnico pagado</li>
+                              )}
+                            </ul>
+                          </div>
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400 pt-2 border-t border-emerald-200 dark:border-emerald-800">
+                            Las devoluciones completas no se cuentan ya que la factura pasa a estado "Devuelta"
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
                 {/* Final Stats */}
                 <div className="space-y-6">
                   {/* Primera fila: Métricas principales */}
@@ -414,75 +523,6 @@ export function MonthlyClosureDialog({
                     </Card>
                   </div>
                 </div>
-
-                {/* Ingresos Netos Card - Full Width */}
-                <Card className="bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-950/30 dark:to-green-950/30 border-emerald-200 dark:border-emerald-800">
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-base font-semibold text-emerald-900 dark:text-emerald-100">
-                      Ingresos Netos del Mes
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                      <div className="flex-1 space-y-6">
-                        <div>
-                          <div className="text-4xl font-bold text-emerald-600 dark:text-emerald-400">
-                            COP {formatCOP(monthlyStats.netRevenue + (monthlyStats.totalCreditPayments || 0))}
-                          </div>
-                          <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-2">
-                            Facturas pagadas + Abonos de créditos
-                          </p>
-                          <div className="mt-2 space-y-1">
-                            {(monthlyStats.serviceRevenue || 0) > 0 && (
-                              <p className="text-xs text-blue-600 dark:text-blue-400">
-                                • Servicio Técnico: COP {formatCOP(monthlyStats.serviceRevenue || 0)}
-                              </p>
-                            )}
-                            {(monthlyStats.totalCreditPayments || 0) > 0 && (
-                              <p className="text-xs text-purple-600 dark:text-purple-400">
-                                • Abonos de Créditos: COP {formatCOP(monthlyStats.totalCreditPayments || 0)}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="pt-4 border-t border-emerald-300 dark:border-emerald-700">
-                          <div className={`text-3xl font-bold ${
-                            ((monthlyStats.netRevenue + (monthlyStats.totalCreditPayments || 0)) - monthlyStats.totalExpenses) >= 0
-                              ? 'text-blue-600 dark:text-blue-400'
-                              : 'text-red-600 dark:text-red-400'
-                          }`}>
-                            COP {formatCOP((monthlyStats.netRevenue + (monthlyStats.totalCreditPayments || 0)) - monthlyStats.totalExpenses)}
-                          </div>
-                          <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-2">
-                            Ingresos netos restando gastos del mes
-                          </p>
-                          <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                            Gastos: COP {formatCOP(monthlyStats.totalExpenses)}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex-shrink-0 bg-white/50 dark:bg-zinc-900/50 p-4 rounded-lg border border-emerald-200 dark:border-emerald-800">
-                        <div className="text-sm space-y-1">
-                          <p className="text-zinc-600 dark:text-zinc-400">
-                            Este valor incluye:
-                          </p>
-                          <ul className="list-disc list-inside space-y-1 text-zinc-700 dark:text-zinc-300">
-                            <li>Facturas pagadas completamente</li>
-                            <li>Facturas con devolución parcial</li>
-                            <li className="text-purple-600 dark:text-purple-400">Abonos de créditos recibidos</li>
-                            {(monthlyStats.serviceRevenue || 0) > 0 && (
-                              <li className="text-blue-600 dark:text-blue-400">Servicio Técnico pagado</li>
-                            )}
-                          </ul>
-                          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2 pt-2 border-t border-emerald-200 dark:border-emerald-800">
-                            Las devoluciones completas no se cuentan ya que la factura pasa a estado "Devuelta"
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
 
                 {/* Explicación de Diferencia entre Ingresos Totales e Ingresos Netos */}
                 <Card className="bg-gradient-to-br from-amber-50 to-orange-50 dark:from-amber-950/30 dark:to-orange-950/30 border-amber-300 dark:border-amber-800">

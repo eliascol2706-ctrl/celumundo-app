@@ -189,12 +189,15 @@ export default function Reports() {
   const currentMonth = new Date().getMonth();
   const currentYear = new Date().getFullYear();
 
+  // Total de ventas del mes: TODAS las facturas (regulares y a crédito, pagas o no)
+  // Excluyendo solo las devueltas completamente y canceladas
   const monthlyInvoices = invoices.filter(inv => {
     const invDate = new Date(inv.date);
     return (
       invDate.getMonth() === currentMonth &&
       invDate.getFullYear() === currentYear &&
-      (inv.status === 'paid' || inv.status === 'partially_returned')
+      inv.status !== 'returned' &&
+      inv.status !== 'cancelled'
     );
   });
 

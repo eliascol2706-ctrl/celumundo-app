@@ -352,51 +352,51 @@ export function Returns() {
 
       {/* Tarjetas de estadísticas */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card className="border-red-200 bg-red-50">
+        <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-red-700">
+            <CardTitle className="text-sm font-medium text-red-700 dark:text-red-400">
               Total Devoluciones
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-red-700">{returns.length}</div>
+            <div className="text-3xl font-bold text-red-700 dark:text-red-400">{returns.length}</div>
           </CardContent>
         </Card>
 
-        <Card className="border-red-200 bg-red-50">
+        <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-red-700">
+            <CardTitle className="text-sm font-medium text-red-700 dark:text-red-400">
               Monto Devuelto
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-700">
+            <div className="text-2xl font-bold text-red-700 dark:text-red-400">
               {formatCOP(returns.reduce((sum, ret) => sum + ret.total, 0))}
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border-purple-200 bg-purple-50">
+        <Card className="border-purple-200 bg-purple-50 dark:border-purple-800 dark:bg-purple-950/30">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-purple-700">
+            <CardTitle className="text-sm font-medium text-purple-700 dark:text-purple-400">
               Dev. Completas
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-purple-700">
+            <div className="text-3xl font-bold text-purple-700 dark:text-purple-400">
               {returns.filter(r => r.type === 'full').length}
             </div>
           </CardContent>
         </Card>
 
-        <Card className="border-orange-200 bg-orange-50">
+        <Card className="border-orange-200 bg-orange-50 dark:border-orange-800 dark:bg-orange-950/30">
           <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-orange-700">
+            <CardTitle className="text-sm font-medium text-orange-700 dark:text-orange-400">
               Dev. Parciales
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-orange-700">
+            <div className="text-3xl font-bold text-orange-700 dark:text-orange-400">
               {returns.filter(r => r.type === 'partial').length}
             </div>
           </CardContent>
@@ -435,7 +435,7 @@ export function Returns() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <RotateCcw className="h-5 w-5 text-red-600" />
+            <RotateCcw className="h-5 w-5 text-red-600 dark:text-red-400" />
             Historial de Devoluciones
           </CardTitle>
         </CardHeader>
@@ -462,8 +462,8 @@ export function Returns() {
                     <td className="py-3 px-3">
                       <span className={`px-2 py-1 text-xs rounded-full ${
                         ret.type === 'full'
-                          ? 'bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300'
-                          : 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300'
+                          ? 'bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-400 dark:text-red-300'
+                          : 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-400 dark:text-orange-300'
                       }`}>
                         {ret.type === 'full' ? 'Completa' : 'Parcial'}
                       </span>
@@ -569,7 +569,7 @@ export function Returns() {
         <DialogContent className="sm:max-w-3xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <RotateCcw className="h-5 w-5 text-red-600" />
+              <RotateCcw className="h-5 w-5 text-red-600 dark:text-red-400" />
               Nueva Devolución
             </DialogTitle>
             <DialogDescription>
@@ -695,11 +695,11 @@ export function Returns() {
                 </div>
 
                 {/* Total a devolver */}
-                <Card className="border-red-200 bg-red-50">
+                <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30">
                   <CardContent className="pt-4">
                     <div className="flex items-center justify-between">
-                      <span className="text-lg font-medium text-red-700">Total a Devolver:</span>
-                      <span className="text-2xl font-bold text-red-700">
+                      <span className="text-lg font-medium text-red-700 dark:text-red-400">Total a Devolver:</span>
+                      <span className="text-2xl font-bold text-red-700 dark:text-red-400">
                         {formatCOP(calculateReturnTotal())}
                       </span>
                     </div>

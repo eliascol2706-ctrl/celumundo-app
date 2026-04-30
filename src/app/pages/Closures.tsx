@@ -210,10 +210,11 @@ export function Closures() {
       .filter(inv => inv.status === 'pending')
       .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
 
-    // CORRECCIÓN: Incluir facturas pagadas, parcialmente devueltas y completamente devueltas
-    // Estas facturas SÍ generaron ingresos brutos, las devoluciones se restan por separado
+    // CORRECCIÓN: Solo facturas REGULARES (excluir crédito para evitar doble contabilidad con abonos)
+    // Incluir facturas pagadas, parcialmente devueltas y completamente devueltas
+    // Las facturas a crédito se contabilizan a través de los abonos
     const grossRevenue = todayInvoices
-      .filter(inv => inv.status === 'paid' || inv.status === 'partial_return' || inv.status === 'returned')
+      .filter(inv => (inv.status === 'paid' || inv.status === 'partial_return' || inv.status === 'returned') && !inv.is_credit)
       .reduce((sum, inv) => sum + inv.total, 0);
 
     // CAMBIO CRÍTICO: Filtrar devoluciones por la fecha de la factura original, NO por la fecha de la devolución
@@ -307,10 +308,11 @@ export function Closures() {
     const prevMonth = String(currentDate.getMonth() + 1).padStart(2, '0');
     const previousMonthStr = `${prevYear}-${prevMonth}`;
 
+    // IMPORTANTE: Solo facturas REGULARES pagadas (excluir crédito para evitar doble contabilidad con abonos)
     const previousMonthInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
       const invDate = extractColombiaDate(inv.date);
-      return invDate.substring(0, 7) === previousMonthStr && (inv.status === 'paid' || inv.status === 'partial_return');
+      return invDate.substring(0, 7) === previousMonthStr && (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit;
     });
     const previousMonthRevenue = previousMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
@@ -338,10 +340,11 @@ export function Closures() {
 
     const previousMonthNetRevenue = previousMonthRevenue + previousMonthExchangeImpact + previousMonthServiceRevenue;
 
+    // IMPORTANTE: Solo facturas REGULARES pagadas (excluir crédito para evitar doble contabilidad con abonos)
     const currentMonthInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
       const invDate = extractColombiaDate(inv.date);
-      return invDate.substring(0, 7) === currentMonthStr && (inv.status === 'paid' || inv.status === 'partial_return');
+      return invDate.substring(0, 7) === currentMonthStr && (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit;
     });
     const currentMonthRevenue = currentMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
@@ -399,9 +402,34 @@ export function Closures() {
     // Las facturas 'returned' ya no se cuentan en currentMonthRevenue
     const netRevenue = currentMonthRevenue + currentMonthExchangeImpact + currentMonthServiceRevenue;
 
-    // Calcular costo de productos vendidos en el mes
+    // NUEVO: Ingresos por Factura (TODAS las facturas excepto devueltas completamente y canceladas + impacto por cambios)
+    const allMonthInvoices = invoices.filter(inv => {
+      if (!inv.date) return false;
+      const invDate = extractColombiaDate(inv.date);
+      return invDate.substring(0, 7) === currentMonthStr && inv.status !== 'returned' && inv.status !== 'cancelled';
+    });
+    const totalFacturas = allMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
+    const ingresosPorFactura = totalFacturas + currentMonthExchangeImpact;
+
+    // Calcular costo de productos vendidos en el mes (facturas regulares pagadas/parciales + facturas a crédito)
+    const invoicesForCost = invoices.filter(inv => {
+      if (!inv.date) return false;
+      const invDate = extractColombiaDate(inv.date);
+      if (invDate.substring(0, 7) !== currentMonthStr) return false;
+
+      // Facturas regulares pagadas o parcialmente devueltas
+      if (!inv.is_credit && (inv.status === 'paid' || inv.status === 'partial_return')) {
+        return true;
+      }
+      // Facturas a crédito (todas, excepto canceladas)
+      if (inv.is_credit && inv.status !== 'cancelled') {
+        return true;
+      }
+      return false;
+    });
+
     let totalProductCost = 0;
-    currentMonthInvoices.forEach(invoice => {
+    invoicesForCost.forEach(invoice => {
       if (invoice.items && Array.isArray(invoice.items)) {
         invoice.items.forEach((item: any) => {
           const product = products.find(p => p.id === item.productId);
@@ -412,8 +440,8 @@ export function Closures() {
       }
     });
 
-    // Calcular ganancias reales (ingresos netos - costo de productos - gastos)
-    const realProfit = netRevenue - totalProductCost - totalExpenses;
+    // Calcular ganancias reales (ingresos por factura - costo de productos - gastos)
+    const realProfit = ingresosPorFactura - totalProductCost - totalExpenses;
 
     // Crear objetos Date para obtener nombres de meses en español
     const previousMonthDate = new Date(previousMonthStr + '-01T12:00:00');
@@ -498,6 +526,7 @@ export function Closures() {
       serviceRevenue: currentMonthServiceRevenue, // Ingresos de servicio técnico
       totalCreditPayments, // NUEVO: Total de abonos de créditos del mes
       profitFromCredit, // NUEVO: Ganancias de facturas a crédito del mes
+      ingresosPorFactura, // NUEVO: Ingresos por factura (todas las facturas + impacto cambios)
     };
   };
 
@@ -947,8 +976,11 @@ export function Closures() {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold text-green-600 dark:text-green-400">
-                  COP {formatCOP(monthlyStats.netRevenue)}
+                  COP {formatCOP(monthlyStats.netRevenue + (monthlyStats.totalCreditPayments || 0))}
                 </div>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Facturas pagadas + Abonos
+                </p>
               </CardContent>
             </Card>
 
@@ -1064,13 +1096,12 @@ export function Closures() {
                 <table className="w-full">
                   <thead>
                     <tr className="border-b border-border">
-                      <th className="text-left py-2 px-3 text-sm font-medium">Mes</th>
-                      <th className="text-center py-2 px-3 text-sm font-medium">Año</th>
-                      <th className="text-center py-2 px-3 text-sm font-medium">Facturas</th>
-                      <th className="text-right py-2 px-3 text-sm font-medium">Total Ingresos</th>
-                      <th className="text-right py-2 px-3 text-sm font-medium">💰 Del Día</th>
-                      <th className="text-right py-2 px-3 text-sm font-medium">📊 Por Crédito</th>
-                      <th className="text-left py-2 px-3 text-sm font-medium">Cerrado por</th>
+                      <th className="text-left py-2 px-3 text-sm font-medium">📅 Mes</th>
+                      <th className="text-center py-2 px-3 text-sm font-medium">🗓️ Año</th>
+                      <th className="text-center py-2 px-3 text-sm font-medium">📋 Facturas</th>
+                      <th className="text-right py-2 px-3 text-sm font-medium">💰 Total Ingresos</th>
+                      <th className="text-right py-2 px-3 text-sm font-medium">💎 Ganancias Reales</th>
+                      <th className="text-left py-2 px-3 text-sm font-medium">👤 Cerrado por</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1084,8 +1115,7 @@ export function Closures() {
                       return (
                         <>
                           {paginatedClosures.map((closure) => {
-                            const profitGenerated = closure.profit_generated || 0;
-                            const profitCollected = closure.profit_collected || 0;
+                            const realProfit = closure.real_profit || 0;
 
                             return (
                               <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
@@ -1093,23 +1123,20 @@ export function Closures() {
                                   {new Date(closure.month + '-01').toLocaleDateString('es-ES', { month: 'long', timeZone: 'UTC' })}
                                 </td>
                                 <td className="py-2 px-3 text-center text-sm">{closure.year}</td>
-                                <td className="py-2 px-3 text-center text-sm">{closure.totalInvoices}</td>
+                                <td className="py-2 px-3 text-center text-sm">{closure.total_invoices}</td>
                                 <td className="py-2 px-3 text-right text-sm font-bold text-emerald-600 dark:text-emerald-400">
-                                  COP {formatCOP(closure.totalRevenue)}
-                                </td>
-                                <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
-                                  COP {formatCOP(profitCollected)}
+                                  COP {formatCOP(closure.total_revenue)}
                                 </td>
                                 <td className="py-2 px-3 text-right text-sm font-bold text-blue-600 dark:text-blue-400">
-                                  COP {formatCOP(profitGenerated)}
+                                  COP {formatCOP(realProfit)}
                                 </td>
-                                <td className="py-2 px-3 text-sm">{closure.closedBy}</td>
+                                <td className="py-2 px-3 text-sm">{closure.closed_by}</td>
                               </tr>
                             );
                           })}
                           {paginatedClosures.length === 0 && (
                             <tr>
-                              <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                              <td colSpan={6} className="py-8 text-center text-muted-foreground">
                                 No hay cierres mensuales registrados
                               </td>
                             </tr>

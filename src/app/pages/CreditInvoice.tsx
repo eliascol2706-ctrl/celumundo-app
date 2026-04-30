@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useBlocker } from 'react-router';
 import {
   ArrowLeft,
   Plus,
@@ -854,6 +854,41 @@ export function CreditInvoice() {
     }
   }, [showLoadDialog]);
 
+  // Bloquear navegación si hay productos en la factura
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      items.length > 0 &&
+      currentLocation.pathname !== nextLocation.pathname
+  );
+
+  // Mostrar confirmación al bloqueador de navegación
+  useEffect(() => {
+    if (blocker.state === "blocked") {
+      const confirmExit = window.confirm(
+        "⚠️ Tienes una factura sin terminar con productos agregados.\n\nSi sales, se perderá toda la información.\n\n¿Estás seguro de que deseas salir?"
+      );
+
+      if (confirmExit) {
+        blocker.proceed();
+      } else {
+        blocker.reset();
+      }
+    }
+  }, [blocker]);
+
+  // Prevenir cierre de ventana/pestaña si hay productos
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (items.length > 0) {
+        e.preventDefault();
+        e.returnValue = ''; // Necesario para Chrome
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [items.length]);
+
   const filteredProducts = products.filter(
     (p) =>
       includesIgnoreAccents(p.name, productSearch) ||
@@ -952,13 +987,27 @@ export function CreditInvoice() {
 
   const statusColor = getStatusColor();
 
+  // Función para manejar volver al menú con confirmación
+  const handleBackToMenu = () => {
+    if (items.length > 0) {
+      const confirmExit = window.confirm(
+        "⚠️ Tienes una factura sin terminar con productos agregados.\n\nSi sales, se perderá toda la información.\n\n¿Estás seguro de que deseas salir?"
+      );
+      if (confirmExit) {
+        navigate('/facturacion');
+      }
+    } else {
+      navigate('/facturacion');
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
       {/* Header */}
-      <div className="bg-white border-b border-zinc-200">
+      <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
         <div className="p-6">
           <div className="flex items-center gap-2 mb-4">
-            <Button variant="ghost" onClick={() => navigate('/facturacion')}>
+            <Button variant="ghost" onClick={handleBackToMenu}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Volver al Menú
             </Button>
@@ -984,13 +1033,13 @@ export function CreditInvoice() {
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-3">
-                <h1 className="text-3xl font-semibold text-zinc-900">Nueva Factura a Crédito</h1>
+                <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-100">Nueva Factura a Crédito</h1>
                 <span className="flex items-center gap-1 text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
                   <Scan className="h-4 w-4" />
                   Lector de código activo
                 </span>
               </div>
-              <p className="text-sm text-zinc-500 mt-1">
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
                 Venta con pago diferido y seguimiento de cartera
               </p>
             </div>
@@ -1018,10 +1067,10 @@ export function CreditInvoice() {
             {/* Sección Cliente */}
             <Card className={`border-2 ${
               selectedCustomer
-                ? `border-${statusColor}-300 bg-${statusColor}-50/50`
-                : 'border-zinc-200'
+                ? `border-${statusColor}-300 dark:border-${statusColor}-700 bg-${statusColor}-50/50 dark:bg-${statusColor}-950/30`
+                : 'border-zinc-200 dark:border-zinc-800'
             }`}>
-              <CardHeader className="border-b border-zinc-100">
+              <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2">
                     <User className="w-5 h-5" />
@@ -1060,12 +1109,12 @@ export function CreditInvoice() {
                   <div className="space-y-4">
                     <div className="flex items-start justify-between">
                       <div>
-                        <p className="text-lg font-semibold text-zinc-900">
+                        <p className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
                           {selectedCustomer.name}
                         </p>
-                        <p className="text-sm text-zinc-500">{selectedCustomer.document}</p>
+                        <p className="text-sm text-zinc-500 dark:text-zinc-400">{selectedCustomer.document}</p>
                         {selectedCustomer.phone && (
-                          <p className="text-sm text-zinc-600 mt-1">{selectedCustomer.phone}</p>
+                          <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">{selectedCustomer.phone}</p>
                         )}
                       </div>
                       <Button
@@ -1077,23 +1126,23 @@ export function CreditInvoice() {
                       </Button>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-4 pt-4 border-t border-zinc-200">
+                    <div className="grid grid-cols-3 gap-4 pt-4 border-t border-zinc-200 dark:border-zinc-700">
                       <div>
-                        <p className="text-xs text-zinc-600">Cupo de Crédito</p>
-                        <p className="text-sm font-bold text-zinc-900">
+                        <p className="text-xs text-zinc-600 dark:text-zinc-400">Cupo de Crédito</p>
+                        <p className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
                           {formatCOP(selectedCustomer.credit_limit ?? 0)}
                         </p>
                       </div>
                       <div>
-                        <p className="text-xs text-zinc-600">Deuda Actual</p>
-                        <p className="text-sm font-bold text-amber-600">
+                        <p className="text-xs text-zinc-600 dark:text-zinc-400">Deuda Actual</p>
+                        <p className="text-sm font-bold text-amber-600 dark:text-amber-400">
                           {formatCOP(creditAnalysis.usedCredit)}
                         </p>
                       </div>
                       <div>
-                        <p className="text-xs text-zinc-600">Crédito Disponible</p>
+                        <p className="text-xs text-zinc-600 dark:text-zinc-400">Crédito Disponible</p>
                         <p className={`text-sm font-bold ${
-                          creditAnalysis.availableCredit > 0 ? 'text-emerald-600' : 'text-red-600'
+                          creditAnalysis.availableCredit > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
                         }`}>
                           {formatCOP(creditAnalysis.availableCredit)}
                         </p>
@@ -1101,14 +1150,14 @@ export function CreditInvoice() {
                     </div>
 
                     {creditAnalysis.overdueDays > 0 && (
-                      <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
                         <div className="flex items-start gap-2">
-                          <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                          <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
                           <div>
-                            <p className="text-sm font-medium text-amber-900">
+                            <p className="text-sm font-medium text-amber-900 dark:text-amber-300">
                               Cliente con facturas vencidas
                             </p>
-                            <p className="text-xs text-amber-700 mt-1">
+                            <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
                               {creditAnalysis.overdueDays} días de mora • {formatCOP(creditAnalysis.totalDebt)}
                             </p>
                           </div>
@@ -1121,8 +1170,8 @@ export function CreditInvoice() {
             </Card>
 
             {/* Sección Productos */}
-            <Card className="border-zinc-200">
-              <CardHeader className="border-b border-zinc-100">
+            <Card className="border-zinc-200 dark:border-zinc-800">
+              <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2">
                     <Package className="w-5 h-5" />
@@ -1136,8 +1185,8 @@ export function CreditInvoice() {
               </CardHeader>
               <CardContent className="pt-6">
                 {items.length === 0 ? (
-                  <div className="text-center py-12 text-zinc-500">
-                    <Package className="w-16 h-16 mx-auto mb-4 text-zinc-300" />
+                  <div className="text-center py-12 text-zinc-500 dark:text-zinc-400">
+                    <Package className="w-16 h-16 mx-auto mb-4 text-zinc-300 dark:text-zinc-600" />
                     <p className="text-lg font-medium">No hay productos agregados</p>
                     <p className="text-sm mt-1">Agregue productos para continuar</p>
                   </div>
@@ -1146,7 +1195,7 @@ export function CreditInvoice() {
                     {items.map((item, index) => (
                       <div
                         key={index}
-                        className="p-4 bg-zinc-50 rounded-lg border border-zinc-200"
+                        className="p-4 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700"
                       >
                         <div className="flex items-start gap-4">
                           <div className="flex-1 space-y-3">
@@ -1242,7 +1291,7 @@ export function CreditInvoice() {
                             variant="ghost"
                             size="sm"
                             onClick={() => removeItem(index)}
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 hover:bg-red-50 dark:hover:bg-red-950"
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
@@ -1256,8 +1305,8 @@ export function CreditInvoice() {
 
             {/* Sección Condiciones de Crédito */}
             {selectedCustomer && (
-              <Card className="border-zinc-200">
-                <CardHeader className="border-b border-zinc-100">
+              <Card className="border-zinc-200 dark:border-zinc-800">
+                <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
                   <CardTitle className="flex items-center gap-2">
                     <Calendar className="w-5 h-5" />
                     Condiciones de Crédito
@@ -1279,7 +1328,7 @@ export function CreditInvoice() {
                         }}
                         min="1"
                       />
-                      <p className="text-xs text-zinc-500 mt-1">
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                         Plazo estándar: {selectedCustomer.payment_term} días
                       </p>
                     </div>
@@ -1297,30 +1346,30 @@ export function CreditInvoice() {
           <div className="lg:col-span-1">
             <div className="sticky top-24 space-y-6">
               {/* Resumen */}
-              <Card className="border-zinc-200 shadow-lg">
-                <CardHeader className="border-b border-zinc-100 bg-zinc-50">
-                  <CardTitle>Resumen de Venta</CardTitle>
+              <Card className="border-zinc-200 dark:border-zinc-800 shadow-lg">
+                <CardHeader className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800">
+                  <CardTitle className="text-zinc-900 dark:text-zinc-100">Resumen de Venta</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-6 space-y-4">
                   <div className="flex justify-between text-lg font-bold">
-                    <span className="text-zinc-900">Total:</span>
-                    <span className="text-emerald-600">{formatCOP(calculateTotal())}</span>
+                    <span className="text-zinc-900 dark:text-zinc-100">Total:</span>
+                    <span className="text-emerald-600 dark:text-emerald-400">{formatCOP(calculateTotal())}</span>
                   </div>
 
                   {selectedCustomer && (
                     <>
-                      <div className="pt-4 border-t border-zinc-200 space-y-2">
+                      <div className="pt-4 border-t border-zinc-200 dark:border-zinc-700 space-y-2">
                         <div className="flex justify-between text-sm">
-                          <span className="text-zinc-600">Disponible actual:</span>
-                          <span className="font-medium text-emerald-600">
+                          <span className="text-zinc-600 dark:text-zinc-400">Disponible actual:</span>
+                          <span className="font-medium text-emerald-600 dark:text-emerald-400">
                             {formatCOP(creditAnalysis.availableCredit)}
                           </span>
                         </div>
                         <div className="flex justify-between text-sm">
-                          <span className="text-zinc-600">Después de la venta:</span>
+                          <span className="text-zinc-600 dark:text-zinc-400">Después de la venta:</span>
                           <span
                             className={`font-bold ${
-                              creditAnalysis.hasEnoughCredit ? 'text-emerald-600' : 'text-red-600'
+                              creditAnalysis.hasEnoughCredit ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'
                             }`}
                           >
                             {formatCOP(creditAnalysis.creditAfterSale)}
@@ -1330,14 +1379,14 @@ export function CreditInvoice() {
 
                       {/* Advertencias */}
                       {!creditAnalysis.hasEnoughCredit && (
-                        <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                        <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
                           <div className="flex items-start gap-2">
-                            <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                            <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
                             <div>
-                              <p className="text-sm font-medium text-red-900">
+                              <p className="text-sm font-medium text-red-900 dark:text-red-300">
                                 Crédito Insuficiente
                               </p>
-                              <p className="text-xs text-red-700 mt-1">
+                              <p className="text-xs text-red-700 dark:text-red-400 mt-1">
                                 Esta venta supera el crédito disponible en{' '}
                                 {formatCOP(Math.abs(creditAnalysis.creditAfterSale))}
                               </p>
@@ -1347,14 +1396,14 @@ export function CreditInvoice() {
                       )}
 
                       {creditAnalysis.hasEnoughCredit && calculateTotal() > 0 && (
-                        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg">
+                        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 rounded-lg">
                           <div className="flex items-start gap-2">
-                            <CheckCircle className="w-5 h-5 text-emerald-600 flex-shrink-0 mt-0.5" />
+                            <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400 flex-shrink-0 mt-0.5" />
                             <div>
-                              <p className="text-sm font-medium text-emerald-900">
+                              <p className="text-sm font-medium text-emerald-900 dark:text-emerald-300">
                                 Venta Autorizada
                               </p>
-                              <p className="text-xs text-emerald-700 mt-1">
+                              <p className="text-xs text-emerald-700 dark:text-emerald-400 mt-1">
                                 El cliente tiene crédito suficiente
                               </p>
                             </div>
@@ -1363,14 +1412,14 @@ export function CreditInvoice() {
                       )}
 
                       {creditAnalysis.overdueDays > 0 && (
-                        <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                        <div className="p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg">
                           <div className="flex items-start gap-2">
-                            <Info className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+                            <Info className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
                             <div>
-                              <p className="text-sm font-medium text-amber-900">
+                              <p className="text-sm font-medium text-amber-900 dark:text-amber-300">
                                 Cliente con Mora
                               </p>
-                              <p className="text-xs text-amber-700 mt-1">
+                              <p className="text-xs text-amber-700 dark:text-amber-400 mt-1">
                                 {creditAnalysis.overdueDays} días • {formatCOP(creditAnalysis.totalDebt)}
                               </p>
                             </div>
@@ -1622,9 +1671,9 @@ export function CreditInvoice() {
 
       {/* Diálogo para Guardar Factura */}
       <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md bg-white dark:bg-zinc-900">
           <DialogHeader>
-            <DialogTitle>Guardar Factura a Crédito</DialogTitle>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Guardar Factura a Crédito</DialogTitle>
             <DialogDescription>
               Guarda esta factura para continuarla más tarde
             </DialogDescription>
@@ -1644,9 +1693,9 @@ export function CreditInvoice() {
               </p>
             </div>
 
-            <div className="bg-muted/50 p-3 rounded-lg text-sm">
-              <p className="font-medium mb-1">Se guardará:</p>
-              <ul className="space-y-1 text-muted-foreground">
+            <div className="bg-muted/50 dark:bg-zinc-800/50 p-3 rounded-lg text-sm">
+              <p className="font-medium mb-1 text-zinc-900 dark:text-zinc-100">Se guardará:</p>
+              <ul className="space-y-1 text-muted-foreground dark:text-zinc-400">
                 <li>• {items.length} producto(s)</li>
                 <li>• Total: {formatCOP(calculateTotal())}</li>
                 {selectedCustomer && <li>• Cliente: {selectedCustomer.name}</li>}
@@ -1681,9 +1730,9 @@ export function CreditInvoice() {
 
       {/* Diálogo para Cargar Factura */}
       <Dialog open={showLoadDialog} onOpenChange={setShowLoadDialog}>
-        <DialogContent className="max-w-2xl max-h-[80vh]">
+        <DialogContent className="max-w-2xl max-h-[80vh] bg-white dark:bg-zinc-900">
           <DialogHeader>
-            <DialogTitle>Cargar Factura Guardada</DialogTitle>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Cargar Factura Guardada</DialogTitle>
             <DialogDescription>
               Selecciona una factura guardada para continuar trabajando en ella
             </DialogDescription>
@@ -1695,7 +1744,7 @@ export function CreditInvoice() {
                 <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
               </div>
             ) : savedInvoices.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
+              <div className="text-center py-12 text-muted-foreground dark:text-zinc-400">
                 <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
                 <p>No hay facturas guardadas</p>
               </div>
@@ -1706,14 +1755,14 @@ export function CreditInvoice() {
                   return (
                     <div
                       key={save.id}
-                      className="border rounded-lg p-4 hover:bg-muted/50 transition-colors"
+                      className="border dark:border-zinc-700 rounded-lg p-4 hover:bg-muted/50 dark:hover:bg-zinc-800 transition-colors"
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1">
-                          <h4 className="font-medium">
+                          <h4 className="font-medium text-zinc-900 dark:text-zinc-100">
                             {save.save_name || `Factura sin nombre`}
                           </h4>
-                          <div className="text-sm text-muted-foreground mt-1 space-y-0.5">
+                          <div className="text-sm text-muted-foreground dark:text-zinc-400 mt-1 space-y-0.5">
                             <p>• {data.items?.length || 0} producto(s)</p>
                             <p>• Total: {formatCOP(data.total || 0)}</p>
                             {data.selectedCustomer && <p>• Cliente: {data.selectedCustomer.name}</p>}
@@ -1738,7 +1787,7 @@ export function CreditInvoice() {
                             size="sm"
                             variant="outline"
                             onClick={() => handleDeleteSave(save.id)}
-                            className="text-red-600 border-red-300 hover:bg-red-50"
+                            className="text-red-600 dark:text-red-400 border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-950"
                           >
                             <Trash2 className="w-4 h-4 mr-1" />
                             Eliminar

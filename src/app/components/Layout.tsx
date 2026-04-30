@@ -629,13 +629,21 @@ export function Layout() {
               </span>
             </div>
             <div className="hidden md:block text-sm text-muted-foreground">
-              {new Date().toLocaleDateString('es-ES', { 
-                weekday: 'long', 
-                year: 'numeric', 
-                month: 'long', 
-                day: 'numeric' 
+              {new Date().toLocaleDateString('es-ES', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
               })}
             </div>
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-lg transition-all duration-200 hover:bg-amber-100 dark:hover:bg-amber-900/20 border border-amber-300 dark:border-amber-700"
+              aria-label="Toggle theme"
+              title={isDark ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'}
+            >
+              {isDark ? <Sun className="h-5 w-5 text-amber-500" /> : <Moon className="h-5 w-5 text-amber-600" />}
+            </button>
             <button
               onClick={handleLogout}
               className="flex items-center gap-2 px-3 py-2 rounded-lg transition-all duration-200 text-red-500 hover:text-red-400 hover:bg-red-900/10 border border-red-900/30 hover:border-red-700/50"
@@ -663,15 +671,6 @@ export function Layout() {
           </Suspense>
         </main>
       </div>
-
-      {/* Botón de tema fijo en esquina inferior izquierda */}
-      <button
-        onClick={toggleTheme}
-        className="fixed bottom-4 left-4 lg:bottom-6 lg:left-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 text-white rounded-full shadow-lg transition-all duration-300 hover:scale-110"
-        aria-label="Toggle theme"
-      >
-        {isDark ? <Sun className="h-5 w-5 lg:h-6 lg:w-6" /> : <Moon className="h-5 w-5 lg:h-6 lg:w-6" />}
-      </button>
 
       {/* Botón flotante de Nueva Factura (para todos los usuarios) */}
       <button

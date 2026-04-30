@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router';
+import { useNavigate, useBlocker } from 'react-router';
 import {
   ArrowLeft,
   Plus,
@@ -570,6 +570,41 @@ export function RegularInvoice() {
     }
   }, [showLoadDialog]);
 
+  // Bloquear navegación si hay productos en la factura
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      items.length > 0 &&
+      currentLocation.pathname !== nextLocation.pathname
+  );
+
+  // Mostrar confirmación al bloqueador de navegación
+  useEffect(() => {
+    if (blocker.state === "blocked") {
+      const confirmExit = window.confirm(
+        "⚠️ Tienes una factura sin terminar con productos agregados.\n\nSi sales, se perderá toda la información.\n\n¿Estás seguro de que deseas salir?"
+      );
+
+      if (confirmExit) {
+        blocker.proceed();
+      } else {
+        blocker.reset();
+      }
+    }
+  }, [blocker]);
+
+  // Prevenir cierre de ventana/pestaña si hay productos
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (items.length > 0) {
+        e.preventDefault();
+        e.returnValue = ''; // Necesario para Chrome
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [items.length]);
+
   // Atajos de teclado para agilizar facturación
   useEffect(() => {
     // Función unificada para manejar atajos
@@ -859,13 +894,27 @@ export function RegularInvoice() {
     toast.success(`${selectedUnitIds.length} ID(s) seleccionadas correctamente`);
   };
 
+  // Función para manejar volver al menú con confirmación
+  const handleBackToMenu = () => {
+    if (items.length > 0) {
+      const confirmExit = window.confirm(
+        "⚠️ Tienes una factura sin terminar con productos agregados.\n\nSi sales, se perderá toda la información.\n\n¿Estás seguro de que deseas salir?"
+      );
+      if (confirmExit) {
+        navigate('/facturacion');
+      }
+    } else {
+      navigate('/facturacion');
+    }
+  };
+
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
       {/* Header */}
-      <div className="bg-white border-b border-zinc-200">
+      <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
         <div className="p-6">
           <div className="flex items-center gap-2 mb-4">
-            <Button variant="ghost" onClick={() => navigate('/facturacion')}>
+            <Button variant="ghost" onClick={handleBackToMenu}>
               <ArrowLeft className="w-4 h-4 mr-2" />
               Volver al Menú
             </Button>
@@ -891,13 +940,13 @@ export function RegularInvoice() {
           <div className="flex items-center justify-between">
             <div>
               <div className="flex items-center gap-3">
-                <h1 className="text-3xl font-semibold text-zinc-900">Nueva Factura Regular</h1>
+                <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-100">Nueva Factura Regular</h1>
                 <span className="flex items-center gap-1 text-sm text-blue-600 bg-blue-50 px-3 py-1 rounded-full">
                   <Scan className="h-4 w-4" />
                   Lector de código activo
                 </span>
               </div>
-              <p className="text-sm text-zinc-500 mt-1">
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
                 {invoiceStatus === 'paid' ? 'Venta con pago inmediato' : 'Venta pendiente de confirmación'}
               </p>
             </div>
@@ -941,9 +990,9 @@ export function RegularInvoice() {
             </div>
 
             {/* Información del Cliente (Opcional) */}
-            <Card className="border-zinc-200">
-              <CardHeader className="border-b border-zinc-100">
-                <CardTitle className="flex items-center gap-2">
+            <Card className="border-zinc-200 dark:border-zinc-800">
+              <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
+                <CardTitle className="flex items-center gap-2 text-zinc-900 dark:text-zinc-100">
                   <User className="w-5 h-5" />
                   Información del Cliente (Opcional)
                 </CardTitle>
@@ -971,8 +1020,8 @@ export function RegularInvoice() {
             </Card>
 
             {/* Sección Productos */}
-            <Card className="border-zinc-200">
-              <CardHeader className="border-b border-zinc-100">
+            <Card className="border-zinc-200 dark:border-zinc-800">
+              <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2">
                     <Package className="w-5 h-5" />
@@ -986,8 +1035,8 @@ export function RegularInvoice() {
               </CardHeader>
               <CardContent className="pt-6">
                 {items.length === 0 ? (
-                  <div className="text-center py-12 text-zinc-500">
-                    <Package className="w-16 h-16 mx-auto mb-4 text-zinc-300" />
+                  <div className="text-center py-12 text-zinc-500 dark:text-zinc-400">
+                    <Package className="w-16 h-16 mx-auto mb-4 text-zinc-300 dark:text-zinc-600" />
                     <p className="text-lg font-medium">No hay productos agregados</p>
                     <p className="text-sm mt-1">Agregue productos para continuar</p>
                   </div>
@@ -996,7 +1045,7 @@ export function RegularInvoice() {
                     {items.map((item, index) => (
                       <div
                         key={index}
-                        className="p-4 bg-zinc-50 rounded-lg border border-zinc-200"
+                        className="p-4 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700"
                       >
                         <div className="flex items-start gap-4">
                           <div className="flex-1 space-y-3">
@@ -1113,8 +1162,8 @@ export function RegularInvoice() {
 
             {/* Método de Pago - Solo si está paga */}
             {invoiceStatus === 'paid' && (
-              <Card className="border-zinc-200">
-                <CardHeader className="border-b border-zinc-100">
+              <Card className="border-zinc-200 dark:border-zinc-800">
+                <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
                   <CardTitle className="flex items-center gap-2">
                     <CreditCard className="w-5 h-5" />
                     Método de Pago
@@ -1123,7 +1172,7 @@ export function RegularInvoice() {
                 <CardContent className="pt-6 space-y-4">
                   <div>
                     <Label>Seleccionar método *</Label>
-                    <div className="grid grid-cols-5 gap-2 mt-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-2 mt-2">
                       <Button
                         type="button"
                         variant={paymentMethod === 'cash' ? 'default' : 'outline'}
@@ -1173,49 +1222,53 @@ export function RegularInvoice() {
                   </div>
 
                   {paymentMethod === 'mixed' && (
-                    <div className="space-y-3 p-4 bg-zinc-50 rounded-lg border border-zinc-200">
-                      <p className="text-sm font-medium text-zinc-700">Distribución de Pagos</p>
-                      <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-3 p-3 sm:p-4 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700">
+                      <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Distribución de Pagos</p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
-                          <Label>Efectivo</Label>
+                          <Label className="text-xs sm:text-sm">Efectivo</Label>
                           <Input
                             type="number"
                             value={paymentCash}
                             onChange={(e) => setPaymentCash(parseFloat(e.target.value) || 0)}
                             min="0"
+                            className="text-sm sm:text-base"
                           />
                         </div>
                         <div>
-                          <Label>Transferencia</Label>
+                          <Label className="text-xs sm:text-sm">Transferencia</Label>
                           <Input
                             type="number"
                             value={paymentTransfer}
                             onChange={(e) => setPaymentTransfer(parseFloat(e.target.value) || 0)}
                             min="0"
+                            className="text-sm sm:text-base"
                           />
                         </div>
                         <div>
-                          <Label>Nequi</Label>
+                          <Label className="text-xs sm:text-sm">Nequi</Label>
                           <Input
                             type="number"
                             value={paymentNequi}
                             onChange={(e) => setPaymentNequi(parseFloat(e.target.value) || 0)}
                             min="0"
+                            className="text-sm sm:text-base"
                           />
                         </div>
                         <div>
-                          <Label>Daviplata</Label>
+                          <Label className="text-xs sm:text-sm">Daviplata</Label>
                           <Input
                             type="number"
                             value={paymentDaviplata}
                             onChange={(e) => setPaymentDaviplata(parseFloat(e.target.value) || 0)}
                             min="0"
+                            className="text-sm sm:text-base"
                           />
                         </div>
                       </div>
-                      <div className="pt-3 border-t border-zinc-300 flex justify-between items-center">
-                        <span className="text-sm font-medium text-zinc-700">Total de Pagos:</span>
-                        <span className={`text-lg font-bold ${getTotalPayments() === calculateTotal() ? 'text-emerald-600' : 'text-red-600'}`}>
+                      <div className="pt-3 border-t border-zinc-300 dark:border-zinc-600 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
+                        <span className="text-xs sm:text-sm font-medium text-zinc-700 dark:text-zinc-300">Total de Pagos:</span>
+                        <span className={`text-base sm:text-lg font-bold ${getTotalPayments() === calculateTotal() ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
                           {formatCOP(getTotalPayments())}
                         </span>
                       </div>
@@ -1235,25 +1288,25 @@ export function RegularInvoice() {
           <div className="lg:col-span-1">
             <div className="sticky top-6 space-y-6">
               {/* Resumen */}
-              <Card className="border-zinc-200 shadow-lg">
-                <CardHeader className="border-b border-zinc-100 bg-zinc-50">
-                  <CardTitle>Resumen de Venta</CardTitle>
+              <Card className="border-zinc-200 dark:border-zinc-800 shadow-lg">
+                <CardHeader className="border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800">
+                  <CardTitle className="text-zinc-900 dark:text-zinc-100">Resumen de Venta</CardTitle>
                 </CardHeader>
                 <CardContent className="pt-6 space-y-4">
                   <div className="flex justify-between text-lg font-bold">
-                    <span className="text-zinc-900">Total:</span>
-                    <span className="text-emerald-600">{formatCOP(calculateTotal())}</span>
+                    <span className="text-zinc-900 dark:text-zinc-100">Total:</span>
+                    <span className="text-emerald-600 dark:text-emerald-400">{formatCOP(calculateTotal())}</span>
                   </div>
 
-                  <div className="pt-4 border-t border-zinc-200">
-                    <div className="space-y-2 text-sm text-zinc-600">
+                  <div className="pt-4 border-t border-zinc-200 dark:border-zinc-700">
+                    <div className="space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
                       <div className="flex justify-between">
                         <span>Productos:</span>
                         <span className="font-medium">{items.length}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Estado:</span>
-                        <span className={`font-medium ${invoiceStatus === 'paid' ? 'text-emerald-600' : 'text-amber-600'}`}>
+                        <span className={`font-medium ${invoiceStatus === 'paid' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`}>
                           {invoiceStatus === 'paid' ? 'Paga' : 'En Confirmación'}
                         </span>
                       </div>
@@ -1309,9 +1362,9 @@ export function RegularInvoice() {
 
       {/* Modal de Selección de Estado Inicial */}
       <Dialog open={showStatusModal} onOpenChange={setShowStatusModal}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="sm:max-w-md bg-white dark:bg-zinc-900">
           <DialogHeader>
-            <DialogTitle className="text-2xl">¿Cuál es el estado de esta factura?</DialogTitle>
+            <DialogTitle className="text-2xl text-zinc-900 dark:text-zinc-100">¿Cuál es el estado de esta factura?</DialogTitle>
             <DialogDescription>
               Selecciona el estado de pago de la factura
             </DialogDescription>
@@ -1328,11 +1381,11 @@ export function RegularInvoice() {
             <Button
               onClick={() => handleStatusSelection('pending_confirmation')}
               variant="outline"
-              className="w-full h-20 border-2 border-amber-300 hover:bg-amber-50 flex-col gap-2"
+              className="w-full h-20 border-2 border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950 flex-col gap-2"
             >
-              <Clock className="w-8 h-8 text-amber-600" />
-              <span className="text-lg font-semibold text-amber-700">En Confirmación</span>
-              <span className="text-xs text-amber-600">Pendiente de confirmar pago</span>
+              <Clock className="w-8 h-8 text-amber-600 dark:text-amber-400" />
+              <span className="text-lg font-semibold text-amber-700 dark:text-amber-400">En Confirmación</span>
+              <span className="text-xs text-amber-600 dark:text-amber-400">Pendiente de confirmar pago</span>
             </Button>
           </div>
         </DialogContent>
@@ -1681,9 +1734,9 @@ export function RegularInvoice() {
 
       {/* Diálogo para Guardar Factura */}
       <Dialog open={showSaveDialog} onOpenChange={setShowSaveDialog}>
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md bg-white dark:bg-zinc-900">
           <DialogHeader>
-            <DialogTitle>Guardar Factura</DialogTitle>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Guardar Factura</DialogTitle>
             <DialogDescription>
               Guarda esta factura para continuarla más tarde
             </DialogDescription>
@@ -1703,9 +1756,9 @@ export function RegularInvoice() {
               </p>
             </div>
 
-            <div className="bg-muted/50 p-3 rounded-lg text-sm">
-              <p className="font-medium mb-1">Se guardará:</p>
-              <ul className="space-y-1 text-muted-foreground">
+            <div className="bg-muted/50 dark:bg-zinc-800/50 p-3 rounded-lg text-sm">
+              <p className="font-medium mb-1 text-zinc-900 dark:text-zinc-100">Se guardará:</p>
+              <ul className="space-y-1 text-muted-foreground dark:text-zinc-400">
                 <li>• {items.length} producto(s)</li>
                 <li>• Total: {formatCOP(calculateTotal())}</li>
                 {customerName && <li>• Cliente: {customerName}</li>}
@@ -1740,9 +1793,9 @@ export function RegularInvoice() {
 
       {/* Diálogo para Cargar Factura */}
       <Dialog open={showLoadDialog} onOpenChange={setShowLoadDialog}>
-        <DialogContent className="max-w-2xl max-h-[80vh]">
+        <DialogContent className="max-w-2xl max-h-[80vh] bg-white dark:bg-zinc-900">
           <DialogHeader>
-            <DialogTitle>Cargar Factura Guardada</DialogTitle>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Cargar Factura Guardada</DialogTitle>
             <DialogDescription>
               Selecciona una factura guardada para continuar trabajando en ella
             </DialogDescription>
@@ -1754,7 +1807,7 @@ export function RegularInvoice() {
                 <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
               </div>
             ) : savedInvoices.length === 0 ? (
-              <div className="text-center py-12 text-muted-foreground">
+              <div className="text-center py-12 text-muted-foreground dark:text-zinc-400">
                 <FolderOpen className="w-12 h-12 mx-auto mb-3 opacity-50" />
                 <p>No hay facturas guardadas</p>
               </div>
@@ -1765,14 +1818,14 @@ export function RegularInvoice() {
                   return (
                     <div
                       key={save.id}
-                      className="border rounded-lg p-4 hover:bg-muted/50 transition-colors"
+                      className="border dark:border-zinc-700 rounded-lg p-4 hover:bg-muted/50 dark:hover:bg-zinc-800 transition-colors"
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1">
-                          <h4 className="font-medium">
+                          <h4 className="font-medium text-zinc-900 dark:text-zinc-100">
                             {save.save_name || `Factura sin nombre`}
                           </h4>
-                          <div className="text-sm text-muted-foreground mt-1 space-y-0.5">
+                          <div className="text-sm text-muted-foreground dark:text-zinc-400 mt-1 space-y-0.5">
                             <p>• {data.items?.length || 0} producto(s)</p>
                             <p>• Total: {formatCOP(data.total || 0)}</p>
                             {data.customerName && <p>• Cliente: {data.customerName}</p>}
@@ -1797,7 +1850,7 @@ export function RegularInvoice() {
                             size="sm"
                             variant="outline"
                             onClick={() => handleDeleteSave(save.id)}
-                            className="text-red-600 border-red-300 hover:bg-red-50"
+                            className="text-red-600 dark:text-red-400 border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-950"
                           >
                             <Trash2 className="w-4 h-4 mr-1" />
                             Eliminar

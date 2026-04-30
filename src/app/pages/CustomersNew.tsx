@@ -22,7 +22,9 @@ import {
   updateCustomer,
   deleteCustomer,
   addCreditHistory,
+  getInvoices,
   type Customer,
+  type Invoice,
   getCurrentUser
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -45,6 +47,7 @@ export function CustomersNew() {
   const initialMode = (searchParams.get('mode') as ViewMode) || 'dashboard';
   const [viewMode, setViewMode] = useState<ViewMode>(initialMode);
   const [customers, setCustomers] = useState<Customer[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
@@ -74,8 +77,12 @@ export function CustomersNew() {
   }, [searchParams]);
 
   const loadCustomers = async () => {
-    const data = await getCustomers();
-    setCustomers(data);
+    const [customersData, invoicesData] = await Promise.all([
+      getCustomers(),
+      getInvoices()
+    ]);
+    setCustomers(customersData);
+    setInvoices(invoicesData);
   };
 
   const resetForm = () => {
@@ -230,9 +237,9 @@ export function CustomersNew() {
   const getStatusBadge = (customer: Customer) => {
     const status = customer.status || 'active';
     const styles: Record<string, string> = {
-      active: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-      overdue: 'bg-amber-100 text-amber-700 border-amber-200',
-      blocked: 'bg-red-100 text-red-700 border-red-200'
+      active: 'bg-emerald-100 text-emerald-700 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:border-emerald-700',
+      overdue: 'bg-amber-100 text-amber-700 border-amber-200 dark:bg-amber-900/30 dark:text-amber-400 dark:border-amber-700',
+      blocked: 'bg-red-100 text-red-700 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-700'
     };
     const labels: Record<string, string> = {
       active: 'Activo',
@@ -244,6 +251,17 @@ export function CustomersNew() {
         {labels[status] || labels.active}
       </Badge>
     );
+  };
+
+  // Calcular el saldo real del cliente basándose en sus facturas a crédito
+  const getCustomerBalance = (customerDocument: string): number => {
+    const customerCreditInvoices = invoices.filter(
+      inv => inv.customer_document === customerDocument &&
+             inv.is_credit &&
+             inv.status !== 'cancelled'
+    );
+
+    return customerCreditInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
   };
 
   const filteredCustomers = customers.filter(customer =>
@@ -263,7 +281,7 @@ export function CustomersNew() {
   if (viewMode === 'dashboard') {
     return (
       <div>
-        <div className="bg-white border-b border-zinc-200 px-6 py-4 flex items-center justify-between">
+        <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 px-6 py-4 flex items-center justify-between">
           <div className="flex gap-2">
             <Button
               onClick={() => {
@@ -414,12 +432,12 @@ export function CustomersNew() {
   }
 
   return (
-    <div className="p-6 space-y-6 bg-white min-h-screen">
+    <div className="p-6 space-y-6 bg-white dark:bg-zinc-900 min-h-screen">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-semibold text-zinc-900">Lista de Clientes</h1>
-          <p className="text-sm text-zinc-500 mt-1">Gestión completa de clientes de crédito</p>
+          <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-100">Lista de Clientes</h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Gestión completa de clientes de crédito</p>
         </div>
         <div className="flex gap-2">
           <Button
@@ -456,7 +474,7 @@ export function CustomersNew() {
       </div>
 
       {/* Búsqueda */}
-      <Card className="border-zinc-200 shadow-sm">
+      <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
         <CardContent className="pt-6">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-zinc-400 w-5 h-5" />
@@ -472,75 +490,73 @@ export function CustomersNew() {
       </Card>
 
       {/* Tabla de Clientes */}
-      <Card className="border-zinc-200 shadow-sm">
+      <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
         <CardHeader className="border-b border-zinc-100">
-          <CardTitle className="text-lg font-semibold text-zinc-900">
+          <CardTitle className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
             Clientes ({filteredCustomers.length})
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {paginatedCustomers.length === 0 ? (
-            <div className="p-12 text-center text-zinc-500">
-              <User className="w-16 h-16 mx-auto mb-4 text-zinc-300" />
+            <div className="p-12 text-center text-zinc-500 dark:text-zinc-400">
+              <User className="w-16 h-16 mx-auto mb-4 text-zinc-300 dark:text-zinc-600" />
               <p className="text-lg font-medium">No hay clientes registrados</p>
               <p className="text-sm mt-1">Comience agregando un nuevo cliente</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
-                <thead className="bg-zinc-50 border-b border-zinc-200">
+                <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-800">
                   <tr>
-                    <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 uppercase tracking-wider">
+                    <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
                       Cliente
                     </th>
-                    <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 uppercase tracking-wider">
+                    <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
                       Contacto
                     </th>
-                    <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 uppercase tracking-wider">
+                    <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
                       Cupo
                     </th>
-                    <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 uppercase tracking-wider">
+                    <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
                       Saldo
                     </th>
-                    <th className="text-center px-6 py-3 text-xs font-medium text-zinc-600 uppercase tracking-wider">
+                    <th className="text-center px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
                       Estado
                     </th>
-                    <th className="text-center px-6 py-3 text-xs font-medium text-zinc-600 uppercase tracking-wider">
+                    <th className="text-center px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
                       Acciones
                     </th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100">
                   {paginatedCustomers.map((customer) => {
-                    const totalCredit = customer.total_credit ?? 0;
-                    const totalPaid = customer.total_paid ?? 0;
                     const creditLimit = customer.credit_limit ?? 0;
-                    const usedCredit = totalCredit - totalPaid;
+                    const usedCredit = getCustomerBalance(customer.document);
                     const availableCredit = creditLimit - usedCredit;
 
                     return (
-                      <tr key={customer.id} className="hover:bg-zinc-50 transition-colors">
+                      <tr key={customer.id} className="hover:bg-zinc-50 dark:bg-zinc-800 transition-colors">
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
                             <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center">
-                              <User className="w-5 h-5 text-emerald-600" />
+                              <User className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
                             </div>
                             <div>
-                              <p className="font-medium text-zinc-900">{customer.name}</p>
-                              <p className="text-sm text-zinc-500">{customer.document}</p>
+                              <p className="font-medium text-zinc-900 dark:text-zinc-100">{customer.name}</p>
+                              <p className="text-sm text-zinc-500 dark:text-zinc-400">{customer.document}</p>
                             </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
                           <div className="text-sm">
                             {customer.phone && (
-                              <div className="flex items-center gap-1 text-zinc-600">
+                              <div className="flex items-center gap-1 text-zinc-600 dark:text-zinc-400">
                                 <Phone className="w-3 h-3" />
                                 <span>{customer.phone}</span>
                               </div>
                             )}
                             {customer.email && (
-                              <div className="flex items-center gap-1 text-zinc-600 mt-1">
+                              <div className="flex items-center gap-1 text-zinc-600 dark:text-zinc-400 mt-1">
                                 <Mail className="w-3 h-3" />
                                 <span>{customer.email}</span>
                               </div>
@@ -548,14 +564,14 @@ export function CustomersNew() {
                           </div>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <p className="font-medium text-zinc-900">{formatCOP(creditLimit)}</p>
-                          <p className="text-xs text-emerald-600">
+                          <p className="font-medium text-zinc-900 dark:text-zinc-100">{formatCOP(creditLimit)}</p>
+                          <p className="text-xs text-emerald-600 dark:text-emerald-400">
                             Disponible: {formatCOP(availableCredit)}
                           </p>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <p className="font-medium text-zinc-900">{formatCOP(usedCredit)}</p>
-                          <p className="text-xs text-zinc-500">{customer.payment_term ?? 30} días</p>
+                          <p className="font-medium text-zinc-900 dark:text-zinc-100">{formatCOP(usedCredit)}</p>
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400">{customer.payment_term ?? 30} días</p>
                         </td>
                         <td className="px-6 py-4 text-center">
                           {getStatusBadge(customer)}
@@ -570,7 +586,7 @@ export function CustomersNew() {
                                 console.log('Datos completos del cliente:', customer);
                                 navigate(`/clientes/${encodeURIComponent(customer.document)}`);
                               }}
-                              className="hover:bg-emerald-50 hover:border-emerald-300"
+                              className="hover:bg-emerald-50 hover:border-emerald-300 dark:hover:bg-emerald-900/30 dark:hover:border-emerald-700"
                             >
                               <Eye className="w-4 h-4" />
                             </Button>
@@ -578,7 +594,7 @@ export function CustomersNew() {
                               size="sm"
                               variant="outline"
                               onClick={() => openEditDialog(customer)}
-                              className="hover:bg-blue-50 hover:border-blue-300"
+                              className="hover:bg-blue-50 hover:border-blue-300 dark:hover:bg-blue-900/30 dark:hover:border-blue-700"
                             >
                               <Edit className="w-4 h-4" />
                             </Button>
@@ -586,7 +602,7 @@ export function CustomersNew() {
                               size="sm"
                               variant="outline"
                               onClick={() => handleDeleteCustomer(customer)}
-                              className="hover:bg-red-50 hover:border-red-300 text-red-600"
+                              className="hover:bg-red-50 hover:border-red-300 text-red-600 dark:hover:bg-red-900/30 dark:hover:border-red-700 dark:text-red-400"
                             >
                               <Trash2 className="w-4 h-4" />
                             </Button>
@@ -604,7 +620,7 @@ export function CustomersNew() {
         {/* Paginación */}
         {totalPages > 1 && (
           <div className="border-t border-zinc-100 px-6 py-4 flex items-center justify-between">
-            <p className="text-sm text-zinc-600">
+            <p className="text-sm text-zinc-600 dark:text-zinc-400">
               Mostrando {startIndex + 1} a {Math.min(endIndex, filteredCustomers.length)} de {filteredCustomers.length} clientes
             </p>
             <div className="flex gap-2">

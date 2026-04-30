@@ -117,18 +117,18 @@ export function CreditDashboard() {
   if (loading) {
     return (
       <div className="flex items-center justify-center h-96">
-        <div className="animate-pulse text-zinc-500">Cargando dashboard...</div>
+        <div className="animate-pulse text-zinc-500 dark:text-zinc-400">Cargando dashboard...</div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6 p-6 bg-white min-h-screen">
+    <div className="space-y-6 p-6 bg-white dark:bg-zinc-900 min-h-screen">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-3xl font-semibold text-zinc-900">Gestión de Crédito</h1>
-          <p className="text-sm text-zinc-500 mt-1">Panel de control de cartera de clientes</p>
+          <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-100">Gestión de Crédito</h1>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Panel de control de cartera de clientes</p>
         </div>
         <Button
           onClick={() => navigate('/clientes?mode=list')}
@@ -142,30 +142,30 @@ export function CreditDashboard() {
       {/* Métricas principales */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Total de Cartera */}
-        <Card className="border-zinc-200 shadow-sm hover:shadow-md transition-shadow">
+        <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-600">Total de Cartera</CardTitle>
+            <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Total de Cartera</CardTitle>
             <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
               <DollarSign className="w-4 h-4 text-emerald-600" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-900">{formatCOP(metrics.totalPortfolio)}</div>
-            <p className="text-xs text-zinc-500 mt-1">Créditos activos</p>
+            <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{formatCOP(metrics.totalPortfolio)}</div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Créditos activos</p>
           </CardContent>
         </Card>
 
         {/* Cartera Vencida */}
-        <Card className="border-zinc-200 shadow-sm hover:shadow-md transition-shadow">
+        <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-600">Cartera Vencida</CardTitle>
+            <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Cartera Vencida</CardTitle>
             <div className="w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">
               <AlertCircle className="w-4 h-4 text-red-600" />
             </div>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-600">{formatCOP(metrics.overdueAmount)}</div>
-            <p className="text-xs text-zinc-500 mt-1">
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
               {metrics.totalPortfolio > 0 
                 ? `${((metrics.overdueAmount / metrics.totalPortfolio) * 100).toFixed(1)}% del total`
                 : 'Sin cartera vencida'}
@@ -174,23 +174,23 @@ export function CreditDashboard() {
         </Card>
 
         {/* Pagos de la Semana */}
-        <Card className="border-zinc-200 shadow-sm hover:shadow-md transition-shadow">
+        <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-600">Pagos (7 días)</CardTitle>
+            <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Pagos (7 días)</CardTitle>
             <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
               <TrendingUp className="w-4 h-4 text-blue-600" />
             </div>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-900">{formatCOP(metrics.weekPaymentsTotal)}</div>
-            <p className="text-xs text-zinc-500 mt-1">{metrics.weekPaymentsCount} pagos recibidos</p>
+            <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{formatCOP(metrics.weekPaymentsTotal)}</div>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">{metrics.weekPaymentsCount} pagos recibidos</p>
           </CardContent>
         </Card>
 
         {/* Indicador de Riesgo */}
-        <Card className="border-zinc-200 shadow-sm hover:shadow-md transition-shadow">
+        <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-zinc-600">Indicador de Riesgo</CardTitle>
+            <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Indicador de Riesgo</CardTitle>
             <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
               metrics.riskLevel === 'high' ? 'bg-red-100' :
               metrics.riskLevel === 'medium' ? 'bg-amber-100' : 'bg-emerald-100'
@@ -203,24 +203,24 @@ export function CreditDashboard() {
           </CardHeader>
           <CardContent>
             <div className="flex items-center justify-between">
-              <div className="text-2xl font-bold text-zinc-900">{metrics.riskPercentage.toFixed(1)}%</div>
+              <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{metrics.riskPercentage.toFixed(1)}%</div>
               {getRiskBadge(metrics.riskLevel)}
             </div>
-            <p className="text-xs text-zinc-500 mt-1">Porcentaje de mora</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Porcentaje de mora</p>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Clientes con Mayor Deuda */}
-        <Card className="border-zinc-200 shadow-sm">
-          <CardHeader className="border-b border-zinc-100">
-            <CardTitle className="text-lg font-semibold text-zinc-900">Clientes con Mayor Deuda</CardTitle>
-            <p className="text-sm text-zinc-500 mt-1">Top 5 clientes por saldo pendiente</p>
+        <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+          <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
+            <CardTitle className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Clientes con Mayor Deuda</CardTitle>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Top 5 clientes por saldo pendiente</p>
           </CardHeader>
           <CardContent className="p-0">
             {topDebtors.length === 0 ? (
-              <div className="p-8 text-center text-zinc-500">
+              <div className="p-8 text-center text-zinc-500 dark:text-zinc-400">
                 <Users className="w-12 h-12 mx-auto mb-3 text-zinc-300" />
                 <p>No hay clientes con deuda</p>
               </div>
@@ -229,22 +229,22 @@ export function CreditDashboard() {
                 {topDebtors.map((debtor) => (
                   <div 
                     key={debtor.id}
-                    className="p-4 hover:bg-zinc-50 transition-colors cursor-pointer flex items-center justify-between"
+                    className="p-4 hover:bg-zinc-50 dark:bg-zinc-800 transition-colors cursor-pointer flex items-center justify-between"
                     onClick={() => navigate(`/clientes/${debtor.document}`)}
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-2">
-                        <p className="font-medium text-zinc-900">{debtor.name}</p>
+                        <p className="font-medium text-zinc-900 dark:text-zinc-100">{debtor.name}</p>
                         {getStatusBadge(debtor)}
                       </div>
-                      <p className="text-sm text-zinc-500 mt-1">
+                      <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
                         {debtor.overdueDays > 0 
                           ? `${debtor.overdueDays} días de mora` 
                           : 'Sin mora'}
                       </p>
                     </div>
                     <div className="text-right">
-                      <p className="font-semibold text-zinc-900">{formatCOP(debtor.totalDebt)}</p>
+                      <p className="font-semibold text-zinc-900 dark:text-zinc-100">{formatCOP(debtor.totalDebt)}</p>
                       <ArrowRight className="w-4 h-4 text-zinc-400 ml-auto mt-1" />
                     </div>
                   </div>
@@ -255,14 +255,14 @@ export function CreditDashboard() {
         </Card>
 
         {/* Pagos Recientes */}
-        <Card className="border-zinc-200 shadow-sm">
-          <CardHeader className="border-b border-zinc-100">
-            <CardTitle className="text-lg font-semibold text-zinc-900">Pagos Recientes</CardTitle>
-            <p className="text-sm text-zinc-500 mt-1">Últimos abonos registrados</p>
+        <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+          <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
+            <CardTitle className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Pagos Recientes</CardTitle>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Últimos abonos registrados</p>
           </CardHeader>
           <CardContent className="p-0">
             {recentPayments.length === 0 ? (
-              <div className="p-8 text-center text-zinc-500">
+              <div className="p-8 text-center text-zinc-500 dark:text-zinc-400">
                 <CreditCard className="w-12 h-12 mx-auto mb-3 text-zinc-300" />
                 <p>No hay pagos registrados</p>
               </div>
@@ -271,7 +271,7 @@ export function CreditDashboard() {
                 {recentPayments.map((payment) => (
                   <div 
                     key={payment.id}
-                    className="p-4 hover:bg-zinc-50 transition-colors"
+                    className="p-4 hover:bg-zinc-50 dark:bg-zinc-800 transition-colors"
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-3">
@@ -279,12 +279,12 @@ export function CreditDashboard() {
                           {getPaymentIcon(payment.payment_method)}
                         </div>
                         <div>
-                          <p className="font-medium text-zinc-900">{formatCOP(payment.amount)}</p>
-                          <p className="text-sm text-zinc-500 capitalize">{payment.payment_method}</p>
+                          <p className="font-medium text-zinc-900 dark:text-zinc-100">{formatCOP(payment.amount)}</p>
+                          <p className="text-sm text-zinc-500 dark:text-zinc-400 capitalize">{payment.payment_method}</p>
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm text-zinc-600">
+                        <p className="text-sm text-zinc-600 dark:text-zinc-400">
                           {new Date(payment.date).toLocaleDateString('es-CO')}
                         </p>
                         <p className="text-xs text-zinc-400">
@@ -296,7 +296,7 @@ export function CreditDashboard() {
                       </div>
                     </div>
                     {payment.notes && (
-                      <p className="text-sm text-zinc-500 mt-2 ml-13">{payment.notes}</p>
+                      <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2 ml-13">{payment.notes}</p>
                     )}
                   </div>
                 ))}

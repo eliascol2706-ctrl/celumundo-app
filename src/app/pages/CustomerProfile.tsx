@@ -196,7 +196,7 @@ export function CustomerProfile() {
       return <Badge variant="outline" className="bg-emerald-100 text-emerald-700 border-emerald-200">Pagado</Badge>;
     }
     if (invoice.status === 'cancelled') {
-      return <Badge variant="outline" className="bg-zinc-100 text-zinc-700 border-zinc-200">Cancelado</Badge>;
+      return <Badge variant="outline" className="bg-zinc-100 text-zinc-700 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700">Cancelado</Badge>;
     }
 
     if (!invoice.due_date) {
@@ -231,15 +231,15 @@ export function CustomerProfile() {
       invoice: <FileText className="w-4 h-4 text-blue-600" />,
       status_change: <AlertCircle className="w-4 h-4 text-amber-600" />,
       credit_limit_change: <CreditCard className="w-4 h-4 text-purple-600" />,
-      note: <History className="w-4 h-4 text-zinc-600" />
+      note: <History className="w-4 h-4 text-zinc-600 dark:text-zinc-400" />
     };
-    return icons[eventType] || <History className="w-4 h-4 text-zinc-600" />;
+    return icons[eventType] || <History className="w-4 h-4 text-zinc-600 dark:text-zinc-400" />;
   };
 
   if (loading) {
     return (
       <div className="flex items-center justify-center h-screen">
-        <div className="animate-pulse text-zinc-500">Cargando perfil del cliente...</div>
+        <div className="animate-pulse text-zinc-500 dark:text-zinc-400">Cargando perfil del cliente...</div>
       </div>
     );
   }
@@ -269,9 +269,9 @@ export function CustomerProfile() {
   });
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-white dark:bg-zinc-900">
       {/* Header */}
-      <div className="border-b border-zinc-200 bg-white">
+      <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
         <div className="p-6">
           <Button variant="ghost" onClick={() => navigate('/clientes')} className="mb-4">
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -285,10 +285,10 @@ export function CustomerProfile() {
               </div>
               <div>
                 <div className="flex items-center gap-3 mb-2">
-                  <h1 className="text-3xl font-semibold text-zinc-900">{customer.name}</h1>
+                  <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-100">{customer.name}</h1>
                   {getStatusBadge()}
                 </div>
-                <div className="flex items-center gap-4 text-sm text-zinc-600">
+                <div className="flex items-center gap-4 text-sm text-zinc-600 dark:text-zinc-400">
                   <span className="flex items-center gap-1">
                     <CreditCard className="w-4 h-4" />
                     {customer.document}
@@ -338,46 +338,46 @@ export function CustomerProfile() {
       </div>
 
       {/* Métricas de Crédito */}
-      <div className="p-6 border-b border-zinc-100 bg-zinc-50">
+      <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800">
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card className="border-zinc-200 shadow-sm">
+          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-zinc-600">Cupo de Crédito</CardTitle>
+              <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Cupo de Crédito</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-zinc-900">{formatCOP(customer.credit_limit)}</div>
-              <p className="text-xs text-zinc-500 mt-1">Límite aprobado</p>
+              <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{formatCOP(customer.credit_limit)}</div>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Límite aprobado</p>
             </CardContent>
           </Card>
 
-          <Card className="border-zinc-200 shadow-sm">
+          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-zinc-600">Crédito Usado</CardTitle>
+              <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Crédito Usado</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-amber-600">{formatCOP(usedCredit)}</div>
-              <p className="text-xs text-zinc-500 mt-1">
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                 {customer.credit_limit > 0 ? `${((usedCredit / customer.credit_limit) * 100).toFixed(1)}% utilizado` : 'Sin cupo'}
               </p>
             </CardContent>
           </Card>
 
-          <Card className="border-zinc-200 shadow-sm">
+          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-zinc-600">Crédito Disponible</CardTitle>
+              <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Crédito Disponible</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-emerald-600">{formatCOP(availableCredit)}</div>
-              <p className="text-xs text-zinc-500 mt-1">Para nuevas compras</p>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Para nuevas compras</p>
             </CardContent>
           </Card>
 
-          <Card className="border-zinc-200 shadow-sm">
+          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
             <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-zinc-600">Plazo de Pago</CardTitle>
+              <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Plazo de Pago</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-zinc-900">{customer.payment_term} días</div>
+              <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{customer.payment_term} días</div>
               {maxOverdueDays > 0 && (
                 <p className="text-xs text-red-600 mt-1 font-medium">{maxOverdueDays} días de mora</p>
               )}
@@ -406,30 +406,30 @@ export function CustomerProfile() {
 
           {/* Tab de Facturas */}
           <TabsContent value="invoices" className="space-y-4">
-            <Card className="border-zinc-200 shadow-sm">
-              <CardHeader className="border-b border-zinc-100">
+            <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
                 <CardTitle>Facturas</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
                 {invoices.length === 0 ? (
-                  <div className="p-12 text-center text-zinc-500">
-                    <FileText className="w-16 h-16 mx-auto mb-4 text-zinc-300" />
+                  <div className="p-12 text-center text-zinc-500 dark:text-zinc-400">
+                    <FileText className="w-16 h-16 mx-auto mb-4 text-zinc-300 dark:text-zinc-600" />
                     <p className="text-lg font-medium">No hay facturas registradas</p>
                     <p className="text-sm mt-1">Las facturas a crédito aparecerán aquí</p>
                   </div>
                 ) : (
                   <div className="overflow-x-auto">
                     <table className="w-full">
-                      <thead className="bg-zinc-50 border-b border-zinc-200">
+                      <thead className="bg-zinc-50 dark:bg-zinc-800 border-b border-zinc-200 dark:border-zinc-800">
                         <tr>
-                          <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 uppercase">Número</th>
-                          <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 uppercase">Emisión</th>
-                          <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 uppercase">Vencimiento</th>
-                          <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 uppercase">Total</th>
-                          <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 uppercase">Pagado</th>
-                          <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 uppercase">Saldo</th>
-                          <th className="text-center px-6 py-3 text-xs font-medium text-zinc-600 uppercase">Estado</th>
-                          <th className="text-center px-6 py-3 text-xs font-medium text-zinc-600 uppercase">Acciones</th>
+                          <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Número</th>
+                          <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Emisión</th>
+                          <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Vencimiento</th>
+                          <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Total</th>
+                          <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Pagado</th>
+                          <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Saldo</th>
+                          <th className="text-center px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Estado</th>
+                          <th className="text-center px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Acciones</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100">
@@ -438,17 +438,17 @@ export function CustomerProfile() {
                           const balance = invoice.credit_balance || 0;
 
                           return (
-                            <tr key={invoice.id} className="hover:bg-zinc-50">
-                              <td className="px-6 py-4 font-medium text-zinc-900">{invoice.number}</td>
-                              <td className="px-6 py-4 text-sm text-zinc-600">
+                            <tr key={invoice.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800">
+                              <td className="px-6 py-4 font-medium text-zinc-900 dark:text-zinc-100">{invoice.number}</td>
+                              <td className="px-6 py-4 text-sm text-zinc-600 dark:text-zinc-400">
                                 {new Date(invoice.date).toLocaleDateString('es-CO')}
                               </td>
-                              <td className="px-6 py-4 text-sm text-zinc-600">
+                              <td className="px-6 py-4 text-sm text-zinc-600 dark:text-zinc-400">
                                 {invoice.due_date
                                   ? new Date(invoice.due_date).toLocaleDateString('es-CO')
                                   : 'Sin fecha'}
                               </td>
-                              <td className="px-6 py-4 text-right font-medium text-zinc-900">
+                              <td className="px-6 py-4 text-right font-medium text-zinc-900 dark:text-zinc-100">
                                 {formatCOP(invoice.total)}
                               </td>
                               <td className="px-6 py-4 text-right text-emerald-600">{formatCOP(paid)}</td>
@@ -484,8 +484,8 @@ export function CustomerProfile() {
 
           {/* Tab de Pagos */}
           <TabsContent value="payments" className="space-y-4">
-            <Card className="border-zinc-200 shadow-sm">
-              <CardHeader className="border-b border-zinc-100">
+            <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
                 <CardTitle>Historial de Pagos</CardTitle>
               </CardHeader>
               <CardContent className="p-0">
@@ -496,14 +496,14 @@ export function CustomerProfile() {
 
           {/* Tab de Historial */}
           <TabsContent value="history" className="space-y-4">
-            <Card className="border-zinc-200 shadow-sm">
-              <CardHeader className="border-b border-zinc-100">
+            <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <CardHeader className="border-b border-zinc-100 dark:border-zinc-800">
                 <CardTitle>Línea de Tiempo</CardTitle>
               </CardHeader>
               <CardContent className="p-6">
                 {history.length === 0 ? (
-                  <div className="text-center text-zinc-500 py-8">
-                    <History className="w-16 h-16 mx-auto mb-4 text-zinc-300" />
+                  <div className="text-center text-zinc-500 dark:text-zinc-400 py-8">
+                    <History className="w-16 h-16 mx-auto mb-4 text-zinc-300 dark:text-zinc-600" />
                     <p className="text-lg font-medium">No hay eventos registrados</p>
                   </div>
                 ) : (
@@ -511,7 +511,7 @@ export function CustomerProfile() {
                     {history.map((event, index) => (
                       <div key={event.id} className="flex gap-4">
                         <div className="flex flex-col items-center">
-                          <div className="w-10 h-10 rounded-full bg-zinc-100 flex items-center justify-center flex-shrink-0">
+                          <div className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
                             {getHistoryIcon(event.event_type)}
                           </div>
                           {index < history.length - 1 && (
@@ -519,11 +519,11 @@ export function CustomerProfile() {
                           )}
                         </div>
                         <div className="flex-1 pb-6">
-                          <p className="text-sm font-medium text-zinc-900">{event.description}</p>
+                          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">{event.description}</p>
                           {event.amount && (
                             <p className="text-sm text-emerald-600 font-medium mt-1">{formatCOP(event.amount)}</p>
                           )}
-                          <p className="text-xs text-zinc-500 mt-1">
+                          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
                             {new Date(event.created_at!).toLocaleString('es-CO')} • {event.registered_by}
                           </p>
                         </div>
@@ -594,7 +594,7 @@ function PaymentsTab({ invoices }: { invoices: Invoice[] }) {
 
   if (loading) {
     return (
-      <div className="p-8 text-center text-zinc-500">
+      <div className="p-8 text-center text-zinc-500 dark:text-zinc-400">
         <div className="animate-pulse">Cargando pagos...</div>
       </div>
     );
@@ -602,8 +602,8 @@ function PaymentsTab({ invoices }: { invoices: Invoice[] }) {
 
   if (payments.length === 0) {
     return (
-      <div className="p-12 text-center text-zinc-500">
-        <Receipt className="w-16 h-16 mx-auto mb-4 text-zinc-300" />
+      <div className="p-12 text-center text-zinc-500 dark:text-zinc-400">
+        <Receipt className="w-16 h-16 mx-auto mb-4 text-zinc-300 dark:text-zinc-600" />
         <p className="text-lg font-medium">No hay pagos registrados</p>
       </div>
     );
@@ -612,28 +612,28 @@ function PaymentsTab({ invoices }: { invoices: Invoice[] }) {
   return (
     <div className="divide-y divide-zinc-100">
       {payments.map((payment) => (
-        <div key={payment.id} className="p-4 hover:bg-zinc-50 transition-colors">
+        <div key={payment.id} className="p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-full bg-emerald-100 flex items-center justify-center text-xl">
                 {getPaymentIcon(payment.payment_method)}
               </div>
               <div>
-                <p className="font-medium text-zinc-900">{formatCOP(payment.amount)}</p>
-                <p className="text-sm text-zinc-500 capitalize">
+                <p className="font-medium text-zinc-900 dark:text-zinc-100">{formatCOP(payment.amount)}</p>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400 capitalize">
                   {payment.payment_method} • Factura {payment.invoice_number}
                 </p>
               </div>
             </div>
             <div className="text-right">
-              <p className="text-sm text-zinc-600">{new Date(payment.date).toLocaleDateString('es-CO')}</p>
-              <p className="text-xs text-zinc-400">
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">{new Date(payment.date).toLocaleDateString('es-CO')}</p>
+              <p className="text-xs text-zinc-400 dark:text-zinc-500">
                 {new Date(payment.date).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
               </p>
             </div>
           </div>
           {payment.notes && (
-            <p className="text-sm text-zinc-500 mt-2 ml-15">{payment.notes}</p>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2 ml-15">{payment.notes}</p>
           )}
         </div>
       ))}

@@ -41,6 +41,7 @@ export function Products() {
   const [isSubmitting, setIsSubmitting] = useState(false); // Prevenir doble clic
   const [activeIdTab, setActiveIdTab] = useState<'available' | 'sold' | 'warranty'>('available'); // Tab activa en modal de IDs
   const [selectedIdForNote, setSelectedIdForNote] = useState<{ id: string; note: string } | null>(null); // ID seleccionada para ver nota
+  const [isLoadingCode, setIsLoadingCode] = useState(false); // Indicador de carga del código
 
   // Estados para el sistema de impresión
   const [isPrintOptionsOpen, setIsPrintOptionsOpen] = useState(false);
@@ -521,11 +522,10 @@ export function Products() {
         useUnitIds: product.use_unit_ids || false,
       });
     } else {
+      // Nuevo producto: abrir modal inmediatamente con código vacío
       setEditingProduct(null);
-      const { base } = await getNextProductCode();
-      // Al crear nuevo, solo mostrar el código base sin extensión de variante
       setFormData({
-        code: base,
+        code: '', // Inicialmente vacío
         name: '',
         description: '',
         currentCost: '',
@@ -544,6 +544,35 @@ export function Products() {
     }
     setIsDialogOpen(true);
   };
+
+  // Calcular código automáticamente cuando se abre el modal para nuevo producto
+  useEffect(() => {
+    const calculateCode = async () => {
+      // Solo calcular si el modal está abierto, no es edición, y el código está vacío
+      if (isDialogOpen && !editingProduct && formData.code === '') {
+        setIsLoadingCode(true);
+        try {
+          const { base } = await getNextProductCode();
+          setFormData(prev => ({
+            ...prev,
+            code: base
+          }));
+        } catch (error) {
+          console.error('Error al generar código:', error);
+          toast.error('Error al generar código del producto');
+        } finally {
+          setIsLoadingCode(false);
+        }
+      }
+    };
+
+    calculateCode();
+
+    // Limpiar estado de loading cuando se cierre el modal
+    if (!isDialogOpen) {
+      setIsLoadingCode(false);
+    }
+  }, [isDialogOpen, editingProduct]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -968,15 +997,22 @@ export function Products() {
                 <Label htmlFor="code">
                   Código {!editingProduct && <span className="text-xs text-green-600">(Generado automáticamente)</span>}
                 </Label>
-                <Input
-                  id="code"
-                  value={formData.code}
-                  onChange={(e) => setFormData({ ...formData, code: e.target.value })}
-                  readOnly={!editingProduct}
-                  disabled={!editingProduct}
-                  className={!editingProduct ? 'bg-green-50 dark:bg-green-950 font-mono text-lg font-bold text-green-600 dark:text-green-400 cursor-not-allowed' : 'font-mono'}
-                  required
-                />
+                <div className="relative">
+                  <Input
+                    id="code"
+                    value={formData.code}
+                    onChange={(e) => setFormData({ ...formData, code: e.target.value })}
+                    readOnly={!editingProduct}
+                    disabled={!editingProduct}
+                    className={!editingProduct ? 'bg-green-50 dark:bg-green-950 font-mono text-lg font-bold text-green-600 dark:text-green-400 cursor-not-allowed' : 'font-mono'}
+                    required
+                  />
+                  {isLoadingCode && (
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                      <Loader2 className="h-5 w-5 animate-spin text-green-600 dark:text-green-400" />
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="category">Categoría</Label>
