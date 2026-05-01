@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Plus, Package, TrendingUp, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight, Trash2, Edit, CheckCircle, XCircle, X } from 'lucide-react';
+import { Search, Plus, Package, TrendingUp, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight, Trash2, Edit, CheckCircle, XCircle, X, Loader2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Textarea } from '../components/ui/textarea';
 import { formatCOP } from '../lib/currency';
-import { getExchanges, getAllProducts, getInvoices, addExchange, deleteExchange, finalizeExchange, cancelExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, type Exchange, type ExchangeProduct, type Product, type Invoice } from '../lib/supabase';
+import { getExchanges, getAllProducts, getInvoices, addExchange, deleteExchange, finalizeExchange, cancelExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, searchProductsForInvoice, type Exchange, type ExchangeProduct, type Product, type Invoice } from '../lib/supabase';
 import { extractIds, type UnitIdWithNote } from '../lib/unit-ids-utils';
 import { toast } from 'sonner';
 
@@ -26,6 +26,9 @@ export default function Exchanges() {
   const [productSelectorOpen, setProductSelectorOpen] = useState(false);
   const [selectingFor, setSelectingFor] = useState<'original' | 'new'>('original');
   const [productSearchTerm, setProductSearchTerm] = useState('');
+  const [searchedProducts, setSearchedProducts] = useState<Product[]>([]);
+  const [isSearchingProducts, setIsSearchingProducts] = useState(false);
+  const [hasSearched, setHasSearched] = useState(false);
 
   // Estadísticas
   const [stats, setStats] = useState({
@@ -123,6 +126,29 @@ export default function Exchanges() {
     }
   };
 
+  const handleSearchProducts = async () => {
+    if (!productSearchTerm.trim()) {
+      toast.error('Ingresa un término de búsqueda');
+      return;
+    }
+
+    setIsSearchingProducts(true);
+    try {
+      const results = await searchProductsForInvoice(productSearchTerm);
+      setSearchedProducts(results);
+      setHasSearched(true);
+
+      if (results.length === 0) {
+        toast.info('No se encontraron productos');
+      }
+    } catch (error) {
+      console.error('Error searching products:', error);
+      toast.error('Error al buscar productos');
+    } finally {
+      setIsSearchingProducts(false);
+    }
+  };
+
   const handleOpenDialog = () => {
     resetForm();
     setIsDialogOpen(true);
@@ -144,6 +170,10 @@ export default function Exchanges() {
     setPaymentTransfer(0);
     setPaymentOther(0);
     setNotes('');
+    // Limpiar búsqueda de productos
+    setProductSearchTerm('');
+    setSearchedProducts([]);
+    setHasSearched(false);
   };
 
   const handleAddOriginalProduct = () => {
@@ -293,7 +323,7 @@ export default function Exchanges() {
   };
 
   const handleSelectTempProduct = (productId: string) => {
-    const product = products.find(p => p.id === productId);
+    const product = searchedProducts.find(p => p.id === productId);
     if (product) {
       setTempProduct(product);
       setTempPrice(product.final_price);
@@ -314,7 +344,7 @@ export default function Exchanges() {
 
   const handleSelectFinalizeTempProduct = (productId: string) => {
     // Solo se usa en el modal de finalización
-    const product = products.find(p => p.id === productId);
+    const product = searchedProducts.find(p => p.id === productId);
     if (product && finalizeDialogOpen) {
       setFinalizeTempProduct(product);
       setFinalizeTempPrice(product.final_price);
@@ -444,9 +474,9 @@ export default function Exchanges() {
   const filteredExchanges = exchanges.filter(exchange => {
     const searchLower = searchTerm.toLowerCase();
     return (
-      exchange.exchange_number.toLowerCase().includes(searchLower) ||
-      exchange.original_product_name.toLowerCase().includes(searchLower) ||
-      exchange.new_product_name.toLowerCase().includes(searchLower) ||
+      exchange.exchange_number?.toLowerCase().includes(searchLower) ||
+      exchange.original_product_name?.toLowerCase().includes(searchLower) ||
+      exchange.new_product_name?.toLowerCase().includes(searchLower) ||
       exchange.customer_name?.toLowerCase().includes(searchLower) ||
       exchange.invoice_number?.toLowerCase().includes(searchLower)
     );
@@ -886,6 +916,9 @@ export default function Exchanges() {
               <Button
                 onClick={() => {
                   setSelectingFor('original');
+                  setProductSearchTerm('');
+                  setSearchedProducts([]);
+                  setHasSearched(false);
                   setProductSelectorOpen(true);
                 }}
                 className="w-full"
@@ -929,6 +962,9 @@ export default function Exchanges() {
                 <Button
                   onClick={() => {
                     setSelectingFor('new');
+                    setProductSearchTerm('');
+                    setSearchedProducts([]);
+                    setHasSearched(false);
                     setProductSelectorOpen(true);
                   }}
                   className="w-full"
@@ -1132,34 +1168,61 @@ export default function Exchanges() {
 
           <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
             {/* Buscador */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-              <Input
-                placeholder="Buscar por código, nombre o precio..."
-                value={productSearchTerm}
-                onChange={(e) => setProductSearchTerm(e.target.value)}
-                className="pl-10"
-                autoFocus
-              />
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                <Input
+                  placeholder="Buscar por código, nombre o precio..."
+                  value={productSearchTerm}
+                  onChange={(e) => setProductSearchTerm(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSearchProducts();
+                    }
+                  }}
+                  className="pl-10"
+                  autoFocus
+                />
+              </div>
+              <Button
+                onClick={handleSearchProducts}
+                disabled={isSearchingProducts || !productSearchTerm.trim()}
+              >
+                {isSearchingProducts ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Buscando...
+                  </>
+                ) : (
+                  <>
+                    <Search className="mr-2 h-4 w-4" />
+                    Buscar
+                  </>
+                )}
+              </Button>
             </div>
 
             {/* Lista de productos */}
             <div className="flex-1 overflow-y-auto border border-border rounded-lg">
               {(() => {
-                const filtered = products.filter(product => {
-                  const search = productSearchTerm.toLowerCase();
-                  
+                // Si no se ha buscado, mostrar mensaje inicial
+                if (!hasSearched) {
+                  return (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p className="font-medium">Ingresa un término de búsqueda</p>
+                      <p className="text-sm mt-1">Busca por código, nombre, categoría o precio</p>
+                    </div>
+                  );
+                }
+
+                // Filtrar productos según si es para nuevo o original
+                const filtered = searchedProducts.filter(product => {
                   // Si estamos seleccionando producto nuevo, filtrar solo los que tengan stock
                   if (selectingFor === 'new' && product.stock <= 0) {
                     return false;
                   }
-                  
-                  return (
-                    product.code.toLowerCase().includes(search) ||
-                    product.name.toLowerCase().includes(search) ||
-                    product.category.toLowerCase().includes(search) ||
-                    product.final_price.toString().includes(search)
-                  );
+                  return true;
                 });
 
                 if (filtered.length === 0) {
@@ -1253,21 +1316,15 @@ export default function Exchanges() {
             </div>
 
             {/* Contador */}
-            {(() => {
-              const filtered = products.filter(product => {
-                const search = productSearchTerm.toLowerCase();
+            {hasSearched && (() => {
+              const filtered = searchedProducts.filter(product => {
                 if (selectingFor === 'new' && product.stock <= 0) return false;
-                return (
-                  product.code.toLowerCase().includes(search) ||
-                  product.name.toLowerCase().includes(search) ||
-                  product.category.toLowerCase().includes(search) ||
-                  product.final_price.toString().includes(search)
-                );
+                return true;
               });
 
               return (
                 <p className="text-sm text-muted-foreground text-center">
-                  Mostrando {filtered.length} de {selectingFor === 'new' ? products.filter(p => p.stock > 0).length : products.length} productos
+                  Mostrando {filtered.length} producto{filtered.length !== 1 ? 's' : ''} encontrado{filtered.length !== 1 ? 's' : ''}
                 </p>
               );
             })()}
@@ -1495,6 +1552,9 @@ export default function Exchanges() {
               setTempQuantity(1);
               setTempPrice(0);
               setTempUnitIds([]);
+              setProductSearchTerm('');
+              setSearchedProducts([]);
+              setHasSearched(false);
             }}>
               Cancelar
             </Button>
@@ -1581,6 +1641,9 @@ export default function Exchanges() {
                 <Button
                   onClick={() => {
                     setSelectingFor('new');
+                    setProductSearchTerm('');
+                    setSearchedProducts([]);
+                    setHasSearched(false);
                     setProductSelectorOpen(true);
                   }}
                   className="w-full"

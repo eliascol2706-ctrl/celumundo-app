@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router';
-import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2 } from 'lucide-react';
+import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -56,6 +56,10 @@ export function InvoicesMenu() {
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'efectivo' | 'transferencia' | 'nequi' | 'daviplata' | 'otros' | 'mixto'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending_confirmation' | 'pending' | 'partial_return'>('all');
 
+  // Estados para paginación
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
+
   // Estados para modal de impresión de factura recién creada
   const [showPrintOptionsModal, setShowPrintOptionsModal] = useState(false);
   const [newlyCreatedInvoice, setNewlyCreatedInvoice] = useState<Invoice | null>(null);
@@ -85,6 +89,11 @@ export function InvoicesMenu() {
 
     checkNewInvoice();
   }, []);
+
+  // Resetear página cuando cambian los filtros
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, periodFilter, sortBy, paymentFilter, statusFilter]);
 
   const loadStats = async () => {
     setLoading(true);
@@ -271,6 +280,20 @@ export function InvoicesMenu() {
     });
 
     return filtered;
+  };
+
+  // Función para obtener facturas paginadas
+  const getPaginatedInvoices = () => {
+    const filtered = getFilteredInvoices();
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    const endIndex = startIndex + itemsPerPage;
+    return filtered.slice(startIndex, endIndex);
+  };
+
+  // Calcular información de paginación
+  const getTotalPages = () => {
+    const filtered = getFilteredInvoices();
+    return Math.ceil(filtered.length / itemsPerPage);
   };
 
   const handleNavigateToRegular = async () => {
@@ -901,7 +924,7 @@ export function InvoicesMenu() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 bg-white dark:bg-zinc-950">
-                        {getFilteredInvoices().map((invoice) => (
+                        {getPaginatedInvoices().map((invoice) => (
                           <tr
                             key={invoice.id}
                             className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors"
@@ -1052,6 +1075,40 @@ export function InvoicesMenu() {
                         ))}
                       </tbody>
                     </table>
+                  </div>
+                </div>
+              )}
+
+              {/* Paginación */}
+              {!loading && getFilteredInvoices().length > 0 && getTotalPages() > 1 && (
+                <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                    <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400">
+                      Mostrando {(currentPage - 1) * itemsPerPage + 1} a {Math.min(currentPage * itemsPerPage, getFilteredInvoices().length)} de {getFilteredInvoices().length} facturas
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1}
+                        className="h-8 w-8 p-0"
+                      >
+                        <ChevronLeft className="w-4 h-4" />
+                      </Button>
+                      <span className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 min-w-[80px] text-center">
+                        Página {currentPage} de {getTotalPages()}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setCurrentPage(prev => Math.min(getTotalPages(), prev + 1))}
+                        disabled={currentPage === getTotalPages()}
+                        className="h-8 w-8 p-0"
+                      >
+                        <ChevronRight className="w-4 h-4" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
               )}

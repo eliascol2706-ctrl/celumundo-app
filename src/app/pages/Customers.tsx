@@ -156,8 +156,8 @@ export function Customers() {
 
   // Filtrar facturas de crédito por cliente
   const getCustomerInvoices = (customerDocument: string) => {
-    return invoices.filter(inv => 
-      inv.is_credit && 
+    return invoices.filter(inv =>
+      inv.is_credit &&
       inv.customer_document === customerDocument
     );
   };
@@ -300,38 +300,38 @@ export function Customers() {
                     {/* Facturas del Cliente */}
                     {customerInvoices.length > 0 && (
                       <div className="mt-4 space-y-2">
-                        <h4 className="text-sm font-semibold text-gray-700">Facturas</h4>
+                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Facturas</h4>
                         <div className="space-y-2">
                           {customerInvoices.map((invoice) => (
                             <div
                               key={invoice.id}
-                              className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                              className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg"
                             >
                               <div className="flex-1">
                                 <div className="flex items-center gap-2">
-                                  <span className="font-mono text-sm font-semibold text-gray-900">
+                                  <span className="font-mono text-sm font-semibold text-gray-900 dark:text-gray-100">
                                     {invoice.number}
                                   </span>
                                   <span
                                     className={`px-2 py-0.5 text-xs font-medium rounded-full ${
                                       invoice.status === 'paid'
-                                        ? 'bg-green-100 text-green-700'
-                                        : 'bg-orange-100 text-orange-700'
+                                        ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                                        : 'bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300'
                                     }`}
                                   >
                                     {invoice.status === 'paid' ? 'Pagada' : 'Pendiente'}
                                   </span>
                                 </div>
-                                <p className="text-xs text-gray-500 mt-1">
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                                   {new Date(invoice.date).toLocaleDateString('es-CO')}
                                 </p>
                               </div>
                               <div className="text-right mr-4">
-                                <p className="text-sm font-semibold text-gray-900">
+                                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                                   {formatCOP(invoice.total)}
                                 </p>
                                 {invoice.status === 'pending' && (
-                                  <p className="text-xs text-red-600">
+                                  <p className="text-xs text-red-600 dark:text-red-400">
                                     Saldo: {formatCOP(invoice.credit_balance || 0)}
                                   </p>
                                 )}
@@ -351,7 +351,7 @@ export function Customers() {
                                   size="sm"
                                   variant="outline"
                                   onClick={() => handleViewInvoice(invoice)}
-                                  className="border-blue-600 text-blue-600 hover:bg-blue-50"
+                                  className="border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
                                 >
                                   <Eye className="h-4 w-4 mr-1" />
                                   Ver

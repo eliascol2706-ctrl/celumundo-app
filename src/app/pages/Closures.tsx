@@ -247,9 +247,10 @@ export function Closures() {
       return paymentDate === today;
     });
 
-    // FILTRAR CAMBIOS DEL DÍA - usar extractColombiaDate para evitar problemas de zona horaria
+    // FILTRAR CAMBIOS DEL DÍA - usar extractColombiaDate para evitar problemas de zona horaria (excluir cambios pendientes)
     const todayExchanges = exchanges.filter(exchange => {
       if (!exchange.date) return false;
+      if (exchange.status === 'pending') return false; // Excluir cambios pendientes
       const exchangeDate = extractColombiaDate(exchange.date);
       return exchangeDate === today;
     });
@@ -264,9 +265,10 @@ export function Closures() {
     console.log(`[DEBUG Cierres] Órdenes de servicio técnico: ${todayServiceOrders.length}`);
     console.log(`[DEBUG Cierres] Ingresos servicio técnico: ${formatCOP(serviceRevenue)}`);
 
-    // Calcular impacto de cambios del día
+    // Calcular impacto de cambios del día (suma de todos los price_difference)
     const exchangeImpact = todayExchanges.reduce((sum, exchange) => {
-      return sum + (exchange.price_difference || 0);
+      const diff = Number(exchange.price_difference) || 0;
+      return sum + diff;
     }, 0);
 
     console.log(`[DEBUG Cierres] Impacto de cambios: ${formatCOP(exchangeImpact)}`);
@@ -308,37 +310,51 @@ export function Closures() {
     const prevMonth = String(currentDate.getMonth() + 1).padStart(2, '0');
     const previousMonthStr = `${prevYear}-${prevMonth}`;
 
-    // IMPORTANTE: Solo facturas REGULARES pagadas (excluir crédito para evitar doble contabilidad con abonos)
-    const previousMonthInvoices = invoices.filter(inv => {
-      if (!inv.date) return false;
-      const invDate = extractColombiaDate(inv.date);
-      return invDate.substring(0, 7) === previousMonthStr && (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit;
-    });
-    const previousMonthRevenue = previousMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
+    // Buscar el cierre mensual del mes anterior guardado
+    const previousMonthClosure = monthlyClosures.find(closure => closure.month === previousMonthStr);
 
-    // Calcular impacto de cambios del mes anterior
-    const previousMonthExchanges = exchanges.filter(ex => {
-      if (!ex.date) return false;
-      const exDate = extractColombiaDate(ex.date);
-      return exDate.substring(0, 7) === previousMonthStr;
-    });
-    const previousMonthExchangeImpact = previousMonthExchanges.reduce((sum, exchange) => {
-      if (exchange.price_difference > 0) {
-        return sum + exchange.price_difference;
-      } else if (exchange.price_difference < 0) {
-        return sum + exchange.price_difference;
-      }
-      return sum;
-    }, 0);
+    let previousMonthNetRevenue = 0;
 
-    // NUEVO: Calcular ingresos de servicio técnico del mes anterior
-    const previousMonthServiceOrders = serviceOrders.filter(order => {
-      const orderDate = extractColombiaDate(order.received_date);
-      return orderDate.substring(0, 7) === previousMonthStr && order.payment_status === 'paid' && order.final_price;
-    });
-    const previousMonthServiceRevenue = previousMonthServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
+    // Si existe cierre mensual guardado, usar su total_revenue
+    if (previousMonthClosure) {
+      previousMonthNetRevenue = previousMonthClosure.total_revenue || 0;
+      console.log('[CIERRE MENSUAL] Usando total_revenue del cierre guardado del mes anterior:', {
+        mes: previousMonthStr,
+        total_revenue: previousMonthNetRevenue
+      });
+    } else {
+      // Si no existe cierre guardado, calcular dinámicamente (fallback)
+      console.log('[CIERRE MENSUAL] No hay cierre guardado del mes anterior, calculando dinámicamente');
 
-    const previousMonthNetRevenue = previousMonthRevenue + previousMonthExchangeImpact + previousMonthServiceRevenue;
+      // IMPORTANTE: Solo facturas REGULARES pagadas (excluir crédito para evitar doble contabilidad con abonos)
+      const previousMonthInvoices = invoices.filter(inv => {
+        if (!inv.date) return false;
+        const invDate = extractColombiaDate(inv.date);
+        return invDate.substring(0, 7) === previousMonthStr && (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit;
+      });
+      const previousMonthRevenue = previousMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
+
+      // Calcular impacto de cambios del mes anterior (excluir cambios pendientes)
+      const previousMonthExchanges = exchanges.filter(ex => {
+        if (!ex.date) return false;
+        if (ex.status === 'pending') return false; // Excluir cambios pendientes
+        const exDate = extractColombiaDate(ex.date);
+        return exDate.substring(0, 7) === previousMonthStr;
+      });
+      const previousMonthExchangeImpact = previousMonthExchanges.reduce((sum, exchange) => {
+        const diff = Number(exchange.price_difference) || 0;
+        return sum + diff;
+      }, 0);
+
+      // Calcular ingresos de servicio técnico del mes anterior
+      const previousMonthServiceOrders = serviceOrders.filter(order => {
+        const orderDate = extractColombiaDate(order.received_date);
+        return orderDate.substring(0, 7) === previousMonthStr && order.payment_status === 'paid' && order.final_price;
+      });
+      const previousMonthServiceRevenue = previousMonthServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
+
+      previousMonthNetRevenue = previousMonthRevenue + previousMonthExchangeImpact + previousMonthServiceRevenue;
+    }
 
     // IMPORTANTE: Solo facturas REGULARES pagadas (excluir crédito para evitar doble contabilidad con abonos)
     const currentMonthInvoices = invoices.filter(inv => {
@@ -348,20 +364,38 @@ export function Closures() {
     });
     const currentMonthRevenue = currentMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
-    // Calcular impacto de cambios del mes actual
+    // Calcular impacto de cambios del mes actual (excluir cambios pendientes)
     const currentMonthExchanges = exchanges.filter(ex => {
       if (!ex.date) return false;
+      if (ex.status === 'pending') return false; // Excluir cambios pendientes
       const exDate = extractColombiaDate(ex.date);
-      return exDate.substring(0, 7) === currentMonthStr;
+      const matchesMonth = exDate.substring(0, 7) === currentMonthStr;
+      return matchesMonth;
     });
+
+    console.log('[CIERRE MENSUAL] Exchanges del mes:', {
+      mesActual: currentMonthStr,
+      totalExchanges: exchanges.length,
+      exchangesDelMes: currentMonthExchanges.length,
+      exchanges: currentMonthExchanges.map(ex => ({
+        fecha: extractColombiaDate(ex.date),
+        price_difference: ex.price_difference,
+        customer: ex.customer_name
+      }))
+    });
+
     const currentMonthExchangeImpact = currentMonthExchanges.reduce((sum, exchange) => {
-      if (exchange.price_difference > 0) {
-        return sum + exchange.price_difference; // Cliente pagó diferencia
-      } else if (exchange.price_difference < 0) {
-        return sum + exchange.price_difference; // Se devolvió dinero (negativo)
-      }
-      return sum;
+      const diff = Number(exchange.price_difference) || 0;
+      console.log('[CIERRE MENSUAL] Sumando exchange:', {
+        price_difference: exchange.price_difference,
+        diff: diff,
+        sumaActual: sum,
+        nuevaSuma: sum + diff
+      });
+      return sum + diff;
     }, 0);
+
+    console.log('[CIERRE MENSUAL] Impacto total de cambios:', currentMonthExchangeImpact);
 
     // NUEVO: Calcular ingresos de servicio técnico del mes actual
     const currentMonthServiceOrders = serviceOrders.filter(order => {
@@ -400,6 +434,12 @@ export function Closures() {
 
     // Los ingresos netos incluyen las facturas pagadas + el impacto de cambios + servicio técnico
     // Las facturas 'returned' ya no se cuentan en currentMonthRevenue
+    console.log('[CIERRE MENSUAL] Calculando netRevenue:', {
+      currentMonthRevenue,
+      currentMonthExchangeImpact,
+      currentMonthServiceRevenue,
+      suma: currentMonthRevenue + currentMonthExchangeImpact + currentMonthServiceRevenue
+    });
     const netRevenue = currentMonthRevenue + currentMonthExchangeImpact + currentMonthServiceRevenue;
 
     // NUEVO: Ingresos por Factura (TODAS las facturas excepto devueltas completamente y canceladas + impacto por cambios)
@@ -508,6 +548,15 @@ export function Closures() {
       profitFromCredit += (revenue - cost);
     });
 
+    console.log('[CIERRE MENSUAL] Datos finales:', {
+      netRevenue,
+      currentMonthExchangeImpact,
+      currentMonthServiceRevenue,
+      currentMonthRevenue,
+      totalCreditPayments,
+      ingresosPorFactura
+    });
+
     return {
       closures: currentMonthClosures,
       totalRevenue,
@@ -518,7 +567,6 @@ export function Closures() {
       creditComparisonData,
       dailySalesData,
       currentMonthRevenue,
-      previousMonthRevenue,
       netRevenue,
       previousMonthNetRevenue,
       totalProductCost,
@@ -527,6 +575,7 @@ export function Closures() {
       totalCreditPayments, // NUEVO: Total de abonos de créditos del mes
       profitFromCredit, // NUEVO: Ganancias de facturas a crédito del mes
       ingresosPorFactura, // NUEVO: Ingresos por factura (todas las facturas + impacto cambios)
+      exchangeImpact: currentMonthExchangeImpact, // NUEVO: Impacto de cambios por separado
     };
   };
 

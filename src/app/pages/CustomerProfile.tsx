@@ -17,7 +17,9 @@ import {
   Receipt,
   History,
   Lock,
-  Unlock
+  Unlock,
+  Link,
+  Copy
 } from 'lucide-react';
 import {
   getCustomerByDocument,
@@ -36,6 +38,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
+import { Input } from '../components/ui/input';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
 import { PaymentDialog } from '../components/PaymentDialog';
@@ -51,6 +55,7 @@ export function CustomerProfile() {
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
+  const [showTrackingLinkDialog, setShowTrackingLinkDialog] = useState(false);
 
   useEffect(() => {
     if (document) {
@@ -166,6 +171,10 @@ export function CustomerProfile() {
       toast.error('Error al actualizar el estado del cliente');
     }
     setIsUpdating(false);
+  };
+
+  const handleCopyTrackingLink = () => {
+    setShowTrackingLinkDialog(true);
   };
 
   const getStatusBadge = () => {
@@ -315,24 +324,36 @@ export function CustomerProfile() {
               </div>
             </div>
 
-            <Button
-              onClick={handleToggleBlock}
-              disabled={isUpdating}
-              variant={customer.blocked ? 'default' : 'outline'}
-              className={customer.blocked ? 'bg-emerald-600 hover:bg-emerald-700' : 'border-red-300 text-red-600 hover:bg-red-50'}
-            >
-              {customer.blocked ? (
-                <>
-                  <Unlock className="w-4 h-4 mr-2" />
-                  Desbloquear Cliente
-                </>
-              ) : (
-                <>
-                  <Lock className="w-4 h-4 mr-2" />
-                  Bloquear Cliente
-                </>
-              )}
-            </Button>
+            <div className="flex gap-2">
+              <Button
+                onClick={handleCopyTrackingLink}
+                variant="outline"
+                className="border-purple-300 text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-950"
+              >
+                <Link className="w-4 h-4 mr-2" />
+                Link de Seguimiento
+                <Copy className="w-3 h-3 ml-2" />
+              </Button>
+
+              <Button
+                onClick={handleToggleBlock}
+                disabled={isUpdating}
+                variant={customer.blocked ? 'default' : 'outline'}
+                className={customer.blocked ? 'bg-emerald-600 hover:bg-emerald-700' : 'border-red-300 text-red-600 hover:bg-red-50'}
+              >
+                {customer.blocked ? (
+                  <>
+                    <Unlock className="w-4 h-4 mr-2" />
+                    Desbloquear Cliente
+                  </>
+                ) : (
+                  <>
+                    <Lock className="w-4 h-4 mr-2" />
+                    Bloquear Cliente
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
@@ -549,6 +570,40 @@ export function CustomerProfile() {
           onPaymentSuccess={loadCustomerData}
         />
       )}
+
+      {/* Tracking Link Dialog */}
+      <Dialog open={showTrackingLinkDialog} onOpenChange={setShowTrackingLinkDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Link className="w-5 h-5 text-purple-600" />
+              Link de Seguimiento
+            </DialogTitle>
+            <DialogDescription>
+              Comparte este link con tu cliente para que pueda ver su estado de cuenta
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Link del cliente
+              </label>
+              <Input
+                readOnly
+                value={customer ? `https://celumundo-app.vercel.app/seguimiento-cliente/${customer.document}` : ''}
+                className="font-mono text-sm"
+                onClick={(e) => {
+                  const target = e.target as HTMLInputElement;
+                  target.select();
+                }}
+              />
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                Haz clic en el link para seleccionarlo y copiarlo
+              </p>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

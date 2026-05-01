@@ -7,7 +7,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { formatCOP } from '../lib/currency';
-import { addMonthlyClosure, getCurrentUser } from '../lib/supabase';
+import { addMonthlyClosure, getCurrentUser, getColombiaDate } from '../lib/supabase';
 import { toast } from 'sonner';
 
 type Phase = 1 | 2;
@@ -32,6 +32,7 @@ interface MonthlyClosureDialogProps {
     totalCreditPayments?: number; // NUEVO: Total de abonos de créditos del mes
     profitFromCredit?: number; // NUEVO: Ganancias de facturas a crédito del mes
     ingresosPorFactura?: number; // NUEVO: Ingresos por factura (todas las facturas + impacto cambios)
+    exchangeImpact?: number; // NUEVO: Impacto de cambios por separado
   };
   onSuccess: () => void;
 }
@@ -75,8 +76,26 @@ export function MonthlyClosureDialog({
     // Simular procesamiento
     setTimeout(async () => {
       try {
-        const currentMonth = new Date().toISOString().substring(0, 7);
-        const currentYear = new Date().getFullYear();
+        // Usar la fecha de Colombia (GMT-5) en lugar de UTC
+        const colombiaDate = getColombiaDate(); // Formato YYYY-MM-DD
+        const currentMonth = colombiaDate.substring(0, 7); // YYYY-MM
+        const currentYear = parseInt(colombiaDate.substring(0, 4), 10);
+
+        // Obtener fecha y hora de Colombia en formato ISO
+        const now = new Date();
+        const formatter = new Intl.DateTimeFormat('en-CA', {
+          timeZone: 'America/Bogota',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false
+        });
+        const parts = formatter.formatToParts(now);
+        const get = (type: string) => parts.find(p => p.type === type)?.value || '';
+        const closedAtISO = `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}-05:00`;
 
         // Calcular profit_generated y profit_collected sumando los cierres diarios
         const profitGenerated = monthlyStats.closures.reduce((sum, closure) => {
@@ -99,7 +118,7 @@ export function MonthlyClosureDialog({
           total_credit_payments: monthlyStats.totalCreditPayments || 0, // Abonos de créditos del mes
           profit_from_credit: monthlyStats.profitFromCredit || 0, // Ganancias de facturas a crédito del mes
           closed_by: closedByName.trim(),
-          closed_at: new Date().toISOString(),
+          closed_at: closedAtISO,
         });
 
         setIsLoading(false);
@@ -327,6 +346,11 @@ export function MonthlyClosureDialog({
                             {(monthlyStats.totalCreditPayments || 0) > 0 && (
                               <p className="text-xs text-purple-600 dark:text-purple-400">
                                 • Abonos de Créditos: COP {formatCOP(monthlyStats.totalCreditPayments || 0)}
+                              </p>
+                            )}
+                            {(monthlyStats.exchangeImpact || 0) !== 0 && (
+                              <p className={`text-xs ${(monthlyStats.exchangeImpact || 0) > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                                • Impacto de Cambios: {(monthlyStats.exchangeImpact || 0) > 0 ? '+' : ''}COP {formatCOP(monthlyStats.exchangeImpact || 0)}
                               </p>
                             )}
                           </div>

@@ -3430,19 +3430,19 @@ export const cancelExchange = async (exchangeId: string): Promise<boolean> => {
       }
     }
 
-    // 3. Marcar el cambio como cancelado
-    const { error: updateError } = await supabase
+    // 3. Eliminar el cambio pendiente (no marcarlo como cancelado)
+    const { error: deleteError } = await supabase
       .from('exchanges')
-      .update({ status: 'cancelled' })
+      .delete()
       .eq('id', exchangeId)
       .eq('company', company);
 
-    if (updateError) {
-      console.error('Error updating exchange status:', updateError);
+    if (deleteError) {
+      console.error('Error deleting exchange:', deleteError);
       return false;
     }
 
-    console.log(`✅ Exchange ${exchange.exchange_number} cancelled successfully`);
+    console.log(`✅ Exchange ${exchange.exchange_number} deleted successfully`);
     return true;
   } catch (error) {
     console.error('Error in cancelExchange:', error);

@@ -207,6 +207,7 @@ export function FinancialManagement() {
       });
 
       const monthExchanges = exchanges.filter((ex) => {
+        if (ex.status === 'pending') return false; // Excluir cambios pendientes
         const exDate = extractColombiaDate(ex.date);
         return exDate.startsWith(targetMonth);
       });
@@ -230,13 +231,10 @@ export function FinancialManagement() {
 
       const totalDevoluciones = monthReturns.reduce((sum, ret) => sum + ret.total, 0);
 
+      // Calcular impacto de cambios (suma de todos los price_difference, sean positivos o negativos)
       const impactoCambios = monthExchanges.reduce((sum, exchange) => {
-        if (exchange.price_difference > 0) {
-          return sum + exchange.price_difference;
-        } else if (exchange.price_difference < 0) {
-          return sum + exchange.price_difference;
-        }
-        return sum;
+        const diff = Number(exchange.price_difference) || 0;
+        return sum + diff;
       }, 0);
 
       // NUEVO: Ingresos de servicio técnico
@@ -586,8 +584,9 @@ export function FinancialManagement() {
       return expDate === date;
     });
 
-    // Filtrar cambios del día
+    // Filtrar cambios del día (excluir cambios pendientes)
     const dayExchanges = exchanges.filter(ex => {
+      if (ex.status === 'pending') return false; // Excluir cambios pendientes
       const exDate = extractColombiaDate(ex.date);
       return exDate === date;
     });
@@ -601,12 +600,8 @@ export function FinancialManagement() {
     // Calcular ingresos
     const facturasPagas = dayInvoices.reduce((sum, inv) => sum + inv.total, 0);
     const impactoCambios = dayExchanges.reduce((sum, exchange) => {
-      if (exchange.price_difference > 0) {
-        return sum + exchange.price_difference;
-      } else if (exchange.price_difference < 0) {
-        return sum + exchange.price_difference;
-      }
-      return sum;
+      const diff = Number(exchange.price_difference) || 0;
+      return sum + diff;
     }, 0);
 
     // NUEVO: Ingresos de servicio técnico
@@ -832,20 +827,16 @@ export function FinancialManagement() {
 
       const monthInvoices = invoices.filter(inv => extractColombiaDate(inv.date).startsWith(monthStr));
       const monthExpenses = expenses.filter(exp => extractColombiaDate(exp.date).startsWith(monthStr));
-      const monthExchanges = exchanges.filter(ex => extractColombiaDate(ex.date).startsWith(monthStr));
+      const monthExchanges = exchanges.filter(ex => ex.status !== 'pending' && extractColombiaDate(ex.date).startsWith(monthStr));
 
       // IMPORTANTE: Solo contar facturas REGULARES pagadas (excluir crédito para evitar doble contabilidad)
       const paidInvoices = monthInvoices.filter(inv => (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit);
       const facturasPagas = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
-      // Calcular impacto de cambios del mes
+      // Calcular impacto de cambios del mes (suma de todos los price_difference)
       const impactoCambios = monthExchanges.reduce((sum, exchange) => {
-        if (exchange.price_difference > 0) {
-          return sum + exchange.price_difference;
-        } else if (exchange.price_difference < 0) {
-          return sum + exchange.price_difference;
-        }
-        return sum;
+        const diff = Number(exchange.price_difference) || 0;
+        return sum + diff;
       }, 0);
 
       // Calcular abonos del mes para el gráfico
@@ -2225,7 +2216,7 @@ export function FinancialManagement() {
 
               {(() => {
                 const monthExchanges = exchanges.filter(ex =>
-                  extractColombiaDate(ex.date).startsWith(stats.thisMonth)
+                  ex.status !== 'pending' && extractColombiaDate(ex.date).startsWith(stats.thisMonth)
                 );
                 const totalExchangeImpact = monthExchanges.reduce((sum, ex) => sum + ex.price_difference, 0);
                 const positiveExchanges = monthExchanges.filter(ex => ex.price_difference > 0);

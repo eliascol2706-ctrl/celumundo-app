@@ -28,6 +28,7 @@ const ServiceOrders = React.lazy(() => import('./pages/ServiceOrders').then(m =>
 const TrackingPage = React.lazy(() => import('./pages/TrackingPage').then(m => ({ default: m.default || m.TrackingPage })));
 const CatalogAdmin = React.lazy(() => import('./pages/CatalogAdmin').then(m => ({ default: m.CatalogAdmin })));
 const PublicCatalog = React.lazy(() => import('./pages/PublicCatalog').then(m => ({ default: m.PublicCatalog })));
+const CustomerTracking = React.lazy(() => import('./pages/CustomerTracking').then(m => ({ default: m.CustomerTracking })));
 
 // Componente Suspense Wrapper
 function SuspenseWrapper({ children }: { children: React.ReactNode }) {
@@ -75,6 +76,14 @@ export const router = createBrowserRouter([
   {
     path: '/seguimiento/:trackingCode',
     Component: TrackingPage,
+  },
+  {
+    path: '/seguimiento-cliente/:document',
+    element: (
+      <SuspenseWrapper>
+        <CustomerTracking />
+      </SuspenseWrapper>
+    ),
   },
   {
     path: '/catalogo-publico/:company',
