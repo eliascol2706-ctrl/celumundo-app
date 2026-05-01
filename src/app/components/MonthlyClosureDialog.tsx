@@ -34,6 +34,7 @@ interface MonthlyClosureDialogProps {
     ingresosPorFactura?: number; // NUEVO: Ingresos por factura (todas las facturas + impacto cambios)
     exchangeImpact?: number; // NUEVO: Impacto de cambios por separado
   };
+  monthToClose: string; // NUEVO: Mes que se está cerrando (formato YYYY-MM)
   onSuccess: () => void;
 }
 
@@ -41,6 +42,7 @@ export function MonthlyClosureDialog({
   open,
   onOpenChange,
   monthlyStats,
+  monthToClose,
   onSuccess
 }: MonthlyClosureDialogProps) {
   const [phase, setPhase] = useState<Phase>(1);
@@ -76,10 +78,9 @@ export function MonthlyClosureDialog({
     // Simular procesamiento
     setTimeout(async () => {
       try {
-        // Usar la fecha de Colombia (GMT-5) en lugar de UTC
-        const colombiaDate = getColombiaDate(); // Formato YYYY-MM-DD
-        const currentMonth = colombiaDate.substring(0, 7); // YYYY-MM
-        const currentYear = parseInt(colombiaDate.substring(0, 4), 10);
+        // Usar el mes que se está cerrando en lugar del mes actual
+        const currentMonth = monthToClose; // YYYY-MM
+        const currentYear = parseInt(monthToClose.substring(0, 4), 10);
 
         // Obtener fecha y hora de Colombia en formato ISO
         const now = new Date();
@@ -173,13 +174,13 @@ export function MonthlyClosureDialog({
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center justify-between">
-                <span>Cierre Mensual - Fase {phase} de 2</span>
+                <span>Cierre Mensual {new Date(monthToClose + '-01').toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' })} - Fase {phase} de 2</span>
                 <Button variant="ghost" size="sm" onClick={handleClose}>
                   <X className="h-5 w-5" />
                 </Button>
               </DialogTitle>
               <DialogDescription>
-                Revisa los detalles del cierre mensual antes de finalizar.
+                Revisa los detalles del cierre mensual de {new Date(monthToClose + '-01').toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' })} antes de finalizar.
               </DialogDescription>
             </DialogHeader>
 

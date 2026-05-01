@@ -32,6 +32,7 @@ export function Closures() {
   const [isMonthlyDialogOpen, setIsMonthlyDialogOpen] = useState(false);
   const [currentPageDaily, setCurrentPageDaily] = useState(1);
   const [currentPageMonthly, setCurrentPageMonthly] = useState(1);
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null); // NUEVO: Mes seleccionado para cierre
   const itemsPerPage = 10;
 
   const [invoices, setInvoices] = useState<any[]>([]);
@@ -189,11 +190,38 @@ export function Closures() {
     });
   };
 
+  // NUEVO: Función para detectar el mes que se debe cerrar
+  const getMonthToClose = () => {
+    // Si hay un mes seleccionado manualmente, usarlo
+    if (selectedMonth) return selectedMonth;
+
+    // Obtener todos los meses únicos de los cierres diarios ordenados
+    const monthsWithClosures = Array.from(
+      new Set(
+        dailyClosures.map(closure => {
+          const closureDate = extractColombiaDate(closure.date);
+          return closureDate ? closureDate.substring(0, 7) : null;
+        }).filter(Boolean)
+      )
+    ).sort();
+
+    // Buscar el primer mes con cierres diarios pero sin cierre mensual
+    for (const month of monthsWithClosures) {
+      const hasMonthlyClose = monthlyClosures.some(closure => closure.month === month);
+      if (!hasMonthlyClose) {
+        return month;
+      }
+    }
+
+    // Si todos los meses tienen cierre, retornar el mes actual
+    return getColombiaDate().substring(0, 7);
+  };
+
   const getCurrentMonthClosures = () => {
-    const currentMonth = getColombiaDate().substring(0, 7);
+    const monthToClose = getMonthToClose();
     return dailyClosures.filter(closure => {
       const closureDate = extractColombiaDate(closure.date);
-      return closureDate && closureDate.substring(0, 7) === currentMonth;
+      return closureDate && closureDate.substring(0, 7) === monthToClose;
     });
   };
 
@@ -298,12 +326,12 @@ export function Closures() {
     const currentMonthClosures = getCurrentMonthClosures();
     const totalRevenue = currentMonthClosures.reduce((sum, closure) => sum + closure.total, 0);
 
-    // Obtener mes actual y anterior usando fecha de Colombia - SIN UTC
-    const currentColombiaDate = getColombiaDate();
-    const currentMonthStr = currentColombiaDate.substring(0, 7);
-    
+    // Obtener mes que se está cerrando y anterior usando fecha de Colombia - SIN UTC
+    const monthToClose = getMonthToClose();
+    const currentMonthStr = monthToClose;
+
     // Calcular mes anterior usando fecha de Colombia - SIN toISOString
-    const currentDate = new Date(currentColombiaDate + 'T12:00:00'); // Mediodía para evitar problemas
+    const currentDate = new Date(monthToClose + '-01T12:00:00'); // Mediodía para evitar problemas
     currentDate.setMonth(currentDate.getMonth() - 1);
     // Extraer mes anterior sin usar toISOString
     const prevYear = currentDate.getFullYear();
@@ -634,49 +662,42 @@ export function Closures() {
   const hourlyData = calculateHourlyData();
   const topProducts = calculateTopProducts();
 
-  const hasCurrentMonthClosure = () => {
-    const currentMonth = getColombiaDate().substring(0, 7);
-    return monthlyClosures.some(closure => closure.month === currentMonth);
-  };
-
-  // Verificar si es un nuevo mes sin cierre mensual del mes anterior
+  // NUEVO: Verificar si hay meses pendientes de cerrar (mejorado)
   const needsMonthlyClose = () => {
-    const today = getColombiaDate();
-    
-    // Calcular ayer sin usar toISOString - SIN UTC
-    const todayDate = new Date(today + 'T12:00:00'); // Mediodía para evitar problemas
-    todayDate.setDate(todayDate.getDate() - 1);
-    // Extraer fecha sin usar toISOString
-    const year = todayDate.getFullYear();
-    const month = String(todayDate.getMonth() + 1).padStart(2, '0');
-    const day = String(todayDate.getDate()).padStart(2, '0');
-    const yesterdayStr = `${year}-${month}-${day}`;
+    if (dailyClosures.length === 0) {
+      return { needed: false };
+    }
 
-    const currentMonth = today.substring(0, 7);
-    const yesterdayMonth = yesterdayStr.substring(0, 7);
+    // Obtener todos los meses únicos de los cierres diarios
+    const monthsWithClosures = Array.from(
+      new Set(
+        dailyClosures.map(closure => {
+          const closureDate = extractColombiaDate(closure.date);
+          return closureDate ? closureDate.substring(0, 7) : null;
+        }).filter(Boolean)
+      )
+    ).sort();
 
-    // Si es día 1 de un nuevo mes (ayer era otro mes)
-    if (currentMonth !== yesterdayMonth) {
-      // Verificar si existe cierre mensual del mes anterior
-      const hasPreviousMonthClosure = monthlyClosures.some(closure => closure.month === yesterdayMonth);
+    // Buscar el primer mes con cierres diarios pero sin cierre mensual
+    for (const month of monthsWithClosures) {
+      const hasMonthlyClose = monthlyClosures.some(closure => closure.month === month);
 
-      // Verificar si realmente hubo facturas en el mes anterior usando extractColombiaDate
-      const previousMonthInvoices = invoices.filter(inv => {
-        if (!inv.date) return false;
-        const invDate = extractColombiaDate(inv.date);
-        return invDate.substring(0, 7) === yesterdayMonth;
-      });
+      if (!hasMonthlyClose) {
+        // Verificar si realmente hubo facturas en ese mes
+        const monthInvoices = invoices.filter(inv => {
+          if (!inv.date) return false;
+          const invDate = extractColombiaDate(inv.date);
+          return invDate.substring(0, 7) === month;
+        });
 
-      // Solo pedir el cierre mensual si:
-      // 1. NO existe un cierre mensual del mes anterior
-      // 2. Hay cierres diarios en total (el sistema está en uso)
-      // 3. Realmente hubo facturas en el mes anterior
-      if (!hasPreviousMonthClosure && dailyClosures.length > 0 && previousMonthInvoices.length > 0) {
-        const previousMonthDate = new Date(yesterdayStr + 'T12:00:00');
-        const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric' });
-        return { needed: true, monthName };
+        if (monthInvoices.length > 0) {
+          const monthDate = new Date(month + '-01T12:00:00');
+          const monthName = monthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+          return { needed: true, monthName, month };
+        }
       }
     }
+
     return { needed: false };
   };
 
@@ -688,12 +709,15 @@ export function Closures() {
       }
       setIsDailyDialogOpen(true);
     } else {
-      if (hasCurrentMonthClosure()) {
-        toast.error('Ya existe un cierre para este mes');
+      const monthToClose = getMonthToClose();
+      const monthClosureExists = monthlyClosures.some(closure => closure.month === monthToClose);
+
+      if (monthClosureExists) {
+        toast.error(`Ya existe un cierre para ${monthToClose}`);
         return;
       }
       if (getCurrentMonthClosures().length === 0) {
-        toast.error('No hay cierres diarios en este mes para realizar el cierre mensual');
+        toast.error(`No hay cierres diarios en ${monthToClose} para realizar el cierre mensual`);
         return;
       }
       setIsMonthlyDialogOpen(true);
@@ -741,6 +765,10 @@ export function Closures() {
                 </p>
                 <Button
                   onClick={() => {
+                    const pendingMonth = needsMonthlyClose();
+                    if (pendingMonth.needed && pendingMonth.month) {
+                      setSelectedMonth(pendingMonth.month);
+                    }
                     setView('monthly');
                     setTimeout(() => {
                       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1015,6 +1043,75 @@ export function Closures() {
       {/* Monthly Closure View */}
       {view === 'monthly' && (
         <>
+          {/* Month Selector */}
+          {(() => {
+            const monthsWithClosures = Array.from(
+              new Set(
+                dailyClosures.map(closure => {
+                  const closureDate = extractColombiaDate(closure.date);
+                  return closureDate ? closureDate.substring(0, 7) : null;
+                }).filter(Boolean)
+              )
+            ).sort().reverse();
+
+            const availableMonths = monthsWithClosures.filter(month => {
+              return !monthlyClosures.some(closure => closure.month === month);
+            });
+
+            const monthToClose = getMonthToClose();
+            const autoDetectedMonth = selectedMonth ? null : monthToClose;
+
+            return availableMonths.length > 0 && (
+              <Card className="border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30">
+                <CardContent className="pt-6">
+                  <div className="flex flex-col md:flex-row md:items-center gap-4">
+                    <div className="flex-1">
+                      <h3 className="text-lg font-bold text-blue-900 dark:text-blue-100 mb-2">
+                        Seleccionar Mes a Cerrar
+                      </h3>
+                      {autoDetectedMonth && (
+                        <p className="text-sm text-blue-700 dark:text-blue-300 mb-3">
+                          <strong>Detectado automáticamente:</strong> {new Date(autoDetectedMonth + '-01').toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' })}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        {availableMonths.map(month => {
+                          const isSelected = (selectedMonth || monthToClose) === month;
+                          const monthDate = new Date(month + '-01');
+                          const monthName = monthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+                          const closuresCount = dailyClosures.filter(c => {
+                            const cDate = extractColombiaDate(c.date);
+                            return cDate && cDate.substring(0, 7) === month;
+                          }).length;
+
+                          return (
+                            <Button
+                              key={month}
+                              variant={isSelected ? 'default' : 'outline'}
+                              onClick={() => {
+                                setSelectedMonth(month);
+                                // Scroll suave a la tabla de cierres
+                                setTimeout(() => {
+                                  const element = document.querySelector('[data-closures-table]');
+                                  if (element) {
+                                    element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                                  }
+                                }, 100);
+                              }}
+                              className={isSelected ? '' : 'hover:bg-blue-100 dark:hover:bg-blue-900'}
+                            >
+                              {monthName} ({closuresCount} cierres)
+                            </Button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })()}
+
           {/* Monthly Stats */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <Card>
@@ -1085,12 +1182,25 @@ export function Closures() {
           </Card>
 
           {/* Monthly Closures Table */}
-          <Card>
+          <Card data-closures-table>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle>Cierres del Mes</CardTitle>
-                <Button onClick={handleOpenClosureDialog} disabled={hasCurrentMonthClosure()}>
-                  {hasCurrentMonthClosure() ? 'Cierre Ya Realizado' : 'Finalizar Cierre'}
+                <CardTitle>
+                  Cierres del Mes - {new Date(getMonthToClose() + '-01').toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' })}
+                </CardTitle>
+                <Button
+                  onClick={handleOpenClosureDialog}
+                  disabled={(() => {
+                    const monthToClose = getMonthToClose();
+                    return monthlyClosures.some(closure => closure.month === monthToClose);
+                  })()}
+                >
+                  {(() => {
+                    const monthToClose = getMonthToClose();
+                    return monthlyClosures.some(closure => closure.month === monthToClose)
+                      ? 'Cierre Ya Realizado'
+                      : 'Finalizar Cierre';
+                  })()}
                 </Button>
               </div>
             </CardHeader>
@@ -1269,7 +1379,11 @@ export function Closures() {
         open={isMonthlyDialogOpen}
         onOpenChange={setIsMonthlyDialogOpen}
         monthlyStats={monthlyStats}
-        onSuccess={loadData}
+        monthToClose={getMonthToClose()}
+        onSuccess={() => {
+          setSelectedMonth(null); // Reset selection after successful closure
+          loadData();
+        }}
       />
     </div>
   );
