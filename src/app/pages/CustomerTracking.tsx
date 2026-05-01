@@ -7,7 +7,7 @@ import { formatCOP } from '../lib/currency';
 import { Badge } from '../components/ui/badge';
 
 export function CustomerTracking() {
-  const { document } = useParams<{ document: string }>();
+  const { customerId } = useParams<{ customerId: string }>();
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [payments, setPayments] = useState<{ [key: string]: CreditPayment[] }>({});
@@ -15,10 +15,10 @@ export function CustomerTracking() {
 
   useEffect(() => {
     loadCustomerData();
-  }, [document]);
+  }, [customerId]);
 
   const loadCustomerData = async () => {
-    if (!document) return;
+    if (!customerId) return;
 
     try {
       const [customersData, invoicesData] = await Promise.all([
@@ -26,13 +26,18 @@ export function CustomerTracking() {
         getInvoices()
       ]);
 
-      // Buscar cliente por documento
-      const foundCustomer = customersData.find(c => c.document === document);
+      // Buscar cliente por ID
+      const foundCustomer = customersData.find(c => c.id === customerId);
       setCustomer(foundCustomer || null);
+
+      if (!foundCustomer) {
+        setLoading(false);
+        return;
+      }
 
       // Filtrar facturas del cliente
       const customerInvoices = invoicesData.filter(
-        inv => inv.is_credit && inv.customer_document === document
+        inv => inv.is_credit && inv.customer_document === foundCustomer.document
       );
       setInvoices(customerInvoices);
 

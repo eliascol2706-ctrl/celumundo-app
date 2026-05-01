@@ -78,7 +78,7 @@ export const router = createBrowserRouter([
     Component: TrackingPage,
   },
   {
-    path: '/seguimiento-cliente/:document',
+    path: '/seguimiento-cliente/:customerId',
     element: (
       <SuspenseWrapper>
         <CustomerTracking />

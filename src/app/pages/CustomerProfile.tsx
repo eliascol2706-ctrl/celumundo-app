@@ -590,7 +590,7 @@ export function CustomerProfile() {
               </label>
               <Input
                 readOnly
-                value={customer ? `https://celumundo-app.vercel.app/seguimiento-cliente/${customer.document}` : ''}
+                value={customer ? `https://celumundo-app.vercel.app/seguimiento-cliente/${customer.id}` : ''}
                 className="font-mono text-sm"
                 onClick={(e) => {
                   const target = e.target as HTMLInputElement;
