@@ -44,7 +44,9 @@ import {
   ChevronUp,
   ArrowUpRight,
   ArrowDownRight,
-  Package
+  Package,
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -54,6 +56,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '../components/ui/collapsible';
 import { Badge } from '../components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
 import { jsPDF } from 'jspdf';
@@ -152,12 +155,100 @@ export function FinancialManagement() {
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('');
 
+  // Estado para navegación de meses
+  const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
+  const [isTimeTravel, setIsTimeTravel] = useState(false);
+
   // Ref para impresión térmica
   const thermalPrintRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     loadData();
   }, []);
+
+  // Funciones para navegación de meses
+  const activateTimeTravel = (callback: () => void) => {
+    setIsTimeTravel(true);
+    // Usar setTimeout corto para permitir que se muestre el loading
+    setTimeout(() => {
+      callback();
+      // Dar tiempo para que React procese el cambio
+      setTimeout(() => {
+        setIsTimeTravel(false);
+      }, 100);
+    }, 50);
+  };
+
+  const goToPreviousMonth = () => {
+    const currentMonth = selectedMonth || getColombiaDate().slice(0, 7);
+    const [year, month] = currentMonth.split('-').map(Number);
+    const prevMonth = month === 1
+      ? `${year - 1}-12`
+      : `${year}-${String(month - 1).padStart(2, '0')}`;
+
+    activateTimeTravel(() => setSelectedMonth(prevMonth));
+  };
+
+  const goToNextMonth = () => {
+    const currentMonth = selectedMonth || getColombiaDate().slice(0, 7);
+    const [year, month] = currentMonth.split('-').map(Number);
+    const nextMonth = month === 12
+      ? `${year + 1}-01`
+      : `${year}-${String(month + 1).padStart(2, '0')}`;
+
+    activateTimeTravel(() => setSelectedMonth(nextMonth));
+  };
+
+  const goToCurrentMonth = () => {
+    activateTimeTravel(() => setSelectedMonth(null));
+  };
+
+  const getMonthName = () => {
+    const month = selectedMonth || getColombiaDate().slice(0, 7);
+    const [year, monthNum] = month.split('-');
+    const date = new Date(`${month}-01T12:00:00`);
+    const monthName = date.toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    return monthName.charAt(0).toUpperCase() + monthName.slice(1);
+  };
+
+  const isCurrentMonth = () => {
+    const current = getColombiaDate().slice(0, 7);
+    const displayed = selectedMonth || current;
+    return current === displayed;
+  };
+
+  // Obtener meses disponibles de los últimos 12 meses con datos
+  const getAvailableMonths = () => {
+    const months = new Set<string>();
+
+    // Agregar meses de facturas
+    invoices.forEach(inv => {
+      const month = extractColombiaDate(inv.date).slice(0, 7);
+      months.add(month);
+    });
+
+    // Agregar meses de gastos
+    expenses.forEach(exp => {
+      const month = extractColombiaDate(exp.date).slice(0, 7);
+      months.add(month);
+    });
+
+    // Convertir a array y ordenar de más reciente a más antiguo
+    const sortedMonths = Array.from(months).sort((a, b) => b.localeCompare(a));
+
+    // Limitar a los últimos 12 meses
+    return sortedMonths.slice(0, 12);
+  };
+
+  const handleMonthChange = (month: string) => {
+    activateTimeTravel(() => {
+      if (month === 'current') {
+        setSelectedMonth(null);
+      } else {
+        setSelectedMonth(month);
+      }
+    });
+  };
 
   const loadData = async () => {
     setIsLoading(true);
@@ -187,7 +278,8 @@ export function FinancialManagement() {
   // Calcular estadísticas con comparación de mes anterior
   const getStats = () => {
     const today = getColombiaDate();
-    const thisMonth = today.slice(0, 7);
+    // Usar el mes seleccionado o el mes actual por defecto
+    const thisMonth = selectedMonth || today.slice(0, 7);
 
     // Calcular mes anterior
     const [year, month] = thisMonth.split('-').map(Number);
@@ -252,23 +344,15 @@ export function FinancialManagement() {
       // MODIFICADO: Incluir ingresos de servicio técnico y abonos a crédito
       const ingresoNeto = facturasPagas + impactoCambios + ingresosServicioTecnico + abonosDelMes;
 
-      // NUEVO: Ingresos por Factura (TODAS las facturas excepto devueltas completamente y canceladas + impacto por cambios)
-      const totalFacturas = monthInvoices
-        .filter((inv) => inv.status !== 'returned' && inv.status !== 'cancelled')
+      // NUEVO: Total de Facturas En Confirmación (solo facturas pending e in_confirmation)
+      const totalFacturasEnConfirmacion = monthInvoices
+        .filter((inv) => inv.status === 'pending' || inv.status === 'in_confirmation')
         .reduce((sum, inv) => sum + inv.total, 0);
-      const ingresosPorFactura = totalFacturas + impactoCambios;
+      const ingresosPorFactura = totalFacturasEnConfirmacion;
 
-      // NUEVO: Costos de Productos (facturas regulares pagadas/parciales + facturas a crédito)
+      // NUEVO: Costos de Productos (solo facturas pagas y devueltas parcialmente)
       const facturasParaCostos = monthInvoices.filter((inv) => {
-        // Facturas regulares pagadas o parcialmente devueltas
-        if (!inv.is_credit && (inv.status === 'paid' || inv.status === 'partial_return')) {
-          return true;
-        }
-        // Facturas a crédito (todas, sin importar status excepto canceladas)
-        if (inv.is_credit && inv.status !== 'cancelled') {
-          return true;
-        }
-        return false;
+        return inv.status === 'paid' || inv.status === 'partial_return';
       });
 
       let costosDeProductos = 0;
@@ -296,13 +380,13 @@ export function FinancialManagement() {
 
       const totalGastos = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
-      // NUEVO: Ganancias Netas usando Ingresos por Factura
-      const gananciasNetas = ingresosPorFactura - costosDeProductos - totalGastos;
+      // NUEVO: Ganancias Netas usando Ingresos del Mes (solo facturas pagas y parciales)
+      const gananciasNetas = ingresoNeto - costosDeProductos - totalGastos;
 
       // Mantener ganancias original para compatibilidad
       const ganancias = ingresoNeto - totalCostos - totalGastos;
 
-      const margen = ingresosPorFactura > 0 ? (gananciasNetas / ingresosPorFactura) * 100 : 0;
+      const margen = ingresoNeto > 0 ? (gananciasNetas / ingresoNeto) * 100 : 0;
 
       return {
         ingresoNeto,
@@ -334,8 +418,8 @@ export function FinancialManagement() {
       ? ((currentMonth.totalGastos - previousMonth.totalGastos) / previousMonth.totalGastos) * 100
       : 0;
 
-    const gananciasChange = previousMonth.ganancias > 0
-      ? ((currentMonth.ganancias - previousMonth.ganancias) / previousMonth.ganancias) * 100
+    const gananciasChange = Math.abs(previousMonth.gananciasNetas) > 0
+      ? ((currentMonth.gananciasNetas - previousMonth.gananciasNetas) / Math.abs(previousMonth.gananciasNetas)) * 100
       : 0;
 
     return {
@@ -681,7 +765,7 @@ export function FinancialManagement() {
       y += 6;
       doc.text(`Gastos del Mes: ${formatCOP(stats.currentMonth.totalGastos)}`, 20, y);
       y += 6;
-      doc.text(`Ganancias Netas: ${formatCOP(stats.currentMonth.ganancias)}`, 20, y);
+      doc.text(`Ganancias Netas: ${formatCOP(stats.currentMonth.gananciasNetas)}`, 20, y);
       y += 6;
       doc.text(`Margen de Ganancia: ${stats.currentMonth.margen.toFixed(1)}%`, 20, y);
       y += 10;
@@ -718,7 +802,7 @@ export function FinancialManagement() {
         doc.text(`Impacto de Cambios: ${stats.currentMonth.impactoCambios > 0 ? '+' : ''}${formatCOP(stats.currentMonth.impactoCambios)}`, 25, y);
         y += 6;
       }
-      doc.text(`Costos de Productos: ${formatCOP(stats.currentMonth.totalCostos)}`, 25, y);
+      doc.text(`Costos de Productos: ${formatCOP(stats.currentMonth.costosDeProductos)}`, 25, y);
       y += 6;
       doc.text(`Gastos Operativos: ${formatCOP(stats.currentMonth.totalGastos)}`, 25, y);
       y += 12;
@@ -1064,8 +1148,21 @@ export function FinancialManagement() {
 
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-900">
-      {/* Header */}
-      <div className="bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 dark:border-zinc-800">
+      {/* Pantalla de carga - aparece sobre el contenido */}
+      {isTimeTravel && (
+        <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-900">
+          <div className="text-center space-y-4">
+            <Loader2 className="w-12 h-12 animate-spin text-emerald-600 dark:text-emerald-400 mx-auto" />
+            <p className="text-lg text-zinc-600 dark:text-zinc-400">Recalculando...</p>
+          </div>
+        </div>
+      )}
+
+      {/* Contenido normal - oculto durante el viaje en el tiempo */}
+      {!isTimeTravel && (
+      <>
+        {/* Header */}
+        <div className="bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 dark:border-zinc-800">
         <div className="p-6">
           <Button variant="ghost" onClick={() => navigate('/facturacion')} className="mb-4">
             <ArrowLeft className="w-4 h-4 mr-2" />
@@ -1073,12 +1170,77 @@ export function FinancialManagement() {
           </Button>
 
           <div className="flex items-center justify-between">
-            <div>
+            <div className="flex-1">
               <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-100 dark:text-zinc-100">Gestión de Finanzas</h1>
               <p className="text-sm text-zinc-500 dark:text-zinc-400 dark:text-zinc-400 mt-1">
                 Panel de control financiero y análisis de rendimiento
               </p>
             </div>
+
+            {/* Selector de meses */}
+            <div className="flex items-center gap-3 mx-6">
+              <div className="flex items-center gap-2">
+                <Calendar className="h-4 w-4 text-zinc-500" />
+                <Select
+                  value={selectedMonth || 'current'}
+                  onValueChange={handleMonthChange}
+                >
+                  <SelectTrigger className="w-[200px]">
+                    <SelectValue>
+                      {getMonthName()}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="current">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium">Mes Actual</span>
+                        <Badge variant="outline" className="text-xs bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800">
+                          Hoy
+                        </Badge>
+                      </div>
+                    </SelectItem>
+                    {getAvailableMonths().map(month => {
+                      const date = new Date(`${month}-01T12:00:00`);
+                      const monthName = date.toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+                      const formattedName = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+                      const isCurrent = month === getColombiaDate().slice(0, 7);
+
+                      if (isCurrent) return null; // Ya está en "Mes Actual"
+
+                      return (
+                        <SelectItem key={month} value={month}>
+                          {formattedName}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+
+                {/* Botones de navegación rápida */}
+                <div className="flex items-center gap-1 ml-1">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={goToPreviousMonth}
+                    className="h-8 w-8 p-0"
+                    title="Mes anterior"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={goToNextMonth}
+                    disabled={isCurrentMonth()}
+                    className="h-8 w-8 p-0"
+                    title="Mes siguiente"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+
             <Button
               className="bg-emerald-600 hover:bg-emerald-700"
               onClick={handleExportReport}
@@ -1161,11 +1323,11 @@ export function FinancialManagement() {
               </CardContent>
             </Card>
 
-            {/* 2. Ingresos por Factura */}
+            {/* 2. Total de Facturas En Confirmación */}
             <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="pb-2">
                 <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Ingresos por Factura</CardTitle>
+                  <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Total de Facturas En Confirmación</CardTitle>
                   <div className="w-8 h-8 rounded-full bg-cyan-100 dark:bg-cyan-900/30 flex items-center justify-center">
                     <FileText className="w-4 h-4 text-cyan-600 dark:text-cyan-400" />
                   </div>
@@ -1177,7 +1339,7 @@ export function FinancialManagement() {
                 {/* Desglose */}
                 <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Total de todas las facturas del mes (regulares, crédito y parciales) + impacto por cambios
+                    Total de facturas pendientes y en confirmación del mes
                   </div>
                 </div>
 
@@ -1220,7 +1382,7 @@ export function FinancialManagement() {
                 {/* Desglose */}
                 <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Costos de productos en facturas regulares pagadas y facturas a crédito
+                    Costos de productos en facturas pagas y devueltas parcialmente
                   </div>
                 </div>
 
@@ -1297,8 +1459,8 @@ export function FinancialManagement() {
                 {/* Desglose */}
                 <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800 space-y-1">
                   <div className="flex justify-between text-xs">
-                    <span className="text-zinc-600 dark:text-zinc-400">Ingresos por factura</span>
-                    <span className="font-medium text-emerald-600">+{formatCOP(stats.currentMonth.ingresosPorFactura)}</span>
+                    <span className="text-zinc-600 dark:text-zinc-400">Ingresos del mes</span>
+                    <span className="font-medium text-emerald-600">+{formatCOP(stats.currentMonth.ingresoNeto)}</span>
                   </div>
                   <div className="flex justify-between text-xs">
                     <span className="text-zinc-600 dark:text-zinc-400">Costos productos</span>
@@ -1539,7 +1701,7 @@ export function FinancialManagement() {
                   <CardContent className="pt-0 space-y-2">
                     <div className="flex justify-between py-2 border-b border-zinc-100">
                       <span className="text-sm text-zinc-600 dark:text-zinc-400">Costos de Productos</span>
-                      <span className="text-sm font-medium">{formatCOP(stats.currentMonth.totalCostos)}</span>
+                      <span className="text-sm font-medium">{formatCOP(stats.currentMonth.costosDeProductos)}</span>
                     </div>
                     <div className="flex justify-between py-2 border-b border-zinc-100">
                       <span className="text-sm text-zinc-600 dark:text-zinc-400">Gastos Operativos</span>
@@ -1712,6 +1874,8 @@ export function FinancialManagement() {
           </CardContent>
         </Card>
       </div>
+      </>
+      )}
 
       {/* Modal de Facturas Pagas */}
       <Dialog open={activeModal === 'paid'} onOpenChange={(open) => !open && closeModal()}>

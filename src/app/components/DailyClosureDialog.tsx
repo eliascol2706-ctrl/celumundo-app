@@ -61,8 +61,8 @@ export function DailyClosureDialog({
     let totalCost = 0;
 
     dailyStats.invoices.forEach(invoice => {
-      // Solo contar facturas pagadas
-      if (invoice.status === 'paid') {
+      // Solo contar facturas pagadas o parcialmente devueltas
+      if (invoice.status === 'paid' || invoice.status === 'partial_return') {
         invoice.items.forEach((item: any) => {
           // Buscar el producto para obtener su costo actual
           const product = products.find(p => p.id === item.productId);
@@ -99,15 +99,15 @@ export function DailyClosureDialog({
     return totalRevenue - totalCost;
   };
 
-  // Calcular ganancia COBRADA: Solo ventas pagadas al 100%
+  // Calcular ganancia COBRADA: Solo ventas pagadas al 100% o parcialmente devueltas
   const calculateProfitCollected = () => {
     let totalRevenue = 0;
     let totalCost = 0;
 
     dailyStats.invoices.forEach(invoice => {
-      // Solo facturas completamente pagadas
+      // Solo facturas completamente pagadas o parcialmente devueltas
       // EXCLUIR: créditos pendientes Y facturas pendientes de confirmación
-      if (invoice.status === 'paid') {
+      if (invoice.status === 'paid' || invoice.status === 'partial_return') {
         totalRevenue += invoice.total || 0;
 
         invoice.items.forEach((item: any) => {
@@ -134,26 +134,15 @@ export function DailyClosureDialog({
     let totalDaviplata = 0; // Solo de facturas
     let totalOtherMethods = 0; // Otros métodos de pago (solo facturas)
 
-    console.log('[DEBUG Cierre] ========================================');
-    console.log('[DEBUG Cierre] Iniciando cálculo de totales de pago');
-    console.log(`[DEBUG Cierre] Total facturas: ${dailyStats.invoices.length}`);
-
-    // Sumar pagos de facturas pagadas del día
+    // Sumar pagos de facturas pagadas y parcialmente devueltas del día
     dailyStats.invoices.forEach(invoice => {
-      // Solo contar facturas pagadas (no créditos pendientes)
-      if (invoice.status === 'paid' && !invoice.is_credit) {
+      // Solo contar facturas pagadas o parcialmente devueltas (no créditos pendientes)
+      if ((invoice.status === 'paid' || invoice.status === 'partial_return') && !invoice.is_credit) {
         const paymentStr = invoice.payment_method || '';
         const invoiceTotal = invoice.total || 0;
-        console.log(`[DEBUG Cierre] Factura ${invoice.number}:`);
-        console.log(`  - Payment method: "${paymentStr}"`);
-        console.log(`  - Total: ${invoiceTotal}`);
-        console.log(`  - payment_cash: ${invoice.payment_cash || 0}`);
-        console.log(`  - payment_transfer: ${invoice.payment_transfer || 0}`);
-        console.log(`  - payment_other: ${invoice.payment_other || 0}`);
 
         // Verificar si tenemos los campos detallados de pago en la factura
         if (invoice.payment_cash !== undefined || invoice.payment_transfer !== undefined || invoice.payment_other !== undefined) {
-          console.log(`  [usando campos detallados de BD]`);
           const cash = invoice.payment_cash || 0;
           const transfer = invoice.payment_transfer || 0;
           const other = invoice.payment_other || 0;
@@ -169,31 +158,23 @@ export function DailyClosureDialog({
             if (paymentLower.includes('nequi') && !paymentLower.includes('daviplata')) {
               totalTransfer += other;
               totalNequi += other;
-              console.log(`  ✅ Nequi (payment_other): ${other}`);
             } else if (paymentLower.includes('daviplata') && !paymentLower.includes('nequi')) {
               totalTransfer += other;
               totalDaviplata += other;
-              console.log(`  ✅ Daviplata (payment_other): ${other}`);
             } else if (paymentLower.includes('nequi') && paymentLower.includes('daviplata')) {
               totalTransfer += other;
               totalOtherMethods += other;
-              console.log(`  ✅ Nequi-Daviplata (payment_other): ${other}`);
             } else {
               totalTransfer += other;
               totalOtherMethods += other;
-              console.log(`  ✅ Otros (payment_other): ${other}`);
             }
           }
-
-          console.log(`  ✅ Sumado - Efectivo: ${cash}, Transferencia bancaria: ${transfer}, Payment_other: ${other}`);
         } else {
           // Fallback: parsear desde el payment_method string
-          console.log(`  [parseando desde payment_method string]`);
           const hasDetailedFormat = paymentStr.includes(':');
 
           if (hasDetailedFormat) {
             // FORMATO DETALLADO: "Efectivo: 70.000, Transferencia: 29.000"
-            console.log(`  [formato detallado detectado]`);
 
             // Extraer efectivo
             const cashMatch = paymentStr.match(/Efectivo:\s*([\d,.]+)/i);
@@ -201,7 +182,6 @@ export function DailyClosureDialog({
               const cashValue = parseFloat(cashMatch[1].replace(/\./g, '').replace(/,/g, ''));
               if (!isNaN(cashValue)) {
                 totalCash += cashValue;
-                console.log(`  ✅ Efectivo: ${cashValue}`);
               }
             }
 
@@ -212,7 +192,6 @@ export function DailyClosureDialog({
               if (!isNaN(transferValue)) {
                 totalTransfer += transferValue;
                 totalTransferRegular += transferValue;
-                console.log(`  ✅ Transferencia: ${transferValue}`);
               }
             }
 
@@ -223,7 +202,6 @@ export function DailyClosureDialog({
               if (!isNaN(nequiValue)) {
                 totalTransfer += nequiValue;
                 totalNequi += nequiValue;
-                console.log(`  ✅ Nequi: ${nequiValue} (sumado a transferencias)`);
               }
             }
 
@@ -234,7 +212,6 @@ export function DailyClosureDialog({
               if (!isNaN(daviplataValue)) {
                 totalTransfer += daviplataValue;
                 totalDaviplata += daviplataValue;
-                console.log(`  ✅ Daviplata: ${daviplataValue} (sumado a transferencias)`);
               }
             }
 
@@ -245,114 +222,65 @@ export function DailyClosureDialog({
               if (!isNaN(otherValue)) {
                 totalTransfer += otherValue;
                 totalOtherMethods += otherValue;
-                console.log(`  ✅ Otros: ${otherValue} (sumado a transferencias)`);
               }
             }
           } else {
             // FORMATO SIMPLE: solo el nombre del método (ej: "Nequi", "Efectivo", "Transferencia")
-            console.log(`  [formato simple detectado]`);
             const paymentLower = paymentStr.toLowerCase().trim();
 
             if (paymentLower === 'efectivo') {
               totalCash += invoiceTotal;
-              console.log(`  ✅ Efectivo (simple): ${invoiceTotal}`);
             } else if (paymentLower === 'transferencia') {
               totalTransfer += invoiceTotal;
               totalTransferRegular += invoiceTotal;
-              console.log(`  ✅ Transferencia (simple): ${invoiceTotal}`);
             } else if (paymentLower === 'nequi') {
               totalTransfer += invoiceTotal;
               totalNequi += invoiceTotal;
-              console.log(`  ✅ Nequi (simple): ${invoiceTotal}`);
             } else if (paymentLower === 'daviplata') {
               totalTransfer += invoiceTotal;
               totalDaviplata += invoiceTotal;
-              console.log(`  ✅ Daviplata (simple): ${invoiceTotal}`);
             } else if (paymentLower === 'nequi-daviplata') {
               totalTransfer += invoiceTotal;
               totalOtherMethods += invoiceTotal;
-              console.log(`  ✅ Nequi-Daviplata (simple): ${invoiceTotal}`);
             } else if (paymentLower === 'otros') {
               totalTransfer += invoiceTotal;
               totalOtherMethods += invoiceTotal;
-              console.log(`  ✅ Otros (simple): ${invoiceTotal} (sumado a transferencias)`);
-            } else {
-              console.log(`  ⚠️ Método de pago desconocido: \"${paymentStr}\"`);
             }
           }
         }
       }
     });
 
-    console.log(`[DEBUG Cierre] Totales de facturas - Efectivo: ${totalCash}, Transferencias: ${totalTransfer}, Otros: ${totalOthers}`);
-
-    // SUMAR ABONOS A CRÉDITO DEL DÍA (separados - NO se suman a transferencias, solo a efectivo y total general)
+    // SUMAR ABONOS A CRÉDITO DEL DÍA (separados - se suman SOLO a totalAbonos, NO a totalCash/totalTransfer)
     let totalAbonos = 0;
     if (dailyStats.creditPayments && dailyStats.creditPayments.length > 0) {
-      console.log(`[DEBUG Cierre] Sumando ${dailyStats.creditPayments.length} abonos a crédito del día`);
-
       dailyStats.creditPayments.forEach(payment => {
-        const paymentMethod = payment.payment_method?.toLowerCase() || '';
         const amount = payment.amount || 0;
-
         totalAbonos += amount;
-
-        if (paymentMethod.includes('efectivo')) {
-          totalCash += amount;
-          console.log(`[DEBUG Cierre] Abono efectivo: ${amount}`);
-        } else if (paymentMethod.includes('transferencia')) {
-          // NO sumar a totalTransfer ni sus desglose - los abonos se muestran separados
-          console.log(`[DEBUG Cierre] Abono transferencia: ${amount} (solo en card de abonos)`);
-        } else if (paymentMethod.includes('nequi')) {
-          // NO sumar a totalTransfer ni totalNequi
-          console.log(`[DEBUG Cierre] Abono nequi: ${amount} (solo en card de abonos)`);
-        } else if (paymentMethod.includes('daviplata')) {
-          // NO sumar a totalTransfer ni totalDaviplata
-          console.log(`[DEBUG Cierre] Abono daviplata: ${amount} (solo en card de abonos)`);
-        } else if (paymentMethod.includes('otros')) {
-          totalOthers += amount;
-          console.log(`[DEBUG Cierre] Abono otros (no se cuenta): ${amount}`);
-        }
       });
     }
 
     // SUMAR/RESTAR CAMBIOS DEL DÍA
     if (dailyStats.exchanges && dailyStats.exchanges.length > 0) {
-      console.log(`[DEBUG Cierre] Procesando ${dailyStats.exchanges.length} cambios del día`);
-      
       dailyStats.exchanges.forEach(exchange => {
         const cashAmount = exchange.payment_cash || 0;
         const transferAmount = exchange.payment_transfer || 0;
         const priceDifference = exchange.price_difference || 0;
-        
+
         if (priceDifference > 0) {
           // Cliente paga diferencia (suma a ingresos)
           totalCash += cashAmount;
           totalTransfer += transferAmount;
-          console.log(`[DEBUG Cierre] Cambio positivo - Efectivo: ${cashAmount}, Transferencia: ${transferAmount}`);
         } else if (priceDifference < 0) {
           // Se devuelve al cliente (resta de ingresos)
           totalCash -= cashAmount;
           totalTransfer -= transferAmount;
-          console.log(`[DEBUG Cierre] Cambio negativo (devolución) - Efectivo: ${cashAmount}, Transferencia: ${transferAmount}`);
         }
       });
     }
 
-    // NUEVO: Sumar ingresos de servicio técnico
+    // Sumar ingresos de servicio técnico
     const serviceRevenue = dailyStats.serviceRevenue || 0;
-    if (serviceRevenue > 0) {
-      console.log(`[DEBUG Cierre] Ingresos Servicio Técnico: ${serviceRevenue}`);
-    }
-
-    console.log('[DEBUG Cierre] ====== RESUMEN FINAL DE TOTALES ======');
-    console.log(`[DEBUG Cierre] Total Efectivo (incluye abonos en efectivo): ${totalCash}`);
-    console.log(`[DEBUG Cierre] Total Transferencias (SOLO facturas, SIN abonos): ${totalTransfer}`);
-    console.log(`[DEBUG Cierre] Total Otros: ${totalOthers}`);
-    console.log(`[DEBUG Cierre] Total Abonos: ${totalAbonos}`);
-    console.log(`[DEBUG Cierre] Servicio Técnico: ${serviceRevenue}`);
-    console.log(`[DEBUG Cierre] TOTAL INGRESOS: ${totalCash + totalTransfer + totalOthers + totalAbonos + serviceRevenue}`);
-    console.log('[DEBUG Cierre] =====================================');
 
     return {
       totalCash,
@@ -415,7 +343,7 @@ export function DailyClosureDialog({
           date: dayToClose,
           total_invoices: dailyStats.totalInvoices,
           pending_invoices: dailyStats.invoices.filter(inv => inv.status === 'pending').length,
-          paid_invoices: dailyStats.invoices.filter(inv => inv.status === 'paid').length,
+          paid_invoices: dailyStats.invoices.filter(inv => inv.status === 'paid' || inv.status === 'partial_return').length,
           total_cash: totalCashValue,
           total_transfer: totalTransferValue,
           total,
@@ -522,9 +450,12 @@ export function DailyClosureDialog({
                       <div className="text-2xl font-bold text-green-600 dark:text-green-400">
                         COP {formatCOP(paymentTotals.total)}
                       </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Incluye facturas pagadas y devoluciones parciales
+                      </p>
                       {(dailyStats.serviceRevenue || 0) > 0 && (
                         <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                          Incluye Servicio Técnico
+                          + Servicio Técnico
                         </p>
                       )}
                       {dailyStats.exchanges && dailyStats.exchanges.length > 0 && (() => {
@@ -885,9 +816,11 @@ export function DailyClosureDialog({
                                   <span className={`px-2 py-1 text-xs rounded-full ${
                                     invoice.status === 'paid'
                                       ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                                      : invoice.status === 'partial_return'
+                                      ? 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300'
                                       : 'bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300'
                                   }`}>
-                                    {invoice.status === 'paid' ? 'Pagada' : 'Pendiente'}
+                                    {invoice.status === 'paid' ? 'Pagada' : invoice.status === 'partial_return' ? 'Dev. Parcial' : 'Pendiente'}
                                   </span>
                                 </td>
                               </tr>

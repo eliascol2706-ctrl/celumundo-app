@@ -1199,6 +1199,45 @@ export const getInvoices = async (): Promise<Invoice[]> => {
   return data || [];
 };
 
+// NUEVA FUNCIÓN: Obtiene facturas de un cliente específico directamente de la base de datos
+export const getInvoicesByCustomer = async (customerDocument: string, customerName?: string): Promise<Invoice[]> => {
+  const company = getCurrentCompany();
+
+  // Buscar por documento O por nombre del cliente (búsqueda flexible)
+  let query = supabase
+    .from('invoices')
+    .select('*')
+    .eq('company', company)
+    .eq('is_credit', true);
+
+  // Intentar buscar por documento primero
+  const { data: byDocument, error: docError } = await query
+    .eq('customer_document', customerDocument)
+    .order('date', { ascending: false });
+
+  // Si no encuentra por documento y tenemos nombre, buscar por nombre
+  if ((!byDocument || byDocument.length === 0) && customerName) {
+    const { data: byName } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('company', company)
+      .eq('is_credit', true)
+      .ilike('customer_name', `%${customerName}%`)
+      .order('date', { ascending: false });
+
+    if (byName && byName.length > 0) {
+      return byName;
+    }
+  }
+
+  if (docError) {
+    console.error('Error fetching customer invoices:', docError);
+    return [];
+  }
+
+  return byDocument || [];
+};
+
 // NUEVA FUNCIÓN: Obtiene TODAS las facturas sin límite (paginación automática)
 export const getAllInvoices = async (): Promise<Invoice[]> => {
   const company = getCurrentCompany();
@@ -2111,7 +2150,7 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
   // Actualizar estado de la factura y eliminar productos devueltos
   const { data: invoice } = await supabase
     .from('invoices')
-    .select('items, total, subtotal, tax')
+    .select('items, total, subtotal, tax, payment_cash, payment_transfer, payment_other')
     .eq('id', returnData.invoice_id)
     .single();
 
@@ -2159,11 +2198,13 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
     const newTax = newSubtotal * taxRate;
     const newTotal = newSubtotal + newTax;
 
-    console.log(`[addReturn] Factura ${returnData.invoice_number}:`);
-    console.log(`  Items originales: ${invoice.items.length}`);
-    console.log(`  Items restantes: ${updatedItems.length}`);
-    console.log(`  Total original: ${invoice.total}`);
-    console.log(`  Total actualizado: ${newTotal}`);
+    // NUEVO: Calcular payment_cash, payment_transfer y payment_other proporcionalmente
+    const originalTotal = invoice.total || 0;
+    const ratio = originalTotal > 0 ? newTotal / originalTotal : 0;
+
+    const newPaymentCash = (invoice.payment_cash || 0) * ratio;
+    const newPaymentTransfer = (invoice.payment_transfer || 0) * ratio;
+    const newPaymentOther = (invoice.payment_other || 0) * ratio;
 
     // Actualizar estado de factura y items
     const newStatus = allProductsReturned ? 'returned' : 'partial_return';
@@ -2172,7 +2213,10 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
       items: updatedItems,
       subtotal: newSubtotal,
       tax: newTax,
-      total: newTotal
+      total: newTotal,
+      payment_cash: newPaymentCash,
+      payment_transfer: newPaymentTransfer,
+      payment_other: newPaymentOther
     });
   }
   
@@ -2287,6 +2331,14 @@ export const revertReturn = async (returnId: string): Promise<boolean> => {
     const newTax = newSubtotal * taxRate;
     const newTotal = newSubtotal + newTax;
 
+    // NUEVO: Calcular payment_cash, payment_transfer y payment_other proporcionalmente
+    const originalTotal = invoice.total || 0;
+    const ratio = originalTotal > 0 ? newTotal / originalTotal : 0;
+
+    const newPaymentCash = (invoice.payment_cash || 0) * ratio;
+    const newPaymentTransfer = (invoice.payment_transfer || 0) * ratio;
+    const newPaymentOther = (invoice.payment_other || 0) * ratio;
+
     // Determinar el nuevo estado de la factura
     let newStatus: 'paid' | 'partial_return' | 'returned' = 'paid';
 
@@ -2316,7 +2368,10 @@ export const revertReturn = async (returnId: string): Promise<boolean> => {
         items: updatedItems,
         subtotal: newSubtotal,
         tax: newTax,
-        total: newTotal
+        total: newTotal,
+        payment_cash: newPaymentCash,
+        payment_transfer: newPaymentTransfer,
+        payment_other: newPaymentOther
       })
       .eq('id', returnData.invoice_id);
 

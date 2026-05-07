@@ -24,6 +24,8 @@ import {
 import {
   getCustomerByDocument,
   getInvoices,
+  getAllInvoices,
+  getInvoicesByCustomer,
   getCreditHistory,
   getCreditPaymentsByInvoice,
   updateCustomer,
@@ -70,13 +72,8 @@ export function CustomerProfile() {
     try {
       // Decodificar el documento de la URL por si tiene caracteres especiales
       const decodedDocument = decodeURIComponent(document);
-      console.log('Cargando perfil del cliente con documento:', decodedDocument);
 
-      const [customerData, allInvoices, historyData] = await Promise.all([
-        getCustomerByDocument(decodedDocument),
-        getInvoices(),
-        getCreditHistory(decodedDocument)
-      ]);
+      const customerData = await getCustomerByDocument(decodedDocument);
 
       if (!customerData) {
         console.error('Cliente no encontrado con documento:', decodedDocument);
@@ -85,11 +82,10 @@ export function CustomerProfile() {
         return;
       }
 
-      console.log('Datos del cliente cargados:', customerData);
-
-      const customerInvoices = allInvoices.filter(
-        (inv) => inv.customer_document === decodedDocument && inv.is_credit
-      );
+      const [customerInvoices, historyData] = await Promise.all([
+        getInvoicesByCustomer(decodedDocument, customerData.name),
+        getCreditHistory(decodedDocument)
+      ]);
 
       // Calcular el estado correcto del cliente basándose en sus facturas
       let calculatedStatus: 'active' | 'overdue' | 'blocked' = 'active';

@@ -32,8 +32,10 @@ export function Closures() {
   const [isMonthlyDialogOpen, setIsMonthlyDialogOpen] = useState(false);
   const [currentPageDaily, setCurrentPageDaily] = useState(1);
   const [currentPageMonthly, setCurrentPageMonthly] = useState(1);
+  const [currentPageInvoices, setCurrentPageInvoices] = useState(1);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null); // NUEVO: Mes seleccionado para cierre
   const itemsPerPage = 10;
+  const invoicesPerPage = 20;
 
   const [invoices, setInvoices] = useState<any[]>([]);
   const [dailyClosures, setDailyClosures] = useState<any[]>([]);
@@ -479,21 +481,15 @@ export function Closures() {
     const totalFacturas = allMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
     const ingresosPorFactura = totalFacturas + currentMonthExchangeImpact;
 
-    // Calcular costo de productos vendidos en el mes (facturas regulares pagadas/parciales + facturas a crédito)
+    // Calcular costo de productos vendidos en el mes (TODAS las facturas incluidas en ingresosPorFactura)
+    // Debe ser consistente con el filtro de ingresosPorFactura
     const invoicesForCost = invoices.filter(inv => {
       if (!inv.date) return false;
       const invDate = extractColombiaDate(inv.date);
       if (invDate.substring(0, 7) !== currentMonthStr) return false;
 
-      // Facturas regulares pagadas o parcialmente devueltas
-      if (!inv.is_credit && (inv.status === 'paid' || inv.status === 'partial_return')) {
-        return true;
-      }
-      // Facturas a crédito (todas, excepto canceladas)
-      if (inv.is_credit && inv.status !== 'cancelled') {
-        return true;
-      }
-      return false;
+      // Excluir facturas devueltas completamente y canceladas (igual que ingresosPorFactura)
+      return inv.status !== 'returned' && inv.status !== 'cancelled';
     });
 
     let totalProductCost = 0;
@@ -877,45 +873,109 @@ export function Closures() {
                     </tr>
                   </thead>
                   <tbody>
-                    {dailyStats.invoices.map((invoice) => (
-                      <tr key={invoice.id} className="border-b border-border hover:bg-muted/50">
-                        <td className="py-2 px-3 text-sm font-medium">{invoice.number}</td>
-                        <td className="py-2 px-3">
-                          <span className={`px-2 py-1 text-xs rounded-full ${
-                            invoice.type === 'regular' 
-                              ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300' 
-                              : 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
-                          }`}>
-                            {invoice.type === 'regular' ? 'Regular' : 'Al Mayor'}
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 text-sm">{invoice.customer_name || '-'}</td>
-                        <td className="py-2 px-3 text-right text-sm font-medium text-green-600 dark:text-green-400">
-                          COP {formatCOP(invoice.total)}
-                        </td>
-                        <td className="py-2 px-3 text-center">
-                          <span className={`px-2 py-1 text-xs rounded-full ${
-                            invoice.status === 'paid'
-                              ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
-                              : invoice.status === 'pending'
-                              ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300'
-                              : 'bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300'
-                          }`}>
-                            {getInvoiceStatusLabel(invoice.status)}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                    {dailyStats.invoices.length === 0 && (
-                      <tr>
-                        <td colSpan={5} className="py-8 text-center text-muted-foreground">
-                          No hay facturas hoy
-                        </td>
-                      </tr>
-                    )}
+                    {(() => {
+                      const startIndex = (currentPageInvoices - 1) * invoicesPerPage;
+                      const endIndex = startIndex + invoicesPerPage;
+                      const paginatedInvoices = dailyStats.invoices.slice(startIndex, endIndex);
+
+                      return (
+                        <>
+                          {paginatedInvoices.map((invoice) => (
+                            <tr key={invoice.id} className="border-b border-border hover:bg-muted/50">
+                              <td className="py-2 px-3 text-sm font-medium">{invoice.number}</td>
+                              <td className="py-2 px-3">
+                                <span className={`px-2 py-1 text-xs rounded-full ${
+                                  invoice.type === 'regular'
+                                    ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                                    : 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
+                                }`}>
+                                  {invoice.type === 'regular' ? 'Regular' : 'Al Mayor'}
+                                </span>
+                              </td>
+                              <td className="py-2 px-3 text-sm">{invoice.customer_name || '-'}</td>
+                              <td className="py-2 px-3 text-right text-sm font-medium text-green-600 dark:text-green-400">
+                                COP {formatCOP(invoice.total)}
+                              </td>
+                              <td className="py-2 px-3 text-center">
+                                <span className={`px-2 py-1 text-xs rounded-full ${
+                                  invoice.status === 'paid'
+                                    ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                                    : invoice.status === 'partial_return'
+                                    ? 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300'
+                                    : invoice.status === 'pending'
+                                    ? 'bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300'
+                                    : 'bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300'
+                                }`}>
+                                  {getInvoiceStatusLabel(invoice.status)}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                          {paginatedInvoices.length === 0 && (
+                            <tr>
+                              <td colSpan={5} className="py-8 text-center text-muted-foreground">
+                                No hay facturas hoy
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      );
+                    })()}
                   </tbody>
                 </table>
               </div>
+
+              {/* Paginación de Facturas */}
+              {dailyStats.invoices.length > invoicesPerPage && (
+                <div className="flex items-center justify-between mt-4 pt-4 border-t border-border">
+                  <div className="text-sm text-muted-foreground">
+                    Mostrando {(currentPageInvoices - 1) * invoicesPerPage + 1} - {Math.min(currentPageInvoices * invoicesPerPage, dailyStats.invoices.length)} de {dailyStats.invoices.length} facturas
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPageInvoices(prev => Math.max(1, prev - 1))}
+                      disabled={currentPageInvoices === 1}
+                    >
+                      Anterior
+                    </Button>
+                    <div className="flex items-center gap-1">
+                      {Array.from({ length: Math.ceil(dailyStats.invoices.length / invoicesPerPage) }, (_, i) => i + 1).map(page => {
+                        const totalPages = Math.ceil(dailyStats.invoices.length / invoicesPerPage);
+                        if (
+                          page === 1 ||
+                          page === totalPages ||
+                          (page >= currentPageInvoices - 1 && page <= currentPageInvoices + 1)
+                        ) {
+                          return (
+                            <Button
+                              key={page}
+                              variant={currentPageInvoices === page ? 'default' : 'outline'}
+                              size="sm"
+                              onClick={() => setCurrentPageInvoices(page)}
+                              className="min-w-[40px]"
+                            >
+                              {page}
+                            </Button>
+                          );
+                        } else if (page === currentPageInvoices - 2 || page === currentPageInvoices + 2) {
+                          return <span key={page} className="px-2 text-muted-foreground">...</span>;
+                        }
+                        return null;
+                      })}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCurrentPageInvoices(prev => Math.min(Math.ceil(dailyStats.invoices.length / invoicesPerPage), prev + 1))}
+                      disabled={currentPageInvoices === Math.ceil(dailyStats.invoices.length / invoicesPerPage)}
+                    >
+                      Siguiente
+                    </Button>
+                  </div>
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -1380,6 +1440,9 @@ export function Closures() {
         onOpenChange={setIsMonthlyDialogOpen}
         monthlyStats={monthlyStats}
         monthToClose={getMonthToClose()}
+        invoices={invoices}
+        exchanges={exchanges}
+        returns={returns}
         onSuccess={() => {
           setSelectedMonth(null); // Reset selection after successful closure
           loadData();

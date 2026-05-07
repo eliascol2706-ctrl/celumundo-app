@@ -23,6 +23,7 @@ import {
   deleteCustomer,
   addCreditHistory,
   getInvoices,
+  getAllInvoices,
   type Customer,
   type Invoice,
   getCurrentUser
@@ -79,7 +80,7 @@ export function CustomersNew() {
   const loadCustomers = async () => {
     const [customersData, invoicesData] = await Promise.all([
       getCustomers(),
-      getInvoices()
+      getAllInvoices()
     ]);
     setCustomers(customersData);
     setInvoices(invoicesData);

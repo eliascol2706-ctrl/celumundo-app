@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, ChevronLeft, ChevronRight, Loader2, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Loader2, CheckCircle, ChevronDown, ChevronUp, FileText, Package } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -7,7 +7,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { formatCOP } from '../lib/currency';
-import { addMonthlyClosure, getCurrentUser, getColombiaDate } from '../lib/supabase';
+import { addMonthlyClosure, getCurrentUser, getColombiaDate, extractColombiaDate } from '../lib/supabase';
 import { toast } from 'sonner';
 
 type Phase = 1 | 2;
@@ -35,6 +35,9 @@ interface MonthlyClosureDialogProps {
     exchangeImpact?: number; // NUEVO: Impacto de cambios por separado
   };
   monthToClose: string; // NUEVO: Mes que se está cerrando (formato YYYY-MM)
+  invoices?: any[]; // NUEVO: Facturas para justificativo de diferencia
+  exchanges?: any[]; // NUEVO: Cambios para justificativo de diferencia
+  returns?: any[]; // NUEVO: Devoluciones para justificativo de diferencia
   onSuccess: () => void;
 }
 
@@ -43,6 +46,9 @@ export function MonthlyClosureDialog({
   onOpenChange,
   monthlyStats,
   monthToClose,
+  invoices = [],
+  exchanges = [],
+  returns = [],
   onSuccess
 }: MonthlyClosureDialogProps) {
   const [phase, setPhase] = useState<Phase>(1);
@@ -50,6 +56,8 @@ export function MonthlyClosureDialog({
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [showJustification, setShowJustification] = useState(false);
+  const [isJustificativoModalOpen, setIsJustificativoModalOpen] = useState(false);
+  const [expandedDetail, setExpandedDetail] = useState<'partial_returns' | 'negative_exchanges' | 'positive_exchanges' | null>(null);
 
   const currentUser = getCurrentUser();
 
@@ -139,7 +147,90 @@ export function MonthlyClosureDialog({
     }, 2000);
   };
 
+  // Calcular datos para Justificativo de Diferencia
+  const getJustificativoData = () => {
+    // 1. Facturas con devolución parcial del mes
+    const partialReturnsInvoices = invoices.filter(inv => {
+      if (!inv.date) return false;
+      const invDate = extractColombiaDate(inv.date);
+      const monthMatch = invDate.substring(0, 7) === monthToClose;
+      const isPartialReturn = inv.status === 'partial_return';
+      return monthMatch && isPartialReturn;
+    });
+
+    // Calcular total de productos devueltos en devoluciones parciales
+    let totalPartialReturns = 0;
+    const partialReturnsDetails: any[] = [];
+
+    partialReturnsInvoices.forEach(invoice => {
+      // Buscar las devoluciones asociadas a esta factura
+      const invoiceReturns = returns.filter(ret => ret.invoice_id === invoice.id);
+
+      invoiceReturns.forEach(ret => {
+        totalPartialReturns += ret.total || 0;
+        partialReturnsDetails.push({
+          invoice_number: invoice.number,
+          customer_name: invoice.customer_name || 'Cliente general',
+          return_total: ret.total || 0,
+          return_date: ret.date,
+          items: ret.items || []
+        });
+      });
+    });
+
+    // 2. Cambios con excedente negativo (devolvemos dinero al cliente - price_difference negativo)
+    const negativeExchanges = exchanges.filter(ex => {
+      if (!ex.date) return false;
+      if (ex.status === 'pending') return false;
+      const exDate = extractColombiaDate(ex.date);
+      const diff = Number(ex.price_difference) || 0;
+      const monthMatch = exDate.substring(0, 7) === monthToClose;
+      const isNegative = diff < 0;
+      return monthMatch && isNegative;
+    });
+
+    const totalNegativeExchanges = negativeExchanges.reduce((sum, ex) => {
+      return sum + Math.abs(Number(ex.price_difference) || 0);
+    }, 0);
+
+    // 3. Cambios con excedente positivo (el cliente debe pagar más - price_difference positivo)
+    const positiveExchanges = exchanges.filter(ex => {
+      if (!ex.date) return false;
+      if (ex.status === 'pending') return false;
+      const exDate = extractColombiaDate(ex.date);
+      const diff = Number(ex.price_difference) || 0;
+      const monthMatch = exDate.substring(0, 7) === monthToClose;
+      const isPositive = diff > 0;
+      return monthMatch && isPositive;
+    });
+
+    const totalPositiveExchanges = positiveExchanges.reduce((sum, ex) => {
+      return sum + (Number(ex.price_difference) || 0);
+    }, 0);
+
+    return {
+      partialReturns: {
+        total: totalPartialReturns,
+        count: partialReturnsDetails.length,
+        details: partialReturnsDetails
+      },
+      negativeExchanges: {
+        total: totalNegativeExchanges,
+        count: negativeExchanges.length,
+        details: negativeExchanges
+      },
+      positiveExchanges: {
+        total: totalPositiveExchanges,
+        count: positiveExchanges.length,
+        details: positiveExchanges
+      }
+    };
+  };
+
+  const justificativoData = getJustificativoData();
+
   return (
+    <>
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" aria-describedby={isLoading || isSuccess ? "status-description" : undefined}>
         {isLoading ? (
@@ -383,6 +474,18 @@ export function MonthlyClosureDialog({
                               - Gastos: COP {formatCOP(monthlyStats.totalExpenses)}
                             </p>
                           </div>
+                        </div>
+
+                        {/* Botón Justificativo de Diferencia */}
+                        <div className="pt-4">
+                          <Button
+                            variant="outline"
+                            onClick={() => setIsJustificativoModalOpen(true)}
+                            className="w-full bg-amber-50 dark:bg-amber-950/30 border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-950/50 text-amber-900 dark:text-amber-100"
+                          >
+                            <FileText className="w-4 h-4 mr-2" />
+                            Justificativo de Diferencia
+                          </Button>
                         </div>
                       </div>
                       <div className="flex-shrink-0 bg-white/50 dark:bg-zinc-900/50 p-4 rounded-lg border border-emerald-200 dark:border-emerald-800">
@@ -750,5 +853,232 @@ export function MonthlyClosureDialog({
         )}
       </DialogContent>
     </Dialog>
+
+      {/* Modal de Justificativo de Diferencia */}
+      <Dialog open={isJustificativoModalOpen} onOpenChange={setIsJustificativoModalOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileText className="w-5 h-5 text-amber-600" />
+              Justificativo de Diferencia
+            </DialogTitle>
+            <DialogDescription>
+              Detalle de devoluciones parciales y excedentes de cambios del mes
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            {/* 1. Devoluciones Parciales */}
+            <Card className="border-orange-200 dark:border-orange-800">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base font-semibold text-orange-900 dark:text-orange-100">
+                    Productos Devueltos (Devoluciones Parciales)
+                  </CardTitle>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setExpandedDetail(expandedDetail === 'partial_returns' ? null : 'partial_returns')}
+                  >
+                    {expandedDetail === 'partial_returns' ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                      {justificativoData.partialReturns.count} devoluciones parciales
+                    </p>
+                  </div>
+                  <div className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+                    COP {formatCOP(justificativoData.partialReturns.total)}
+                  </div>
+                </div>
+
+                {expandedDetail === 'partial_returns' && justificativoData.partialReturns.details.length > 0 && (
+                  <div className="mt-4 border-t border-orange-200 dark:border-orange-800 pt-4">
+                    <div className="space-y-3">
+                      {justificativoData.partialReturns.details.map((detail, idx) => (
+                        <div key={idx} className="bg-orange-50 dark:bg-orange-950/30 p-3 rounded-lg border border-orange-200 dark:border-orange-800">
+                          <div className="flex justify-between items-start mb-2">
+                            <div>
+                              <p className="font-semibold text-sm">Factura #{detail.invoice_number}</p>
+                              <p className="text-xs text-zinc-600 dark:text-zinc-400">{detail.customer_name}</p>
+                              <p className="text-xs text-zinc-500 dark:text-zinc-500">
+                                {new Date(detail.return_date).toLocaleDateString('es-ES')}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-bold text-orange-600 dark:text-orange-400">
+                                COP {formatCOP(detail.return_total)}
+                              </p>
+                            </div>
+                          </div>
+                          {detail.items && detail.items.length > 0 && (
+                            <div className="mt-2 pt-2 border-t border-orange-200 dark:border-orange-700">
+                              <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 mb-1">
+                                Productos devueltos:
+                              </p>
+                              <ul className="text-xs space-y-1">
+                                {detail.items.map((item: any, itemIdx: number) => (
+                                  <li key={itemIdx} className="text-zinc-600 dark:text-zinc-400">
+                                    • {item.productName} - Cantidad: {item.quantity} - COP {formatCOP(item.total)}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* 2. Excedentes Negativos (Devolvemos al cliente) */}
+            <Card className="border-red-200 dark:border-red-800">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base font-semibold text-red-900 dark:text-red-100">
+                    Excedentes Negativos de Cambios
+                  </CardTitle>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setExpandedDetail(expandedDetail === 'negative_exchanges' ? null : 'negative_exchanges')}
+                  >
+                    {expandedDetail === 'negative_exchanges' ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                      {justificativoData.negativeExchanges.count} cambios con excedente negativo
+                    </p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-500">
+                      (Devolvemos dinero al cliente)
+                    </p>
+                  </div>
+                  <div className="text-2xl font-bold text-red-600 dark:text-red-400">
+                    -COP {formatCOP(justificativoData.negativeExchanges.total)}
+                  </div>
+                </div>
+
+                {expandedDetail === 'negative_exchanges' && justificativoData.negativeExchanges.details.length > 0 && (
+                  <div className="mt-4 border-t border-red-200 dark:border-red-800 pt-4">
+                    <div className="space-y-3">
+                      {justificativoData.negativeExchanges.details.map((exchange, idx) => (
+                        <div key={idx} className="bg-red-50 dark:bg-red-950/30 p-3 rounded-lg border border-red-200 dark:border-red-800">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-semibold text-sm">{exchange.customer_name || 'Cliente general'}</p>
+                              <p className="text-xs text-zinc-500 dark:text-zinc-500">
+                                {new Date(exchange.date).toLocaleDateString('es-ES')}
+                              </p>
+                              <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1">
+                                Factura original: #{exchange.original_invoice_number}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-bold text-red-600 dark:text-red-400">
+                                COP {formatCOP(Math.abs(Number(exchange.price_difference) || 0))}
+                              </p>
+                              <p className="text-xs text-zinc-500">Excedente</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* 3. Excedentes Positivos (Cliente paga más) */}
+            <Card className="border-emerald-200 dark:border-emerald-800">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base font-semibold text-emerald-900 dark:text-emerald-100">
+                    Excedentes Positivos de Cambios
+                  </CardTitle>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setExpandedDetail(expandedDetail === 'positive_exchanges' ? null : 'positive_exchanges')}
+                  >
+                    {expandedDetail === 'positive_exchanges' ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                      {justificativoData.positiveExchanges.count} cambios con excedente positivo
+                    </p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-500">
+                      (El cliente debe pagar más)
+                    </p>
+                  </div>
+                  <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                    +COP {formatCOP(justificativoData.positiveExchanges.total)}
+                  </div>
+                </div>
+
+                {expandedDetail === 'positive_exchanges' && justificativoData.positiveExchanges.details.length > 0 && (
+                  <div className="mt-4 border-t border-emerald-200 dark:border-emerald-800 pt-4">
+                    <div className="space-y-3">
+                      {justificativoData.positiveExchanges.details.map((exchange, idx) => (
+                        <div key={idx} className="bg-emerald-50 dark:bg-emerald-950/30 p-3 rounded-lg border border-emerald-200 dark:border-emerald-800">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <p className="font-semibold text-sm">{exchange.customer_name || 'Cliente general'}</p>
+                              <p className="text-xs text-zinc-500 dark:text-zinc-500">
+                                {new Date(exchange.date).toLocaleDateString('es-ES')}
+                              </p>
+                              <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1">
+                                Factura original: #{exchange.original_invoice_number}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="font-bold text-emerald-600 dark:text-emerald-400">
+                                COP {formatCOP(Number(exchange.price_difference) || 0)}
+                              </p>
+                              <p className="text-xs text-zinc-500">Excedente</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          <div className="flex justify-end pt-4">
+            <Button variant="outline" onClick={() => setIsJustificativoModalOpen(false)}>
+              Cerrar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
