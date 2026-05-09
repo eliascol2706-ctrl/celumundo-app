@@ -50,6 +50,9 @@ export interface InvoiceItem {
   total: number;
   unitIds?: string[]; // NUEVO: IDs de las unidades específicas vendidas (ej: ['0001', '0002'])
   unitIdNotes?: { [id: string]: string }; // NUEVO: Notas adicionales por ID única
+  exchanged?: boolean; // NUEVO: Indica si este producto fue devuelto en un cambio
+  exchangeId?: string; // NUEVO: ID del cambio asociado
+  exchangedFor?: ExchangeProduct[]; // NUEVO: Productos entregados en cambio por este producto
 }
 
 export interface Invoice {
@@ -662,6 +665,41 @@ export const searchProductsForInvoice = async (searchTerm: string): Promise<Prod
   }
 };
 
+// NUEVA FUNCIÓN: Búsqueda de facturas para cambios
+export const searchInvoicesForExchange = async (searchTerm: string): Promise<Invoice[]> => {
+  const company = getCurrentCompany();
+
+  try {
+    let query = supabase
+      .from('invoices')
+      .select('*')
+      .eq('company', company)
+      .in('status', ['paid', 'partial_return']); // Solo facturas pagadas o parcialmente devueltas
+
+    // Si hay término de búsqueda, aplicar filtros
+    if (searchTerm && searchTerm.trim() !== '') {
+      const term = searchTerm.trim();
+      // Buscar en número de factura o nombre de cliente
+      query = query.or(`number.ilike.%${term}%,customer_name.ilike.%${term}%`);
+    }
+
+    // Ordenar por fecha descendente y limitar a 100 resultados
+    query = query.order('date', { ascending: false }).limit(100);
+
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error searching invoices for exchange:', error);
+      return [];
+    }
+
+    return data || [];
+  } catch (error) {
+    console.error('Error searching invoices for exchange:', error);
+    return [];
+  }
+};
+
 export const addProduct = async (product: Omit<Product, 'id' | 'company' | 'created_at' | 'updated_at'>): Promise<Product | null> => {
   const company = getCurrentCompany();
   const { data, error } = await supabase
@@ -683,6 +721,25 @@ export const addProduct = async (product: Omit<Product, 'id' | 'company' | 'crea
 
 export const updateProduct = async (id: string, updates: Partial<Product>): Promise<Product | null> => {
   const company = getCurrentCompany();
+
+  // Validar campos numéricos que tienen límites en la base de datos
+  const numericFields = ['margin1', 'margin2', 'margin_final'];
+  const maxValue = 999.99;
+
+  for (const field of numericFields) {
+    if (updates[field as keyof Product] !== undefined) {
+      const value = updates[field as keyof Product] as number;
+      if (value > maxValue) {
+        console.warn(`⚠️ Field ${field} has value ${value} which exceeds database limit of ${maxValue}. Capping to ${maxValue}.`);
+        (updates as any)[field] = maxValue;
+      }
+      if (value < -maxValue) {
+        console.warn(`⚠️ Field ${field} has value ${value} which exceeds database limit of -${maxValue}. Capping to -${maxValue}.`);
+        (updates as any)[field] = -maxValue;
+      }
+    }
+  }
+
   const { data, error } = await supabase
     .from('products')
     .update(updates)
@@ -691,7 +748,8 @@ export const updateProduct = async (id: string, updates: Partial<Product>): Prom
     .single();
 
   if (error) {
-    console.error('Error updating product:', error);
+    console.error('❌ Error updating product:', error);
+    console.error('❌ Failed updates were:', JSON.stringify(updates, null, 2));
     return null;
   }
 
@@ -3194,16 +3252,24 @@ export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_
       const newStock = product.stock + originalProd.quantity;
       let newRegisteredIds = product.registered_ids || [];
 
-      // Si el producto usa IDs únicas, agregarlas de vuelta
+      // Si el producto usa IDs únicas, HABILITAR las devueltas (disabled = false)
+      // Solo modificar las IDs que están en la lista de IDs devueltas
       if (product.use_unit_ids && originalProd.unitIds && originalProd.unitIds.length > 0) {
-        if (isPendingExchange) {
-          const { restoreIdsForExchange } = await import('./unit-ids-utils');
-          newRegisteredIds = restoreIdsForExchange(newRegisteredIds, originalProd.unitIds, data.id);
-        } else {
-          const { convertToIdsWithNotes } = await import('./unit-ids-utils');
-          const idsAsObjects = convertToIdsWithNotes(originalProd.unitIds);
-          newRegisteredIds = [...idsAsObjects, ...newRegisteredIds];
-        }
+        newRegisteredIds = newRegisteredIds.map((idObj: any) => {
+          const currentId = typeof idObj === 'string' ? idObj : idObj.id;
+
+          // Solo modificar si esta ID está en la lista de IDs devueltas
+          if (originalProd.unitIds?.includes(currentId)) {
+            if (typeof idObj === 'string') {
+              return { id: idObj, disabled: false, note: '' };
+            } else {
+              return { ...idObj, disabled: false };
+            }
+          }
+
+          // Dejar sin cambios las demás IDs
+          return idObj;
+        });
       }
 
       await updateProduct(originalProd.productId, {
@@ -3242,11 +3308,24 @@ export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_
         const newStock = product.stock - newProd.quantity;
         let newRegisteredIds = product.registered_ids || [];
 
-        // Si el producto usa IDs únicas, removerlas
+        // Si el producto usa IDs únicas, DESHABILITAR las entregadas (disabled = true)
+        // Solo modificar las IDs que están en la lista de IDs entregadas
         if (product.use_unit_ids && newProd.unitIds && newProd.unitIds.length > 0) {
-          newRegisteredIds = newRegisteredIds.filter(
-            (idObj: any) => !newProd.unitIds?.includes(typeof idObj === 'string' ? idObj : idObj.id)
-          );
+          newRegisteredIds = newRegisteredIds.map((idObj: any) => {
+            const currentId = typeof idObj === 'string' ? idObj : idObj.id;
+
+            // Solo modificar si esta ID está en la lista de IDs entregadas
+            if (newProd.unitIds?.includes(currentId)) {
+              if (typeof idObj === 'string') {
+                return { id: idObj, disabled: true, note: '' };
+              } else {
+                return { ...idObj, disabled: true };
+              }
+            }
+
+            // Dejar sin cambios las demás IDs
+            return idObj;
+          });
         }
 
         await updateProduct(newProd.productId, {
@@ -3255,6 +3334,148 @@ export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_
         });
       }
     }
+  }
+
+  // ============================================
+  // ACTUALIZAR FACTURA CON INFORMACIÓN DEL CAMBIO
+  // ============================================
+  if (exchangeData.invoice_id && data) {
+    try {
+      console.log(`🔄 Updating invoice ${exchangeData.invoice_number} with exchange ${data.id}`);
+
+      // Obtener la factura actual
+      const { data: invoice, error: invoiceError } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('id', exchangeData.invoice_id)
+        .eq('company', company)
+        .single();
+
+      if (invoiceError) {
+        console.error('Error fetching invoice for update:', invoiceError);
+        throw invoiceError;
+      }
+
+      if (invoice) {
+        console.log(`📋 Current invoice items:`, invoice.items);
+
+        // Actualizar los items de la factura marcando los cambiados
+        let updatedItems = invoice.items.map((item: InvoiceItem) => {
+          // Buscar si este producto fue devuelto (comparar por productId)
+          const returnedProduct = exchangeData.original_products.find(
+            (p: ExchangeProduct) => p.productId === item.productId
+          );
+
+          if (returnedProduct) {
+            console.log(`✏️ Marking product ${item.productName} as exchanged`);
+            // Marcar como cambiado y agregar productos entregados
+            return {
+              ...item,
+              exchanged: true,
+              exchangeId: data.id,
+              exchangedFor: !isPendingExchange ? exchangeData.new_products : []
+            };
+          }
+
+          return item;
+        });
+
+        // Si NO es un cambio pendiente, agregar los nuevos productos al array de items
+        // Estos aparecerán como productos vendidos normales para cálculos de costos
+        if (!isPendingExchange && exchangeData.new_products.length > 0) {
+          console.log(`➕ Adding ${exchangeData.new_products.length} new products to invoice items`);
+
+          const newItems: InvoiceItem[] = exchangeData.new_products.map((newProd: ExchangeProduct) => ({
+            productId: newProd.productId,
+            productName: newProd.productName,
+            quantity: newProd.quantity,
+            price: newProd.price,
+            total: newProd.total,
+            unitIds: newProd.unitIds || [],
+            // Marcar estos items como parte del cambio para referencia
+            fromExchange: true,
+            exchangeId: data.id
+          } as any));
+
+          updatedItems = [...updatedItems, ...newItems];
+        }
+
+        console.log(`📋 Updated invoice items:`, updatedItems);
+
+        // Recalcular el total de la factura
+        // Ignorar items con exchanged: true (productos devueltos)
+        // Sumar solo items normales y items con fromExchange: true (productos entregados en cambio)
+        const newTotal = updatedItems.reduce((sum: number, item: any) => {
+          // Ignorar productos que fueron devueltos (exchanged sin fromExchange)
+          if (item.exchanged && !item.fromExchange) {
+            return sum;
+          }
+          // Sumar el resto (items normales y productos nuevos del cambio)
+          return sum + item.total;
+        }, 0);
+
+        console.log(`💰 Recalculated invoice total: ${invoice.total} → ${newTotal}`);
+
+        // Actualizar métodos de pago según el cambio
+        let updatedPaymentCash = invoice.payment_cash || 0;
+        let updatedPaymentTransfer = invoice.payment_transfer || 0;
+        let updatedPaymentOther = invoice.payment_other || 0;
+
+        // Solo actualizar si NO es un cambio pendiente (los pendientes no tienen pago todavía)
+        if (!isPendingExchange) {
+          // Si price_difference > 0: cliente paga más (SUMAR)
+          // Si price_difference < 0: se devuelve dinero (RESTAR)
+          const priceDiff = exchangeData.price_difference || 0;
+
+          if (priceDiff > 0) {
+            // Cliente paga la diferencia - SUMAR
+            updatedPaymentCash += (exchangeData.payment_cash || 0);
+            updatedPaymentTransfer += (exchangeData.payment_transfer || 0);
+            updatedPaymentOther += (exchangeData.payment_other || 0);
+            console.log(`💳 Cliente pagó más (+${priceDiff}) - Sumando pagos`);
+          } else if (priceDiff < 0) {
+            // Se devuelve dinero - RESTAR
+            updatedPaymentCash -= (exchangeData.payment_cash || 0);
+            updatedPaymentTransfer -= (exchangeData.payment_transfer || 0);
+            updatedPaymentOther -= (exchangeData.payment_other || 0);
+            console.log(`💳 Se devuelve dinero (${priceDiff}) - Restando pagos`);
+          }
+
+          console.log(`💳 Updated payment methods - Cash: ${updatedPaymentCash}, Transfer: ${updatedPaymentTransfer}, Other: ${updatedPaymentOther}`);
+        }
+
+        console.log(`💾 Saving updated invoice to database...`);
+
+        // Actualizar la factura con los items modificados, el nuevo total y los métodos de pago
+        const { error: updateError } = await supabase
+          .from('invoices')
+          .update({
+            items: updatedItems,
+            total: newTotal,
+            payment_cash: updatedPaymentCash,
+            payment_transfer: updatedPaymentTransfer,
+            payment_other: updatedPaymentOther,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', exchangeData.invoice_id)
+          .eq('company', company);
+
+        if (updateError) {
+          console.error('❌ Error updating invoice:', updateError);
+          throw updateError;
+        }
+
+        console.log(`✅ Invoice ${invoice.number} updated successfully with exchange information`);
+      } else {
+        console.warn('⚠️ Invoice not found for update');
+      }
+    } catch (error) {
+      console.error('❌ Error updating invoice with exchange info:', error);
+      // No fallar la operación completa si no se puede actualizar la factura
+      // pero sí loguear el error detalladamente
+    }
+  } else {
+    console.log('ℹ️ No invoice_id provided or exchange data is null, skipping invoice update');
   }
 
   return data;
@@ -3323,10 +3544,24 @@ export const finalizeExchange = async (
         const newStock = product.stock - newProd.quantity;
         let newRegisteredIds = product.registered_ids || [];
 
-        // Si el producto usa IDs únicas, eliminarlas definitivamente
+        // Si el producto usa IDs únicas, DESHABILITAR las entregadas (disabled = true)
+        // Solo modificar las IDs que están en la lista de IDs entregadas
         if (product.use_unit_ids && newProd.unitIds && newProd.unitIds.length > 0) {
-          const { removeIds } = await import('./unit-ids-utils');
-          newRegisteredIds = removeIds(newRegisteredIds, newProd.unitIds);
+          newRegisteredIds = newRegisteredIds.map((idObj: any) => {
+            const currentId = typeof idObj === 'string' ? idObj : idObj.id;
+
+            // Solo modificar si esta ID está en la lista de IDs entregadas
+            if (newProd.unitIds?.includes(currentId)) {
+              if (typeof idObj === 'string') {
+                return { id: idObj, disabled: true, note: '' };
+              } else {
+                return { ...idObj, disabled: true };
+              }
+            }
+
+            // Dejar sin cambios las demás IDs
+            return idObj;
+          });
         }
 
         await updateProduct(newProd.productId, {
@@ -3404,6 +3639,131 @@ export const finalizeExchange = async (
       return null;
     }
 
+    // 6. Actualizar la factura con los productos entregados
+    if (exchange.invoice_id && updatedExchange) {
+      try {
+        console.log(`🔄 Finalizing invoice ${exchange.invoice_number} with exchange ${exchangeId}`);
+
+        const { data: invoice, error: invoiceError } = await supabase
+          .from('invoices')
+          .select('*')
+          .eq('id', exchange.invoice_id)
+          .eq('company', company)
+          .single();
+
+        if (invoiceError) {
+          console.error('❌ Error fetching invoice for finalize:', invoiceError);
+          throw invoiceError;
+        }
+
+        if (invoice) {
+          console.log(`📋 Current invoice items before finalize:`, invoice.items);
+
+          // Actualizar los items marcando los cambiados con los productos entregados
+          let updatedItems = invoice.items.map((item: InvoiceItem) => {
+            // Si este item ya fue marcado como exchanged con este exchangeId, agregar los productos entregados
+            if (item.exchanged && item.exchangeId === exchangeId) {
+              console.log(`✏️ Adding exchangedFor products to ${item.productName}`);
+              return {
+                ...item,
+                exchangedFor: finalizeData.new_products
+              };
+            }
+            return item;
+          });
+
+          // Agregar los nuevos productos al array de items
+          // Estos aparecerán como productos vendidos normales para cálculos de costos
+          if (finalizeData.new_products.length > 0) {
+            console.log(`➕ Adding ${finalizeData.new_products.length} new products to invoice items`);
+
+            const newItems: InvoiceItem[] = finalizeData.new_products.map((newProd: ExchangeProduct) => ({
+              productId: newProd.productId,
+              productName: newProd.productName,
+              quantity: newProd.quantity,
+              price: newProd.price,
+              total: newProd.total,
+              unitIds: newProd.unitIds || [],
+              // Marcar estos items como parte del cambio para referencia
+              fromExchange: true,
+              exchangeId: exchangeId
+            } as any));
+
+            updatedItems = [...updatedItems, ...newItems];
+          }
+
+          console.log(`📋 Updated invoice items after finalize:`, updatedItems);
+
+          // Recalcular el total de la factura
+          // Ignorar items con exchanged: true (productos devueltos)
+          // Sumar solo items normales y items con fromExchange: true (productos entregados en cambio)
+          const newTotal = updatedItems.reduce((sum: number, item: any) => {
+            // Ignorar productos que fueron devueltos (exchanged sin fromExchange)
+            if (item.exchanged && !item.fromExchange) {
+              return sum;
+            }
+            // Sumar el resto (items normales y productos nuevos del cambio)
+            return sum + item.total;
+          }, 0);
+
+          console.log(`💰 Recalculated invoice total: ${invoice.total} → ${newTotal}`);
+
+          // Actualizar métodos de pago según el cambio finalizado
+          let updatedPaymentCash = invoice.payment_cash || 0;
+          let updatedPaymentTransfer = invoice.payment_transfer || 0;
+          let updatedPaymentOther = invoice.payment_other || 0;
+
+          // Si price_difference > 0: cliente paga más (SUMAR)
+          // Si price_difference < 0: se devuelve dinero (RESTAR)
+          if (price_difference > 0) {
+            // Cliente paga la diferencia - SUMAR
+            updatedPaymentCash += (finalizeData.payment_cash || 0);
+            updatedPaymentTransfer += (finalizeData.payment_transfer || 0);
+            updatedPaymentOther += (finalizeData.payment_other || 0);
+            console.log(`💳 Cliente pagó más (+${price_difference}) - Sumando pagos`);
+          } else if (price_difference < 0) {
+            // Se devuelve dinero - RESTAR
+            updatedPaymentCash -= (finalizeData.payment_cash || 0);
+            updatedPaymentTransfer -= (finalizeData.payment_transfer || 0);
+            updatedPaymentOther -= (finalizeData.payment_other || 0);
+            console.log(`💳 Se devuelve dinero (${price_difference}) - Restando pagos`);
+          }
+
+          console.log(`💳 Updated payment methods - Cash: ${updatedPaymentCash}, Transfer: ${updatedPaymentTransfer}, Other: ${updatedPaymentOther}`);
+
+          console.log(`💾 Saving finalized invoice to database...`);
+
+          // Actualizar la factura con los items modificados, el nuevo total y los métodos de pago
+          const { error: updateError } = await supabase
+            .from('invoices')
+            .update({
+              items: updatedItems,
+              total: newTotal,
+              payment_cash: updatedPaymentCash,
+              payment_transfer: updatedPaymentTransfer,
+              payment_other: updatedPaymentOther,
+              updated_at: new Date().toISOString()
+            })
+            .eq('id', exchange.invoice_id)
+            .eq('company', company);
+
+          if (updateError) {
+            console.error('❌ Error updating invoice:', updateError);
+            throw updateError;
+          }
+
+          console.log(`✅ Invoice ${invoice.number} finalized successfully with exchange products`);
+        } else {
+          console.warn('⚠️ Invoice not found for finalize update');
+        }
+      } catch (error) {
+        console.error('❌ Error updating invoice with finalized exchange:', error);
+        // No fallar la operación si no se puede actualizar la factura
+      }
+    } else {
+      console.log('ℹ️ No invoice_id or updatedExchange, skipping invoice finalize update');
+    }
+
     console.log(`✅ Exchange ${exchange.exchange_number} finalized successfully`);
     return updatedExchange;
   } catch (error) {
@@ -3472,10 +3832,26 @@ export const cancelExchange = async (exchangeId: string): Promise<boolean> => {
         const newStock = product.stock - originalProd.quantity;
         let newRegisteredIds = product.registered_ids || [];
 
-        // Si el producto usa IDs únicas, liberar las IDs que estaban marcadas como "en cambio"
+        // Si el producto usa IDs únicas, DESHABILITARLAS (no eliminarlas)
+        // Al cancelar un cambio pendiente, devolvemos los productos al cliente,
+        // por lo que debemos deshabilitar las IDs que se habían habilitado
+        // Solo modificar las IDs que están en la lista de IDs devueltas
         if (product.use_unit_ids && originalProd.unitIds && originalProd.unitIds.length > 0) {
-          const { releaseExchangeIds } = await import('./unit-ids-utils');
-          newRegisteredIds = releaseExchangeIds(newRegisteredIds, exchangeId);
+          newRegisteredIds = newRegisteredIds.map((idObj: any) => {
+            const currentId = typeof idObj === 'string' ? idObj : idObj.id;
+
+            // Solo modificar si esta ID está en la lista de IDs devueltas
+            if (originalProd.unitIds?.includes(currentId)) {
+              if (typeof idObj === 'string') {
+                return { id: idObj, disabled: true, note: '' };
+              } else {
+                return { ...idObj, disabled: true };
+              }
+            }
+
+            // Dejar sin cambios las demás IDs
+            return idObj;
+          });
         }
 
         await updateProduct(originalProd.productId, {
@@ -3485,7 +3861,61 @@ export const cancelExchange = async (exchangeId: string): Promise<boolean> => {
       }
     }
 
-    // 3. Eliminar el cambio pendiente (no marcarlo como cancelado)
+    // 3. Revertir cambios en la factura (remover marcadores de cambio)
+    if (exchange.invoice_id) {
+      const { data: invoice, error: invoiceError } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('id', exchange.invoice_id)
+        .eq('company', company)
+        .single();
+
+      if (invoice && !invoiceError) {
+        // 1. Eliminar items que fueron agregados por este cambio (fromExchange)
+        // 2. Limpiar marcadores del item devuelto
+        const updatedItems = invoice.items
+          .filter((item: any) => {
+            // Eliminar items agregados por este cambio
+            if (item.fromExchange && item.exchangeId === exchangeId) {
+              console.log(`🗑️ Removing exchange product: ${item.productName}`);
+              return false;
+            }
+            return true;
+          })
+          .map((item: any) => {
+            // Si este item tiene el exchangeId que estamos cancelando, remover los marcadores
+            if (item.exchangeId === exchangeId && item.exchanged) {
+              const { exchanged, exchangeId: _, exchangedFor, fromExchange, ...cleanItem } = item;
+              console.log(`🔄 Reverting exchanged product: ${item.productName}`);
+              return cleanItem;
+            }
+            return item;
+          });
+
+        // Recalcular el total de la factura (debe volver al total original)
+        const newTotal = updatedItems.reduce((sum: number, item: any) => {
+          // Ignorar productos que fueron devueltos (exchanged sin fromExchange)
+          if (item.exchanged && !item.fromExchange) {
+            return sum;
+          }
+          // Sumar el resto
+          return sum + item.total;
+        }, 0);
+
+        await supabase
+          .from('invoices')
+          .update({
+            items: updatedItems,
+            total: newTotal
+          })
+          .eq('id', exchange.invoice_id)
+          .eq('company', company);
+
+        console.log(`✅ Invoice items reverted successfully, total: ${invoice.total} → ${newTotal}`);
+      }
+    }
+
+    // 4. Eliminar el cambio pendiente (no marcarlo como cancelado)
     const { error: deleteError } = await supabase
       .from('exchanges')
       .delete()
@@ -3625,11 +4055,24 @@ export const deleteExchange = async (exchangeId: string): Promise<boolean> => {
         const newStock = product.stock - originalProd.quantity;
         let newRegisteredIds = product.registered_ids || [];
 
-        // Si el producto usa IDs únicas, removerlas
+        // Si el producto usa IDs únicas, DESHABILITARLAS (no eliminarlas)
+        // Solo modificar las IDs que están en la lista de IDs devueltas
         if (product.use_unit_ids && originalProd.unitIds && originalProd.unitIds.length > 0) {
-          newRegisteredIds = newRegisteredIds.filter(
-            (idObj: any) => !originalProd.unitIds?.includes(typeof idObj === 'string' ? idObj : idObj.id)
-          );
+          newRegisteredIds = newRegisteredIds.map((idObj: any) => {
+            const currentId = typeof idObj === 'string' ? idObj : idObj.id;
+
+            // Solo modificar si esta ID está en la lista de IDs devueltas
+            if (originalProd.unitIds?.includes(currentId)) {
+              if (typeof idObj === 'string') {
+                return { id: idObj, disabled: true, note: '' };
+              } else {
+                return { ...idObj, disabled: true };
+              }
+            }
+
+            // Dejar sin cambios las demás IDs
+            return idObj;
+          });
         }
 
         await updateProduct(originalProd.productId, {
@@ -3675,11 +4118,24 @@ export const deleteExchange = async (exchangeId: string): Promise<boolean> => {
           const newStock = product.stock + newProd.quantity;
           let newRegisteredIds = product.registered_ids || [];
 
-          // Si el producto usa IDs únicas, agregarlas de vuelta
+          // Si el producto usa IDs únicas, HABILITARLAS (no crear nuevas)
+          // Solo modificar las IDs que están en la lista de IDs entregadas
           if (product.use_unit_ids && newProd.unitIds && newProd.unitIds.length > 0) {
-            const { convertToIdsWithNotes } = await import('./unit-ids-utils');
-            const idsAsObjects = convertToIdsWithNotes(newProd.unitIds);
-            newRegisteredIds = [...idsAsObjects, ...newRegisteredIds];
+            newRegisteredIds = newRegisteredIds.map((idObj: any) => {
+              const currentId = typeof idObj === 'string' ? idObj : idObj.id;
+
+              // Solo modificar si esta ID está en la lista de IDs entregadas
+              if (newProd.unitIds?.includes(currentId)) {
+                if (typeof idObj === 'string') {
+                  return { id: idObj, disabled: false, note: '' };
+                } else {
+                  return { ...idObj, disabled: false };
+                }
+              }
+
+              // Dejar sin cambios las demás IDs
+              return idObj;
+            });
           }
 
           await updateProduct(newProd.productId, {
@@ -3689,19 +4145,103 @@ export const deleteExchange = async (exchangeId: string): Promise<boolean> => {
         }
       }
     }
-    
-    // 3. Eliminar el cambio de la base de datos
+
+    // 3. Revertir cambios en la factura (remover marcadores de cambio)
+    if (exchange.invoice_id) {
+      const { data: invoice, error: invoiceError } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('id', exchange.invoice_id)
+        .eq('company', company)
+        .single();
+
+      if (invoice && !invoiceError) {
+        // 1. Eliminar items que fueron agregados por este cambio (fromExchange)
+        // 2. Limpiar marcadores del item devuelto
+        const updatedItems = invoice.items
+          .filter((item: any) => {
+            // Eliminar items agregados por este cambio
+            if (item.fromExchange && item.exchangeId === exchangeId) {
+              console.log(`🗑️ Removing exchange product: ${item.productName}`);
+              return false;
+            }
+            return true;
+          })
+          .map((item: any) => {
+            // Si este item tiene el exchangeId que estamos eliminando, remover los marcadores
+            if (item.exchangeId === exchangeId && item.exchanged) {
+              const { exchanged, exchangeId: _, exchangedFor, fromExchange, ...cleanItem } = item;
+              console.log(`🔄 Reverting exchanged product: ${item.productName}`);
+              return cleanItem;
+            }
+            return item;
+          });
+
+        // Recalcular el total de la factura (debe volver al total original)
+        const newTotal = updatedItems.reduce((sum: number, item: any) => {
+          // Ignorar productos que fueron devueltos (exchanged sin fromExchange)
+          if (item.exchanged && !item.fromExchange) {
+            return sum;
+          }
+          // Sumar el resto
+          return sum + item.total;
+        }, 0);
+
+        // Revertir los métodos de pago del cambio eliminado
+        let updatedPaymentCash = invoice.payment_cash || 0;
+        let updatedPaymentTransfer = invoice.payment_transfer || 0;
+        let updatedPaymentOther = invoice.payment_other || 0;
+
+        // Solo revertir si el cambio tenía estado completado (pendientes no tienen payment)
+        if (exchange.status === 'completed') {
+          const priceDiff = exchange.price_difference || 0;
+
+          // Hacer lo inverso de lo que se hizo al crear
+          if (priceDiff > 0) {
+            // Al crear se SUMÓ, ahora RESTAR
+            updatedPaymentCash -= (exchange.payment_cash || 0);
+            updatedPaymentTransfer -= (exchange.payment_transfer || 0);
+            updatedPaymentOther -= (exchange.payment_other || 0);
+            console.log(`💳 Revirtiendo pago positivo - Restando pagos`);
+          } else if (priceDiff < 0) {
+            // Al crear se RESTÓ, ahora SUMAR
+            updatedPaymentCash += (exchange.payment_cash || 0);
+            updatedPaymentTransfer += (exchange.payment_transfer || 0);
+            updatedPaymentOther += (exchange.payment_other || 0);
+            console.log(`💳 Revirtiendo devolución de dinero - Sumando pagos`);
+          }
+
+          console.log(`💳 Reverted payment methods - Cash: ${updatedPaymentCash}, Transfer: ${updatedPaymentTransfer}, Other: ${updatedPaymentOther}`);
+        }
+
+        await supabase
+          .from('invoices')
+          .update({
+            items: updatedItems,
+            total: newTotal,
+            payment_cash: updatedPaymentCash,
+            payment_transfer: updatedPaymentTransfer,
+            payment_other: updatedPaymentOther
+          })
+          .eq('id', exchange.invoice_id)
+          .eq('company', company);
+
+        console.log(`✅ Invoice items reverted successfully, total: ${invoice.total} → ${newTotal}`);
+      }
+    }
+
+    // 4. Eliminar el cambio de la base de datos
     const { error: deleteError } = await supabase
       .from('exchanges')
       .delete()
       .eq('id', exchangeId)
       .eq('company', company);
-    
+
     if (deleteError) {
       console.error('Error al eliminar el cambio:', deleteError);
       return false;
     }
-    
+
     return true;
   } catch (error) {
     console.error('Error en deleteExchange:', error);

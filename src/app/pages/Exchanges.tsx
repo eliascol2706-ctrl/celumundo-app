@@ -1,34 +1,75 @@
 import { useState, useEffect } from 'react';
-import { Search, Plus, Package, TrendingUp, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight, Trash2, Edit, CheckCircle, XCircle, X, Loader2 } from 'lucide-react';
+import { Search, Plus, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight, Trash2, CheckCircle, XCircle, X, Loader2, ArrowRight, Package2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
-import { Textarea } from '../components/ui/textarea';
 import { formatCOP } from '../lib/currency';
-import { getExchanges, getAllProducts, getInvoices, addExchange, deleteExchange, finalizeExchange, cancelExchange, getCurrentUser, getExchangesStats, extractColombiaDate, getColombiaDateTime, searchProductsForInvoice, type Exchange, type ExchangeProduct, type Product, type Invoice } from '../lib/supabase';
-import { extractIds, type UnitIdWithNote } from '../lib/unit-ids-utils';
+import {
+  getExchanges,
+  getAllProducts,
+  searchInvoicesForExchange,
+  searchProductsForInvoice,
+  addExchange,
+  deleteExchange,
+  finalizeExchange,
+  cancelExchange,
+  getCurrentUser,
+  getExchangesStats,
+  extractColombiaDate,
+  type Exchange,
+  type ExchangeProduct,
+  type Product,
+  type Invoice
+} from '../lib/supabase';
+import { type UnitIdWithNote } from '../lib/unit-ids-utils';
 import { toast } from 'sonner';
+
+type FlowStep = 'search-invoice' | 'select-return-products' | 'select-new-products' | 'payment';
 
 export default function Exchanges() {
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [exchangeType, setExchangeType] = useState<'invoice' | 'direct' | 'pending'>('direct');
+  const [exchangeType, setExchangeType] = useState<'invoice' | 'pending'>('invoice');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Estados para el modal de selección de productos
-  const [productSelectorOpen, setProductSelectorOpen] = useState(false);
-  const [selectingFor, setSelectingFor] = useState<'original' | 'new'>('original');
+  // Estados del flujo multi-paso
+  const [flowStep, setFlowStep] = useState<FlowStep>('search-invoice');
+
+  // Estados para búsqueda de facturas
+  const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
+  const [searchedInvoices, setSearchedInvoices] = useState<Invoice[]>([]);
+  const [isSearchingInvoices, setIsSearchingInvoices] = useState(false);
+  const [hasSearchedInvoices, setHasSearchedInvoices] = useState(false);
+  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
+
+  // Estados para productos a devolver
+  const [productsToReturn, setProductsToReturn] = useState<ExchangeProduct[]>([]);
+
+  // Estados para productos nuevos (a entregar)
+  const [newProducts, setNewProducts] = useState<ExchangeProduct[]>([]);
+
+  // Estados para búsqueda de productos nuevos
   const [productSearchTerm, setProductSearchTerm] = useState('');
   const [searchedProducts, setSearchedProducts] = useState<Product[]>([]);
   const [isSearchingProducts, setIsSearchingProducts] = useState(false);
-  const [hasSearched, setHasSearched] = useState(false);
+  const [hasSearchedProducts, setHasSearchedProducts] = useState(false);
+
+  // Estados para producto seleccionado temporalmente
+  const [tempProduct, setTempProduct] = useState<Product | null>(null);
+  const [tempQuantity, setTempQuantity] = useState(1);
+  const [tempPrice, setTempPrice] = useState(0);
+  const [tempUnitIds, setTempUnitIds] = useState<string[]>([]);
+
+  // Diferencia de precio
+  const [paymentCash, setPaymentCash] = useState(0);
+  const [paymentTransfer, setPaymentTransfer] = useState(0);
+  const [paymentOther, setPaymentOther] = useState(0);
 
   // Estadísticas
   const [stats, setStats] = useState({
@@ -38,30 +79,6 @@ export default function Exchanges() {
     totalPositiveDifference: 0,
     totalNegativeDifference: 0,
   });
-
-  // Formulario - Datos generales
-  const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
-  const [invoiceSearch, setInvoiceSearch] = useState('');
-
-  // Arrays de productos
-  const [originalProducts, setOriginalProducts] = useState<ExchangeProduct[]>([]);
-  const [newProducts, setNewProducts] = useState<ExchangeProduct[]>([]);
-
-  // Estados temporales para agregar productos
-  const [tempProduct, setTempProduct] = useState<Product | null>(null);
-  const [tempQuantity, setTempQuantity] = useState(1);
-  const [tempPrice, setTempPrice] = useState(0);
-  const [tempUnitIds, setTempUnitIds] = useState<string[]>([]);
-
-  // Campo de nombre de cliente
-  const [customerName, setCustomerName] = useState('');
-  
-  // Diferencia de precio
-  const [paymentMethod, setPaymentMethod] = useState(''); // Mantener por compatibilidad
-  const [paymentCash, setPaymentCash] = useState(0);
-  const [paymentTransfer, setPaymentTransfer] = useState(0);
-  const [paymentOther, setPaymentOther] = useState(0);
-  const [notes, setNotes] = useState('');
 
   // Modal de finalización de cambio pendiente
   const [finalizeDialogOpen, setFinalizeDialogOpen] = useState(false);
@@ -74,6 +91,10 @@ export default function Exchanges() {
   const [finalizePaymentCash, setFinalizePaymentCash] = useState(0);
   const [finalizePaymentTransfer, setFinalizePaymentTransfer] = useState(0);
   const [finalizePaymentOther, setFinalizePaymentOther] = useState(0);
+  const [finalizeProductSearchTerm, setFinalizeProductSearchTerm] = useState('');
+  const [finalizeSearchedProducts, setFinalizeSearchedProducts] = useState<Product[]>([]);
+  const [isSearchingFinalizeProducts, setIsSearchingFinalizeProducts] = useState(false);
+  const [hasSearchedFinalizeProducts, setHasSearchedFinalizeProducts] = useState(false);
 
   const itemsPerPage = 10;
   const currentUser = getCurrentUser();
@@ -93,36 +114,45 @@ export default function Exchanges() {
     loadData();
   }, []);
 
-  // Limpiar campos de pago cuando la diferencia es 0
-  useEffect(() => {
-    if (originalProducts.length > 0 && newProducts.length > 0) {
-      const difference = calculatePriceDifference();
-      if (difference === 0) {
-        setPaymentCash(0);
-        setPaymentTransfer(0);
-        setPaymentOther(0);
-      }
-    }
-  }, [originalProducts, newProducts]);
-
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [exchangesData, productsData, invoicesData, statsData] = await Promise.all([
+      const [exchangesData, productsData, statsData] = await Promise.all([
         getExchanges(),
         getAllProducts(),
-        getInvoices(),
         getExchangesStats()
       ]);
       setExchanges(exchangesData);
       setProducts(productsData);
-      setInvoices(invoicesData);
       setStats(statsData);
     } catch (error) {
       console.error('Error loading data:', error);
       toast.error('Error al cargar los datos');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const handleSearchInvoices = async () => {
+    if (!invoiceSearchTerm.trim()) {
+      toast.error('Ingresa un término de búsqueda');
+      return;
+    }
+
+    setIsSearchingInvoices(true);
+    try {
+      const results = await searchInvoicesForExchange(invoiceSearchTerm);
+      setSearchedInvoices(results);
+      setHasSearchedInvoices(true);
+
+      if (results.length === 0) {
+        toast.info('No se encontraron facturas');
+      }
+    } catch (error) {
+      console.error('Error searching invoices:', error);
+      toast.error('Error al buscar facturas');
+    } finally {
+      setIsSearchingInvoices(false);
     }
   };
 
@@ -136,7 +166,7 @@ export default function Exchanges() {
     try {
       const results = await searchProductsForInvoice(productSearchTerm);
       setSearchedProducts(results);
-      setHasSearched(true);
+      setHasSearchedProducts(true);
 
       if (results.length === 0) {
         toast.info('No se encontraron productos');
@@ -149,71 +179,80 @@ export default function Exchanges() {
     }
   };
 
+  const handleSearchFinalizeProducts = async () => {
+    if (!finalizeProductSearchTerm.trim()) {
+      toast.error('Ingresa un término de búsqueda');
+      return;
+    }
+
+    setIsSearchingFinalizeProducts(true);
+    try {
+      const results = await searchProductsForInvoice(finalizeProductSearchTerm);
+      setFinalizeSearchedProducts(results);
+      setHasSearchedFinalizeProducts(true);
+
+      if (results.length === 0) {
+        toast.info('No se encontraron productos');
+      }
+    } catch (error) {
+      console.error('Error searching products:', error);
+      toast.error('Error al buscar productos');
+    } finally {
+      setIsSearchingFinalizeProducts(false);
+    }
+  };
+
   const handleOpenDialog = () => {
     resetForm();
     setIsDialogOpen(true);
   };
 
   const resetForm = () => {
-    setExchangeType('direct');
+    setExchangeType('invoice');
+    setFlowStep('search-invoice');
+    setInvoiceSearchTerm('');
+    setSearchedInvoices([]);
+    setHasSearchedInvoices(false);
     setSelectedInvoice(null);
-    setInvoiceSearch('');
-    setOriginalProducts([]);
+    setProductsToReturn([]);
     setNewProducts([]);
     setTempProduct(null);
     setTempQuantity(1);
     setTempPrice(0);
     setTempUnitIds([]);
-    setCustomerName('');
-    setPaymentMethod('');
     setPaymentCash(0);
     setPaymentTransfer(0);
     setPaymentOther(0);
-    setNotes('');
-    // Limpiar búsqueda de productos
     setProductSearchTerm('');
     setSearchedProducts([]);
-    setHasSearched(false);
+    setHasSearchedProducts(false);
   };
 
-  const handleAddOriginalProduct = () => {
-    if (!tempProduct) {
-      toast.error('Selecciona un producto');
-      return;
-    }
-
-    if (tempQuantity <= 0) {
-      toast.error('La cantidad debe ser mayor a 0');
-      return;
-    }
-
-    // Validar IDs únicas si aplica
-    if (tempProduct.use_unit_ids && tempUnitIds.length !== tempQuantity) {
-      toast.error(`Debes seleccionar ${tempQuantity} ID(s) única(s)`);
-      return;
-    }
-
-    const newProduct: ExchangeProduct = {
-      productId: tempProduct.id,
-      productName: tempProduct.name,
-      quantity: tempQuantity,
-      price: tempPrice,
-      total: tempPrice * tempQuantity,
-      unitIds: tempUnitIds.length > 0 ? tempUnitIds : undefined,
-    };
-
-    setOriginalProducts([...originalProducts, newProduct]);
-
-    // Limpiar temporales
-    setTempProduct(null);
-    setTempQuantity(1);
-    setTempPrice(0);
-    setTempUnitIds([]);
-    setProductSelectorOpen(false);
+  const handleSelectInvoice = (invoice: Invoice) => {
+    setSelectedInvoice(invoice);
+    setFlowStep('select-return-products');
   };
 
-  const handleRemoveOriginalProduct = (index: number) => {
-    setOriginalProducts(originalProducts.filter((_, i) => i !== index));
+  const handleToggleReturnProduct = (item: any, checked: boolean) => {
+    if (checked) {
+      // Agregar producto a la lista de devolución
+      const product = products.find(p => p.id === item.productId);
+      if (!product) return;
+
+      const exchangeProduct: ExchangeProduct = {
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        price: item.price,
+        total: item.total,
+        unitIds: item.unitIds || undefined,
+      };
+
+      setProductsToReturn([...productsToReturn, exchangeProduct]);
+    } else {
+      // Remover producto de la lista de devolución
+      setProductsToReturn(productsToReturn.filter(p => p.productId !== item.productId));
+    }
   };
 
   const handleAddNewProduct = () => {
@@ -235,7 +274,7 @@ export default function Exchanges() {
 
     // Validar IDs únicas si aplica
     if (tempProduct.use_unit_ids) {
-      const availableIds = extractIds(tempProduct.registered_ids);
+      const availableIds = getAvailableIds(tempProduct);
       if (availableIds.length < tempQuantity) {
         toast.error('No hay suficientes IDs únicas disponibles');
         return;
@@ -262,7 +301,6 @@ export default function Exchanges() {
     setTempQuantity(1);
     setTempPrice(0);
     setTempUnitIds([]);
-    setProductSelectorOpen(false);
   };
 
   const handleRemoveNewProduct = (index: number) => {
@@ -288,7 +326,7 @@ export default function Exchanges() {
 
     // Validar IDs únicas si aplica
     if (finalizeTempProduct.use_unit_ids) {
-      const availableIds = extractIds(finalizeTempProduct.registered_ids);
+      const availableIds = getAvailableIds(finalizeTempProduct);
       if (availableIds.length < finalizeTempQuantity) {
         toast.error('No hay suficientes IDs únicas disponibles');
         return;
@@ -315,75 +353,16 @@ export default function Exchanges() {
     setFinalizeTempQuantity(1);
     setFinalizeTempPrice(0);
     setFinalizeTempUnitIds([]);
-    setProductSelectorOpen(false);
   };
 
   const handleRemoveFinalizeProduct = (index: number) => {
     setFinalizeNewProducts(finalizeNewProducts.filter((_, i) => i !== index));
   };
 
-  const handleSelectTempProduct = (productId: string) => {
-    const product = searchedProducts.find(p => p.id === productId);
-    if (product) {
-      setTempProduct(product);
-      setTempPrice(product.final_price);
-      setTempQuantity(1);
-      setTempUnitIds([]);
-      // No cerrar el modal, solo seleccionar el producto
-    }
-  };
-
-  const handleSelectInvoice = (invoiceNumber: string) => {
-    const invoice = invoices.find(inv => inv.number === invoiceNumber);
-    if (invoice) {
-      setSelectedInvoice(invoice);
-      setInvoiceSearch(invoiceNumber);
-    }
-  };
-
-
-  const handleSelectFinalizeTempProduct = (productId: string) => {
-    // Solo se usa en el modal de finalización
-    const product = searchedProducts.find(p => p.id === productId);
-    if (product && finalizeDialogOpen) {
-      setFinalizeTempProduct(product);
-      setFinalizeTempPrice(product.final_price);
-      setFinalizeTempQuantity(1);
-      setFinalizeTempUnitIds([]);
-    }
-  };
-
   const calculatePriceDifference = () => {
-    const originalTotal = originalProducts.reduce((sum, p) => sum + p.total, 0);
+    const originalTotal = productsToReturn.reduce((sum, p) => sum + p.total, 0);
     const newTotal = newProducts.reduce((sum, p) => sum + p.total, 0);
     return newTotal - originalTotal;
-  };
-
-  const validateForm = (): string | null => {
-    if (originalProducts.length === 0) {
-      return 'Debes agregar al menos un producto original';
-    }
-
-    if (exchangeType !== 'pending' && newProducts.length === 0) {
-      return 'Debes agregar al menos un producto nuevo';
-    }
-
-    if (!customerName.trim()) {
-      return 'Debes ingresar el nombre del cliente';
-    }
-
-    // Validar diferencia de precio
-    if (exchangeType !== 'pending') {
-      const difference = calculatePriceDifference();
-      if (difference !== 0) {
-        const totalPayment = paymentCash + paymentTransfer + paymentOther;
-        if (Math.abs(totalPayment - Math.abs(difference)) > 0.01) {
-          return `El total de pagos debe ser igual a la diferencia: ${formatCOP(Math.abs(difference))}`;
-        }
-      }
-    }
-
-    return null;
   };
 
   const handleDelete = async (exchangeId: string, exchangeNumber: string) => {
@@ -409,10 +388,31 @@ export default function Exchanges() {
   };
 
   const handleSubmit = async () => {
-    const error = validateForm();
-    if (error) {
-      toast.error(error);
+    if (!selectedInvoice) {
+      toast.error('Debes seleccionar una factura');
       return;
+    }
+
+    if (productsToReturn.length === 0) {
+      toast.error('Debes seleccionar al menos un producto a devolver');
+      return;
+    }
+
+    if (exchangeType !== 'pending' && newProducts.length === 0) {
+      toast.error('Debes agregar al menos un producto nuevo');
+      return;
+    }
+
+    // Validar diferencia de precio
+    if (exchangeType !== 'pending') {
+      const difference = calculatePriceDifference();
+      if (difference !== 0) {
+        const totalPayment = paymentCash + paymentTransfer + paymentOther;
+        if (Math.abs(totalPayment - Math.abs(difference)) > 0.01) {
+          toast.error(`El total de pagos debe ser igual a la diferencia: ${formatCOP(Math.abs(difference))}`);
+          return;
+        }
+      }
     }
 
     if (!currentUser) return;
@@ -420,23 +420,23 @@ export default function Exchanges() {
     setIsLoading(true);
     try {
       const exchangeData = {
-        type: exchangeType,
+        type: 'invoice' as const,
         status: exchangeType === 'pending' ? ('pending' as const) : ('completed' as const),
-        invoice_id: selectedInvoice?.id,
-        invoice_number: selectedInvoice?.number,
-        customer_name: customerName,
+        invoice_id: selectedInvoice.id,
+        invoice_number: selectedInvoice.number,
+        customer_name: selectedInvoice.customer_name || 'Cliente general',
 
-        // NUEVO: Arrays de productos
-        original_products: originalProducts,
+        // Arrays de productos
+        original_products: productsToReturn,
         new_products: exchangeType === 'pending' ? [] : newProducts,
 
         // Compatibilidad con campos antiguos (primer producto de cada array)
-        original_product_id: originalProducts[0]?.productId || '',
-        original_product_name: originalProducts[0]?.productName || '',
-        original_quantity: originalProducts.reduce((sum, p) => sum + p.quantity, 0),
-        original_price: originalProducts[0]?.price || 0,
-        original_total: originalProducts.reduce((sum, p) => sum + p.total, 0),
-        original_unit_ids: originalProducts[0]?.unitIds,
+        original_product_id: productsToReturn[0]?.productId || '',
+        original_product_name: productsToReturn[0]?.productName || '',
+        original_quantity: productsToReturn.reduce((sum, p) => sum + p.quantity, 0),
+        original_price: productsToReturn[0]?.price || 0,
+        original_total: productsToReturn.reduce((sum, p) => sum + p.total, 0),
+        original_unit_ids: productsToReturn[0]?.unitIds,
 
         new_product_id: newProducts[0]?.productId,
         new_product_name: newProducts[0]?.productName,
@@ -449,17 +449,28 @@ export default function Exchanges() {
         payment_cash: paymentCash,
         payment_transfer: paymentTransfer,
         payment_other: paymentOther,
-        notes: notes,
+        notes: '',
         registered_by: currentUser?.username || 'Usuario',
       };
+
+      console.log('📤 [Exchanges] Enviando datos de cambio:', {
+        invoice_id: exchangeData.invoice_id,
+        invoice_number: exchangeData.invoice_number,
+        productsToReturn: exchangeData.original_products,
+        newProducts: exchangeData.new_products,
+        type: exchangeData.type,
+        status: exchangeData.status
+      });
 
       const result = await addExchange(exchangeData);
 
       if (result) {
+        console.log('✅ [Exchanges] Cambio creado:', result);
         toast.success('Cambio registrado exitosamente');
         setIsDialogOpen(false);
         loadData();
       } else {
+        console.error('❌ [Exchanges] Error: addExchange retornó null');
         toast.error('Error al registrar el cambio');
       }
     } catch (error) {
@@ -495,7 +506,7 @@ export default function Exchanges() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-3xl font-bold">Cambios</h2>
-          <p className="text-muted-foreground mt-1">Gestión de intercambio de productos</p>
+          <p className="text-muted-foreground mt-1">Gestión de intercambio de productos por factura</p>
         </div>
         <Button onClick={handleOpenDialog} disabled={isLoading}>
           <Plus className="mr-2 h-4 w-4" />
@@ -522,7 +533,7 @@ export default function Exchanges() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <Package className="h-4 w-4" />
+              <Package2 className="h-4 w-4" />
               Por Factura
             </CardTitle>
           </CardHeader>
@@ -536,7 +547,7 @@ export default function Exchanges() {
         <Card>
           <CardHeader className="pb-3">
             <CardTitle className="text-sm font-medium text-muted-foreground flex items-center gap-2">
-              <TrendingUp className="h-4 w-4" />
+              <DollarSign className="h-4 w-4" />
               Diferencias Cobradas
             </CardTitle>
           </CardHeader>
@@ -597,13 +608,12 @@ export default function Exchanges() {
                     <tr className="border-b border-border">
                       <th className="text-left py-3 px-3 text-sm font-medium">Número</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Fecha</th>
+                      <th className="text-left py-3 px-3 text-sm font-medium">Factura</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Cliente</th>
                       <th className="text-left py-3 px-3 text-sm font-medium">Estado</th>
-                      <th className="text-left py-3 px-3 text-sm font-medium">Tipo</th>
-                      <th className="text-left py-3 px-3 text-sm font-medium">Producto Original</th>
-                      <th className="text-left py-3 px-3 text-sm font-medium">Producto Nuevo</th>
+                      <th className="text-left py-3 px-3 text-sm font-medium">Producto(s) Devuelto(s)</th>
+                      <th className="text-left py-3 px-3 text-sm font-medium">Producto(s) Entregado(s)</th>
                       <th className="text-right py-3 px-3 text-sm font-medium">Diferencia</th>
-                      <th className="text-left py-3 px-3 text-sm font-medium">Registrado por</th>
                       <th className="text-center py-3 px-3 text-sm font-medium">Acciones</th>
                     </tr>
                   </thead>
@@ -613,6 +623,9 @@ export default function Exchanges() {
                         <td className="py-3 px-3 text-sm font-medium">{exchange.exchange_number}</td>
                         <td className="py-3 px-3 text-sm">
                           {new Date(exchange.date).toLocaleDateString('es-ES')}
+                        </td>
+                        <td className="py-3 px-3 text-sm font-medium text-blue-600 dark:text-blue-400">
+                          {exchange.invoice_number || '-'}
                         </td>
                         <td className="py-3 px-3 text-sm">
                           {exchange.customer_name || <span className="text-muted-foreground italic">Sin nombre</span>}
@@ -628,17 +641,6 @@ export default function Exchanges() {
                             {exchange.status === 'completed' ? 'Completado' : exchange.status === 'pending' ? 'Pendiente' : 'Cancelado'}
                           </span>
                         </td>
-                        <td className="py-3 px-3">
-                          <span className={`px-2 py-1 text-xs rounded-full ${
-                            exchange.type === 'invoice'
-                              ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
-                              : exchange.type === 'pending'
-                              ? 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300'
-                              : 'bg-purple-100 dark:bg-purple-900 text-purple-700 dark:text-purple-300'
-                          }`}>
-                            {exchange.type === 'invoice' ? 'Por Factura' : exchange.type === 'pending' ? 'En Espera' : 'Directo'}
-                          </span>
-                        </td>
                         <td className="py-3 px-3 text-sm">
                           {exchange.original_products && exchange.original_products.length > 0 ? (
                             <div className="space-y-1">
@@ -646,17 +648,16 @@ export default function Exchanges() {
                                 <div key={idx}>
                                   <div className="font-medium">{prod.productName}</div>
                                   <div className="text-xs text-muted-foreground">
-                                    Cant: {prod.quantity} × COP {formatCOP(prod.price)} = {formatCOP(prod.total)}
+                                    Cant: {prod.quantity} × COP {formatCOP(prod.price)}
                                   </div>
                                 </div>
                               ))}
                             </div>
                           ) : (
-                            // Fallback para registros antiguos
                             <>
                               <div>{exchange.original_product_name}</div>
                               <div className="text-xs text-muted-foreground">
-                                Cant: {exchange.original_quantity} × COP {formatCOP(exchange.original_price)}
+                                Cant: {exchange.original_quantity}
                               </div>
                             </>
                           )}
@@ -668,17 +669,16 @@ export default function Exchanges() {
                                 <div key={idx}>
                                   <div className="font-medium">{prod.productName}</div>
                                   <div className="text-xs text-muted-foreground">
-                                    Cant: {prod.quantity} × COP {formatCOP(prod.price)} = {formatCOP(prod.total)}
+                                    Cant: {prod.quantity} × COP {formatCOP(prod.price)}
                                   </div>
                                 </div>
                               ))}
                             </div>
                           ) : exchange.new_product_name ? (
-                            // Fallback para registros antiguos
                             <>
                               <div>{exchange.new_product_name}</div>
                               <div className="text-xs text-muted-foreground">
-                                Cant: {exchange.new_quantity} × COP {formatCOP(exchange.new_price)}
+                                Cant: {exchange.new_quantity}
                               </div>
                             </>
                           ) : (
@@ -703,7 +703,6 @@ export default function Exchanges() {
                             <span className="text-xs text-muted-foreground italic">-</span>
                           )}
                         </td>
-                        <td className="py-3 px-3 text-sm">{exchange.registered_by}</td>
                         <td className="py-3 px-3">
                           <div className="flex items-center justify-center gap-2">
                             {exchange.status === 'pending' ? (
@@ -721,6 +720,9 @@ export default function Exchanges() {
                                     setFinalizePaymentCash(0);
                                     setFinalizePaymentTransfer(0);
                                     setFinalizePaymentOther(0);
+                                    setFinalizeProductSearchTerm('');
+                                    setFinalizeSearchedProducts([]);
+                                    setHasSearchedFinalizeProducts(false);
                                     setFinalizeDialogOpen(true);
                                   }}
                                   disabled={isLoading}
@@ -816,748 +818,657 @@ export default function Exchanges() {
 
       {/* Dialog Nuevo Cambio */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Registrar Nuevo Cambio</DialogTitle>
-            <DialogDescription>
-              Complete el formulario para registrar un cambio de producto.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-6">
-            {/* Tipo de Cambio */}
-            <div className="space-y-2">
-              <Label>Tipo de Cambio</Label>
-              <Select value={exchangeType} onValueChange={(value: 'invoice' | 'direct' | 'pending') => {
-                setExchangeType(value);
-                resetForm();
-                setExchangeType(value);
-              }}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="direct">Cambio Directo</SelectItem>
-                  <SelectItem value="invoice">Cambio por Factura</SelectItem>
-                  <SelectItem value="pending">En espera de cambio</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Buscar Factura (solo si es por factura) */}
-            {exchangeType === 'invoice' && (
-              <div className="space-y-2">
-                <Label>Factura</Label>
-                <Select value={selectedInvoice?.number || ''} onValueChange={handleSelectInvoice}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar factura" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {invoices
-                      .filter(inv => inv.status === 'paid' || inv.status === 'partial_return')
-                      .slice(0, 50)
-                      .map(inv => (
-                        <SelectItem key={inv.id} value={inv.number}>
-                          {inv.number} - {inv.customer_name || 'Sin nombre'} - COP {formatCOP(inv.total)}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-                {selectedInvoice && (
-                  <p className="text-sm text-muted-foreground">
-                    Cliente: {selectedInvoice.customer_name || 'N/A'} | Total: COP {formatCOP(selectedInvoice.total)}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Campo Nombre de Cliente */}
-            <div className="space-y-2">
-              <Label htmlFor="customerName">Nombre del Cliente *</Label>
-              <Input
-                id="customerName"
-                placeholder="Ingresa el nombre del cliente"
-                value={customerName}
-                onChange={(e) => setCustomerName(e.target.value)}
-              />
-            </div>
-
-            {/* Productos a Devolver (Originales) */}
-            <div className="space-y-3">
-              <Label>Productos a Devolver</Label>
-
-              {/* Lista de productos agregados */}
-              <div className="space-y-2">
-                {originalProducts.map((product, index) => (
-                  <div key={index} className="flex items-center gap-2 border rounded p-2 bg-red-50 dark:bg-red-950/30">
-                    <div className="flex-1">
-                      <div className="font-medium text-sm">{product.productName}</div>
-                      <div className="text-xs text-gray-600 dark:text-gray-400">
-                        {product.quantity} × {formatCOP(product.price)} = {formatCOP(product.total)}
-                      </div>
-                      {product.unitIds && product.unitIds.length > 0 && (
-                        <div className="text-xs text-gray-500">
-                          IDs: {product.unitIds.join(', ')}
-                        </div>
-                      )}
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => handleRemoveOriginalProduct(index)}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-
-              {/* Botón agregar */}
-              <Button
-                onClick={() => {
-                  setSelectingFor('original');
-                  setProductSearchTerm('');
-                  setSearchedProducts([]);
-                  setHasSearched(false);
-                  setProductSelectorOpen(true);
-                }}
-                className="w-full"
-                variant="outline"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Agregar Producto a Devolver
-              </Button>
-            </div>
-
-            {/* Productos Nuevos (que se entregan) - Ocultar cuando es pending */}
-            {exchangeType !== 'pending' && (
-              <div className="space-y-3">
-                <Label>Productos a Entregar</Label>
-
-                <div className="space-y-2">
-                  {newProducts.map((product, index) => (
-                    <div key={index} className="flex items-center gap-2 border rounded p-2 bg-green-50 dark:bg-green-950/30">
-                      <div className="flex-1">
-                        <div className="font-medium text-sm">{product.productName}</div>
-                        <div className="text-xs text-gray-600 dark:text-gray-400">
-                          {product.quantity} × {formatCOP(product.price)} = {formatCOP(product.total)}
-                        </div>
-                        {product.unitIds && product.unitIds.length > 0 && (
-                          <div className="text-xs text-gray-500">
-                            IDs: {product.unitIds.join(', ')}
-                          </div>
-                        )}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemoveNewProduct(index)}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-
-                <Button
-                  onClick={() => {
-                    setSelectingFor('new');
-                    setProductSearchTerm('');
-                    setSearchedProducts([]);
-                    setHasSearched(false);
-                    setProductSelectorOpen(true);
-                  }}
-                  className="w-full"
-                  variant="outline"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Agregar Producto a Entregar
-                </Button>
-              </div>
-            )}
-
-            {/* Diferencia de Precio - Solo para cambios no pendientes */}
-            {exchangeType !== 'pending' && originalProducts.length > 0 && newProducts.length > 0 && (
-              <div className="p-4 border-2 border-dashed rounded-lg">
-                <div className="flex items-center justify-between mb-4">
-                  <h3 className="font-semibold text-lg">Diferencia de Precio</h3>
-                  <div className={`text-2xl font-bold ${
-                    priceDifference > 0
-                      ? 'text-green-600 dark:text-green-400'
-                      : priceDifference < 0
-                      ? 'text-orange-600 dark:text-orange-400'
-                      : 'text-muted-foreground'
-                  }`}>
-                    {priceDifference > 0 ? '+' : ''}COP {formatCOP(Math.abs(priceDifference))}
-                  </div>
-                </div>
-
-                {priceDifference > 0 && (
-                  <div className="space-y-4">
-                    <p className="text-sm font-medium text-green-700 dark:text-green-300">
-                      Cliente paga diferencia
-                    </p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="space-y-2">
-                        <Label>Efectivo</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          placeholder="0"
-                          value={paymentCash || ''}
-                          onChange={(e) => setPaymentCash(parseFloat(e.target.value) || 0)}
-                          className="text-lg font-semibold"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Transferencia</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          placeholder="0"
-                          value={paymentTransfer || ''}
-                          onChange={(e) => setPaymentTransfer(parseFloat(e.target.value) || 0)}
-                          className="text-lg font-semibold"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Nequi</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          placeholder="0"
-                          value={paymentOther || ''}
-                          onChange={(e) => setPaymentOther(parseFloat(e.target.value) || 0)}
-                          className="text-lg font-semibold"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Daviplata</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          placeholder="0"
-                          disabled
-                          title="Usar el campo Nequi para Daviplata y otros"
-                          className="text-lg font-semibold opacity-50"
-                        />
-                      </div>
-                    </div>
-                    <div className="p-2 bg-green-50 dark:bg-green-950/30 rounded">
-                      <p className="text-xs text-green-700 dark:text-green-300">
-                        Total ingresado: <span className="font-bold">COP {formatCOP(paymentCash + paymentTransfer + paymentOther)}</span>
-                      </p>
-                      {Math.abs((paymentCash + paymentTransfer + paymentOther) - priceDifference) > 0.01 && (
-                        <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                          ⚠️ Debe sumar exactamente COP {formatCOP(priceDifference)}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {priceDifference < 0 && (
-                  <div className="space-y-4">
-                    <p className="text-sm font-medium text-orange-700 dark:text-orange-300">
-                      Se devuelve al cliente
-                    </p>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                      <div className="space-y-2">
-                        <Label>Efectivo</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          placeholder="0"
-                          value={paymentCash || ''}
-                          onChange={(e) => setPaymentCash(parseFloat(e.target.value) || 0)}
-                          className="text-lg font-semibold"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Transferencia</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          placeholder="0"
-                          value={paymentTransfer || ''}
-                          onChange={(e) => setPaymentTransfer(parseFloat(e.target.value) || 0)}
-                          className="text-lg font-semibold"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Nequi</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          placeholder="0"
-                          value={paymentOther || ''}
-                          onChange={(e) => setPaymentOther(parseFloat(e.target.value) || 0)}
-                          className="text-lg font-semibold"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Daviplata</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          placeholder="0"
-                          disabled
-                          title="Usar el campo Nequi para Daviplata y otros"
-                          className="text-lg font-semibold opacity-50"
-                        />
-                      </div>
-                    </div>
-                    <div className="p-2 bg-orange-50 dark:bg-orange-950/30 rounded">
-                      <p className="text-xs text-orange-700 dark:text-orange-300">
-                        Total a devolver: <span className="font-bold">COP {formatCOP(paymentCash + paymentTransfer + paymentOther)}</span>
-                      </p>
-                      {Math.abs((paymentCash + paymentTransfer + paymentOther) - Math.abs(priceDifference)) > 0.01 && (
-                        <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                          ⚠️ Debe sumar exactamente COP {formatCOP(Math.abs(priceDifference))}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {priceDifference === 0 && (
-                  <p className="text-sm text-muted-foreground">
-                    No hay diferencia de precio
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Notas - Mostrar solo para cambios pendientes */}
-            {exchangeType === 'pending' && (
-              <div className="space-y-2">
-                <Label>Notas {exchangeType === 'pending' && '(Requerido para cambios pendientes)'}</Label>
-                <Textarea
-                  placeholder="Información adicional sobre el cambio pendiente..."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={3}
-                />
-              </div>
-            )}
-
-            {/* Botones */}
-            <div className="flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setIsDialogOpen(false)} disabled={isLoading}>
-                Cancelar
-              </Button>
-              <Button onClick={handleSubmit} disabled={isLoading}>
-                {isLoading ? 'Procesando...' : 'Registrar Cambio'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Modal de Selección de Productos */}
-      <Dialog open={productSelectorOpen} onOpenChange={setProductSelectorOpen}>
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>
-              {selectingFor === 'original' ? 'Seleccionar Producto Original' : 'Seleccionar Producto Nuevo'}
+              {flowStep === 'search-invoice' && 'Buscar Factura'}
+              {flowStep === 'select-return-products' && 'Productos a Devolver'}
+              {flowStep === 'select-new-products' && 'Productos a Entregar'}
+              {flowStep === 'payment' && 'Diferencia de Precio'}
             </DialogTitle>
             <DialogDescription>
-              Busca y selecciona el producto para el cambio.
+              {flowStep === 'search-invoice' && 'Busca la factura de la cual se devolverán productos'}
+              {flowStep === 'select-return-products' && 'Selecciona los productos que el cliente devuelve'}
+              {flowStep === 'select-new-products' && 'Busca y agrega los productos que se entregarán al cliente'}
+              {flowStep === 'payment' && 'Configura el método de pago de la diferencia'}
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 flex-1 overflow-hidden flex flex-col">
-            {/* Buscador */}
-            <div className="flex gap-2">
-              <div className="relative flex-1">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
-                <Input
-                  placeholder="Buscar por código, nombre o precio..."
-                  value={productSearchTerm}
-                  onChange={(e) => setProductSearchTerm(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleSearchProducts();
-                    }
-                  }}
-                  className="pl-10"
-                  autoFocus
-                />
-              </div>
-              <Button
-                onClick={handleSearchProducts}
-                disabled={isSearchingProducts || !productSearchTerm.trim()}
-              >
-                {isSearchingProducts ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Buscando...
-                  </>
-                ) : (
-                  <>
-                    <Search className="mr-2 h-4 w-4" />
-                    Buscar
-                  </>
-                )}
-              </Button>
-            </div>
+          <div className="flex-1 overflow-y-auto space-y-4">
+            {/* Paso 1: Buscar Factura */}
+            {flowStep === 'search-invoice' && (
+              <div className="space-y-4">
+                {/* Tipo de Cambio */}
+                <div className="space-y-2">
+                  <Label>Tipo de Cambio</Label>
+                  <Select value={exchangeType} onValueChange={(value: 'invoice' | 'pending') => setExchangeType(value)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="invoice">Cambio Completo</SelectItem>
+                      <SelectItem value="pending">En Espera (Solo Devolución)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    {exchangeType === 'invoice'
+                      ? 'Se devolverán productos y se entregarán otros en el mismo proceso'
+                      : 'Solo se registrará la devolución. Los productos a entregar se definirán después'}
+                  </p>
+                </div>
 
-            {/* Lista de productos */}
-            <div className="flex-1 overflow-y-auto border border-border rounded-lg">
-              {(() => {
-                // Si no se ha buscado, mostrar mensaje inicial
-                if (!hasSearched) {
-                  return (
+                {/* Buscador de Facturas */}
+                <div className="space-y-2">
+                  <Label>Buscar Factura</Label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        placeholder="Buscar por número de factura o nombre de cliente..."
+                        value={invoiceSearchTerm}
+                        onChange={(e) => setInvoiceSearchTerm(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSearchInvoices();
+                          }
+                        }}
+                        className="pl-10"
+                        autoFocus
+                      />
+                    </div>
+                    <Button
+                      onClick={handleSearchInvoices}
+                      disabled={isSearchingInvoices || !invoiceSearchTerm.trim()}
+                    >
+                      {isSearchingInvoices ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Buscando...
+                        </>
+                      ) : (
+                        <>
+                          <Search className="mr-2 h-4 w-4" />
+                          Buscar
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Resultados de búsqueda */}
+                <div className="border border-border rounded-lg min-h-[300px] max-h-[400px] overflow-y-auto">
+                  {!hasSearchedInvoices ? (
                     <div className="text-center py-12 text-muted-foreground">
                       <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
                       <p className="font-medium">Ingresa un término de búsqueda</p>
-                      <p className="text-sm mt-1">Busca por código, nombre, categoría o precio</p>
+                      <p className="text-sm mt-1">Busca por número de factura o nombre de cliente</p>
                     </div>
-                  );
-                }
-
-                // Filtrar productos según si es para nuevo o original
-                const filtered = searchedProducts.filter(product => {
-                  // Si estamos seleccionando producto nuevo, filtrar solo los que tengan stock
-                  if (selectingFor === 'new' && product.stock <= 0) {
-                    return false;
-                  }
-                  return true;
-                });
-
-                if (filtered.length === 0) {
-                  return (
+                  ) : searchedInvoices.length === 0 ? (
                     <div className="text-center py-12 text-muted-foreground">
-                      <Package className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>No se encontraron productos</p>
+                      <Package2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>No se encontraron facturas</p>
                     </div>
-                  );
-                }
+                  ) : (
+                    <div className="divide-y divide-border">
+                      {searchedInvoices.map((invoice) => (
+                        <button
+                          key={invoice.id}
+                          onClick={() => handleSelectInvoice(invoice)}
+                          className="w-full p-4 hover:bg-green-50 dark:hover:bg-green-950/20 transition-colors text-left group"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex-1">
+                              <div className="flex items-center gap-3 mb-2">
+                                <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                                  {invoice.number}
+                                </span>
+                                <span className={`px-2 py-1 text-xs rounded-full ${
+                                  invoice.status === 'paid'
+                                    ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                                    : 'bg-orange-100 dark:bg-orange-900 text-orange-700 dark:text-orange-300'
+                                }`}>
+                                  {invoice.status === 'paid' ? 'Pagada' : 'Dev. Parcial'}
+                                </span>
+                              </div>
+                              <p className="font-medium text-sm mb-1">{invoice.customer_name || 'Cliente general'}</p>
+                              <p className="text-xs text-muted-foreground">
+                                Fecha: {new Date(invoice.date).toLocaleDateString('es-ES')}
+                              </p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-lg font-bold text-green-600 dark:text-green-400">
+                                COP {formatCOP(invoice.total)}
+                              </p>
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {invoice.items?.length || 0} producto(s)
+                              </p>
+                            </div>
+                          </div>
+                          <div className="mt-2 pt-2 border-t border-border opacity-0 group-hover:opacity-100 transition-opacity">
+                            <p className="text-xs font-medium text-green-600 dark:text-green-400 text-center">
+                              ✓ Click para seleccionar esta factura
+                            </p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
 
-                return (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 p-4">
-                    {filtered.map((product) => (
-                      <button
-                        key={product.id}
-                        onClick={() => {
-                          // Si estamos en el modal de finalización
-                          if (finalizeDialogOpen) {
-                            handleSelectFinalizeTempProduct(product.id);
-                          } else {
-                            // Modal de crear cambio nuevo - usar temp product (no cerrar modal)
-                            handleSelectTempProduct(product.id);
+                {hasSearchedInvoices && searchedInvoices.length > 0 && (
+                  <p className="text-sm text-muted-foreground text-center">
+                    Mostrando {searchedInvoices.length} factura{searchedInvoices.length !== 1 ? 's' : ''} encontrada{searchedInvoices.length !== 1 ? 's' : ''}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Paso 2: Seleccionar Productos a Devolver */}
+            {flowStep === 'select-return-products' && selectedInvoice && (
+              <div className="space-y-4">
+                {/* Info de factura */}
+                <div className="p-4 bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800 rounded-lg">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-blue-700 dark:text-blue-300">Factura Seleccionada</p>
+                      <p className="text-lg font-bold text-blue-900 dark:text-blue-100">{selectedInvoice.number}</p>
+                      <p className="text-sm text-blue-600 dark:text-blue-400">{selectedInvoice.customer_name}</p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedInvoice(null);
+                        setProductsToReturn([]);
+                        setFlowStep('search-invoice');
+                      }}
+                    >
+                      Cambiar Factura
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Lista de productos de la factura */}
+                <div className="space-y-2">
+                  <Label>Selecciona los productos que el cliente devuelve</Label>
+                  <div className="border border-border rounded-lg divide-y divide-border max-h-[400px] overflow-y-auto">
+                    {selectedInvoice.items && selectedInvoice.items.length > 0 ? (
+                      selectedInvoice.items.map((item: any, index: number) => {
+                        const isSelected = productsToReturn.some(p => p.productId === item.productId);
+
+                        return (
+                          <label
+                            key={index}
+                            className={`flex items-center gap-3 p-4 cursor-pointer hover:bg-muted/50 transition-colors ${
+                              isSelected ? 'bg-red-50 dark:bg-red-950/30 border-l-4 border-red-500' : ''
+                            }`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => handleToggleReturnProduct(item, e.target.checked)}
+                              className="w-5 h-5 rounded border-gray-300"
+                            />
+                            <div className="flex-1">
+                              <p className="font-medium">{item.productName}</p>
+                              <p className="text-sm text-muted-foreground">
+                                Cantidad: {item.quantity} × COP {formatCOP(item.price)} = COP {formatCOP(item.total)}
+                              </p>
+                              {item.unitIds && item.unitIds.length > 0 && (
+                                <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                  IDs: {item.unitIds.join(', ')}
+                                </p>
+                              )}
+                            </div>
+                            {isSelected && (
+                              <CheckCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                            )}
+                          </label>
+                        );
+                      })
+                    ) : (
+                      <div className="p-8 text-center text-muted-foreground">
+                        <p>Esta factura no tiene productos</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Resumen de selección */}
+                {productsToReturn.length > 0 && (
+                  <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm font-semibold text-red-900 dark:text-red-100 mb-2">
+                      Productos Seleccionados para Devolución: {productsToReturn.length}
+                    </p>
+                    <p className="text-lg font-bold text-red-600 dark:text-red-400">
+                      Total a Devolver: COP {formatCOP(productsToReturn.reduce((sum, p) => sum + p.total, 0))}
+                    </p>
+                  </div>
+                )}
+
+                {/* Botones */}
+                <div className="flex justify-between pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setSelectedInvoice(null);
+                      setProductsToReturn([]);
+                      setFlowStep('search-invoice');
+                    }}
+                  >
+                    <ChevronLeft className="mr-2 h-4 w-4" />
+                    Volver
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (productsToReturn.length === 0) {
+                        toast.error('Selecciona al menos un producto');
+                        return;
+                      }
+                      if (exchangeType === 'pending') {
+                        // Si es cambio pendiente, ir directo a confirmar
+                        handleSubmit();
+                      } else {
+                        // Si es cambio completo, ir a seleccionar productos nuevos
+                        setFlowStep('select-new-products');
+                      }
+                    }}
+                    disabled={productsToReturn.length === 0}
+                  >
+                    {exchangeType === 'pending' ? 'Registrar Devolución' : 'Siguiente'}
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Paso 3: Seleccionar Productos Nuevos */}
+            {flowStep === 'select-new-products' && (
+              <div className="space-y-4">
+                {/* Buscador de productos */}
+                <div className="space-y-2">
+                  <Label>Buscar Productos a Entregar</Label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        placeholder="Buscar por código, nombre..."
+                        value={productSearchTerm}
+                        onChange={(e) => setProductSearchTerm(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleSearchProducts();
                           }
                         }}
-                        className="p-4 border border-border rounded-lg hover:border-green-500 dark:hover:border-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 transition-all text-left group"
-                      >
-                        {/* Código */}
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-mono font-bold bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
-                            {product.code}
-                          </span>
-                          {product.use_unit_ids && (
-                            <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded">
-                              🔢 IDs
-                            </span>
-                          )}
-                        </div>
+                        className="pl-10"
+                      />
+                    </div>
+                    <Button
+                      onClick={handleSearchProducts}
+                      disabled={isSearchingProducts || !productSearchTerm.trim()}
+                    >
+                      {isSearchingProducts ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Buscando...
+                        </>
+                      ) : (
+                        <>
+                          <Search className="mr-2 h-4 w-4" />
+                          Buscar
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
 
-                        {/* Nombre */}
-                        <h4 className="font-semibold text-base mb-1 line-clamp-2 group-hover:text-green-600 dark:group-hover:text-green-400">
-                          {product.name}
-                        </h4>
-
-                        {/* Categoría */}
-                        <p className="text-xs text-muted-foreground mb-3">{product.category}</p>
-
-                        {/* Información */}
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="text-muted-foreground">Stock:</span>
-                            <span className={`font-bold ${
-                              product.stock <= 5
-                                ? 'text-red-600 dark:text-red-400'
-                                : product.stock <= 10
-                                ? 'text-yellow-600 dark:text-yellow-400'
-                                : 'text-green-600 dark:text-green-400'
-                            }`}>
-                              {product.stock} unid.
-                            </span>
+                {/* Productos agregados */}
+                {newProducts.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Productos a Entregar</Label>
+                    <div className="space-y-2">
+                      {newProducts.map((product, index) => (
+                        <div key={index} className="flex items-center gap-2 border rounded p-3 bg-green-50 dark:bg-green-950/30">
+                          <div className="flex-1">
+                            <div className="font-medium text-sm">{product.productName}</div>
+                            <div className="text-xs text-gray-600 dark:text-gray-400">
+                              {product.quantity} × {formatCOP(product.price)} = {formatCOP(product.total)}
+                            </div>
+                            {product.unitIds && product.unitIds.length > 0 && (
+                              <div className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                                IDs: {product.unitIds.join(', ')}
+                              </div>
+                            )}
                           </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveNewProduct(index)}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="p-3 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded">
+                      <p className="text-sm font-medium text-green-900 dark:text-green-100">
+                        Total a Entregar: <span className="font-bold">COP {formatCOP(newProducts.reduce((sum, p) => sum + p.total, 0))}</span>
+                      </p>
+                    </div>
+                  </div>
+                )}
 
-                          <div className="flex items-center justify-between text-sm">
-                            <span className="text-muted-foreground">Precio:</span>
+                {/* Resultados de búsqueda */}
+                <div className="border border-border rounded-lg min-h-[250px] max-h-[350px] overflow-y-auto">
+                  {!hasSearchedProducts ? (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p className="font-medium">Busca productos para entregar</p>
+                      <p className="text-sm mt-1">Ingresa el código o nombre del producto</p>
+                    </div>
+                  ) : searchedProducts.filter(p => p.stock > 0).length === 0 ? (
+                    <div className="text-center py-12 text-muted-foreground">
+                      <Package2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>No se encontraron productos con stock</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4">
+                      {searchedProducts.filter(p => p.stock > 0).map((product) => (
+                        <button
+                          key={product.id}
+                          onClick={() => {
+                            setTempProduct(product);
+                            setTempPrice(product.final_price);
+                            setTempQuantity(1);
+                            setTempUnitIds([]);
+                          }}
+                          className={`p-3 border rounded-lg text-left hover:border-green-500 dark:hover:border-green-600 hover:bg-green-50 dark:hover:bg-green-950/20 transition-all ${
+                            tempProduct?.id === product.id ? 'border-green-500 bg-green-50 dark:bg-green-950/30' : 'border-border'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-mono font-bold bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+                              {product.code}
+                            </span>
+                            {product.use_unit_ids && (
+                              <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded">
+                                🔢 IDs
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="font-semibold text-sm mb-1">{product.name}</h4>
+                          <div className="flex items-center justify-between text-xs">
+                            <span className="text-muted-foreground">Stock: {product.stock}</span>
                             <span className="font-bold text-green-600 dark:text-green-400">
                               {formatCOP(product.final_price)}
                             </span>
                           </div>
-
-                          {product.use_unit_ids && product.registered_ids && (
-                            <div className="flex items-center justify-between text-sm">
-                              <span className="text-muted-foreground">IDs Disp:</span>
-                              <span className="font-medium text-blue-600 dark:text-blue-400">
-                                {product.registered_ids.length}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Botón visual de selección */}
-                        <div className="mt-3 pt-3 border-t border-border">
-                          <div className="text-center text-xs font-medium text-green-600 dark:text-green-400 opacity-0 group-hover:opacity-100 transition-opacity">
-                            ✓ Click para seleccionar
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                );
-              })()}
-            </div>
-
-            {/* Contador */}
-            {hasSearched && (() => {
-              const filtered = searchedProducts.filter(product => {
-                if (selectingFor === 'new' && product.stock <= 0) return false;
-                return true;
-              });
-
-              return (
-                <p className="text-sm text-muted-foreground text-center">
-                  Mostrando {filtered.length} producto{filtered.length !== 1 ? 's' : ''} encontrado{filtered.length !== 1 ? 's' : ''}
-                </p>
-              );
-            })()}
-
-            {/* Configuración del producto seleccionado */}
-            {!finalizeDialogOpen && tempProduct && (
-              <div className="space-y-4 p-4 border-2 border-green-500 dark:border-green-600 rounded-lg bg-green-50 dark:bg-green-950/30">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-semibold text-green-900 dark:text-green-100">
-                    Configurar: {tempProduct.name}
-                  </h4>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setTempProduct(null)}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Cantidad</Label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={tempQuantity}
-                      onChange={(e) => setTempQuantity(parseInt(e.target.value) || 1)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Precio Unitario</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={tempPrice}
-                      onChange={(e) => setTempPrice(parseFloat(e.target.value) || 0)}
-                    />
-                  </div>
-                </div>
-
-                {tempProduct.use_unit_ids && (
-                  <div className="space-y-2">
-                    <Label>IDs Únicas (Se requieren {tempQuantity} ID(s))</Label>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                      {Array.from({ length: tempQuantity }).map((_, index) => {
-                        const availableForSelection = selectingFor === 'original'
-                          ? getDisabledIds(tempProduct).filter(idObj => !tempUnitIds.includes(idObj.id))
-                          : getAvailableIds(tempProduct).filter(idObj => !tempUnitIds.includes(idObj.id));
-
-                        return (
-                          <div key={index} className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">ID #{index + 1}</Label>
-                            <Select
-                              value={tempUnitIds[index] || ''}
-                              onValueChange={(value) => {
-                                const newIds = [...tempUnitIds];
-                                newIds[index] = value;
-                                setTempUnitIds(newIds.filter(id => id));
-                              }}
-                            >
-                              <SelectTrigger className="font-mono text-sm h-9">
-                                <SelectValue placeholder="Seleccionar" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {availableForSelection.map((idObj) => (
-                                  <SelectItem key={idObj.id} value={idObj.id} className="font-mono">
-                                    {idObj.id} {idObj.note && `(${idObj.note})`}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        );
-                      })}
+                        </button>
+                      ))}
                     </div>
-                    {tempUnitIds.length !== tempQuantity && (
-                      <p className="text-xs text-red-600 dark:text-red-400">
-                        ⚠️ Debes seleccionar {tempQuantity} ID(s)
-                      </p>
+                  )}
+                </div>
+
+                {/* Configuración de producto seleccionado */}
+                {tempProduct && (
+                  <div className="p-4 border-2 border-green-500 dark:border-green-600 rounded-lg bg-green-50 dark:bg-green-950/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-green-900 dark:text-green-100">
+                        Configurar: {tempProduct.name}
+                      </h4>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setTempProduct(null)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-sm">Cantidad</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          max={tempProduct.stock}
+                          value={tempQuantity}
+                          onChange={(e) => setTempQuantity(parseInt(e.target.value) || 1)}
+                        />
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label className="text-sm">Precio Unitario</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={tempPrice}
+                          onChange={(e) => setTempPrice(parseFloat(e.target.value) || 0)}
+                        />
+                      </div>
+                    </div>
+
+                    {tempProduct.use_unit_ids && (
+                      <div className="space-y-2">
+                        <Label className="text-sm">IDs Únicas (Se requieren {tempQuantity} ID(s))</Label>
+                        <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                          {Array.from({ length: tempQuantity }).map((_, index) => {
+                            const availableForSelection = getAvailableIds(tempProduct).filter(
+                              idObj => !tempUnitIds.includes(idObj.id)
+                            );
+
+                            return (
+                              <div key={index} className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">ID #{index + 1}</Label>
+                                <Select
+                                  value={tempUnitIds[index] || ''}
+                                  onValueChange={(value) => {
+                                    const newIds = [...tempUnitIds];
+                                    newIds[index] = value;
+                                    setTempUnitIds(newIds.filter(id => id));
+                                  }}
+                                >
+                                  <SelectTrigger className="font-mono text-xs h-8">
+                                    <SelectValue placeholder="Seleccionar" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {availableForSelection.map((idObj) => (
+                                      <SelectItem key={idObj.id} value={idObj.id} className="font-mono text-xs">
+                                        {idObj.id} {idObj.note && `(${idObj.note})`}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {tempUnitIds.length !== tempQuantity && (
+                          <p className="text-xs text-red-600 dark:text-red-400">
+                            ⚠️ Debes seleccionar {tempQuantity} ID(s)
+                          </p>
+                        )}
+                      </div>
                     )}
-                    {selectingFor === 'original' && (
-                      <p className="text-xs text-orange-600 dark:text-orange-400">
-                        💡 IDs inhabilitadas/vendidas: {getDisabledIds(tempProduct).length} disponibles
+
+                    <div className="p-2 bg-white dark:bg-gray-900 rounded">
+                      <p className="text-sm font-medium">Total:</p>
+                      <p className="text-lg font-bold text-green-600 dark:text-green-400">
+                        COP {formatCOP(tempPrice * tempQuantity)}
                       </p>
-                    )}
-                    {selectingFor === 'new' && (
-                      <p className="text-xs text-blue-600 dark:text-blue-400">
-                        💡 IDs disponibles: {getAvailableIds(tempProduct).length} en stock
-                      </p>
-                    )}
+                    </div>
+
+                    <Button
+                      onClick={handleAddNewProduct}
+                      className="w-full"
+                    >
+                      <Plus className="h-4 w-4 mr-2" />
+                      Agregar Producto
+                    </Button>
                   </div>
                 )}
 
-                <div className="p-2 bg-white dark:bg-gray-900 rounded">
-                  <p className="text-sm font-medium">Total:</p>
-                  <p className="text-lg font-bold text-green-600 dark:text-green-400">
-                    COP {formatCOP(tempPrice * tempQuantity)}
-                  </p>
+                {/* Botones */}
+                <div className="flex justify-between pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => setFlowStep('select-return-products')}
+                  >
+                    <ChevronLeft className="mr-2 h-4 w-4" />
+                    Volver
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (newProducts.length === 0) {
+                        toast.error('Agrega al menos un producto a entregar');
+                        return;
+                      }
+                      setFlowStep('payment');
+                    }}
+                    disabled={newProducts.length === 0}
+                  >
+                    Siguiente
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
                 </div>
-
-                <Button
-                  onClick={() => {
-                    if (selectingFor === 'original') {
-                      handleAddOriginalProduct();
-                    } else {
-                      handleAddNewProduct();
-                    }
-                  }}
-                  className="w-full"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Agregar Producto
-                </Button>
               </div>
             )}
 
-            {/* Configuración del producto para finalización */}
-            {finalizeDialogOpen && finalizeTempProduct && (
-              <div className="space-y-4 p-4 border-2 border-blue-500 dark:border-blue-600 rounded-lg bg-blue-50 dark:bg-blue-950/30">
-                <div className="flex items-center justify-between">
-                  <h4 className="font-semibold text-blue-900 dark:text-blue-100">
-                    Configurar: {finalizeTempProduct.name}
-                  </h4>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setFinalizeTempProduct(null)}
-                  >
-                    <X className="h-4 w-4" />
-                  </Button>
-                </div>
-
+            {/* Paso 4: Diferencia de Precio */}
+            {flowStep === 'payment' && (
+              <div className="space-y-4">
+                {/* Resumen */}
                 <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label>Cantidad</Label>
-                    <Input
-                      type="number"
-                      min="1"
-                      value={finalizeTempQuantity}
-                      onChange={(e) => setFinalizeTempQuantity(parseInt(e.target.value) || 1)}
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Precio Unitario</Label>
-                    <Input
-                      type="number"
-                      min="0"
-                      value={finalizeTempPrice}
-                      onChange={(e) => setFinalizeTempPrice(parseFloat(e.target.value) || 0)}
-                    />
-                  </div>
-                </div>
-
-                {finalizeTempProduct.use_unit_ids && (
-                  <div className="space-y-2">
-                    <Label>IDs Únicas (Se requieren {finalizeTempQuantity} ID(s))</Label>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                      {Array.from({ length: finalizeTempQuantity }).map((_, index) => {
-                        const availableForSelection = getAvailableIds(finalizeTempProduct).filter(
-                          idObj => !finalizeTempUnitIds.includes(idObj.id)
-                        );
-
-                        return (
-                          <div key={index} className="space-y-1">
-                            <Label className="text-xs text-muted-foreground">ID #{index + 1}</Label>
-                            <Select
-                              value={finalizeTempUnitIds[index] || ''}
-                              onValueChange={(value) => {
-                                const newIds = [...finalizeTempUnitIds];
-                                newIds[index] = value;
-                                setFinalizeTempUnitIds(newIds.filter(id => id));
-                              }}
-                            >
-                              <SelectTrigger className="font-mono text-sm h-9">
-                                <SelectValue placeholder="Seleccionar" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {availableForSelection.map((idObj) => (
-                                  <SelectItem key={idObj.id} value={idObj.id} className="font-mono">
-                                    {idObj.id} {idObj.note && `(${idObj.note})`}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        );
-                      })}
-                    </div>
-                    {finalizeTempUnitIds.length !== finalizeTempQuantity && (
-                      <p className="text-xs text-red-600 dark:text-red-400">
-                        ⚠️ Debes seleccionar {finalizeTempQuantity} ID(s)
-                      </p>
-                    )}
-                    <p className="text-xs text-blue-600 dark:text-blue-400">
-                      💡 IDs disponibles: {getAvailableIds(finalizeTempProduct).length} en stock
+                  <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
+                    <p className="text-sm text-red-700 dark:text-red-300 mb-1">Productos Devueltos</p>
+                    <p className="text-2xl font-bold text-red-600 dark:text-red-400">
+                      COP {formatCOP(productsToReturn.reduce((sum, p) => sum + p.total, 0))}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {productsToReturn.length} producto(s)
                     </p>
                   </div>
-                )}
 
-                <div className="p-2 bg-white dark:bg-gray-900 rounded">
-                  <p className="text-sm font-medium">Total:</p>
-                  <p className="text-lg font-bold text-blue-600 dark:text-blue-400">
-                    COP {formatCOP(finalizeTempPrice * finalizeTempQuantity)}
-                  </p>
+                  <div className="p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
+                    <p className="text-sm text-green-700 dark:text-green-300 mb-1">Productos Entregados</p>
+                    <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                      COP {formatCOP(newProducts.reduce((sum, p) => sum + p.total, 0))}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {newProducts.length} producto(s)
+                    </p>
+                  </div>
                 </div>
 
-                <Button
-                  onClick={handleAddFinalizeProduct}
-                  className="w-full"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Agregar Producto
-                </Button>
+                {/* Diferencia de precio */}
+                <div className="p-4 border-2 border-dashed rounded-lg">
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="font-semibold text-lg">Diferencia de Precio</h3>
+                    <div className={`text-3xl font-bold ${
+                      priceDifference > 0
+                        ? 'text-green-600 dark:text-green-400'
+                        : priceDifference < 0
+                        ? 'text-orange-600 dark:text-orange-400'
+                        : 'text-muted-foreground'
+                    }`}>
+                      {priceDifference > 0 ? '+' : ''}COP {formatCOP(Math.abs(priceDifference))}
+                    </div>
+                  </div>
+
+                  {priceDifference !== 0 && (
+                    <div className="space-y-4">
+                      <p className={`text-sm font-medium ${
+                        priceDifference > 0
+                          ? 'text-green-700 dark:text-green-300'
+                          : 'text-orange-700 dark:text-orange-300'
+                      }`}>
+                        {priceDifference > 0 ? 'Cliente paga diferencia' : 'Se devuelve al cliente'}
+                      </p>
+
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label>Efectivo</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder="0"
+                            value={paymentCash || ''}
+                            onChange={(e) => setPaymentCash(parseFloat(e.target.value) || 0)}
+                            className="text-lg font-semibold"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Transferencia</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder="0"
+                            value={paymentTransfer || ''}
+                            onChange={(e) => setPaymentTransfer(parseFloat(e.target.value) || 0)}
+                            className="text-lg font-semibold"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Nequi / Otros</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            placeholder="0"
+                            value={paymentOther || ''}
+                            onChange={(e) => setPaymentOther(parseFloat(e.target.value) || 0)}
+                            className="text-lg font-semibold"
+                          />
+                        </div>
+                      </div>
+
+                      <div className={`p-3 rounded ${
+                        priceDifference > 0
+                          ? 'bg-green-50 dark:bg-green-950/30'
+                          : 'bg-orange-50 dark:bg-orange-950/30'
+                      }`}>
+                        <p className={`text-sm ${
+                          priceDifference > 0
+                            ? 'text-green-700 dark:text-green-300'
+                            : 'text-orange-700 dark:text-orange-300'
+                        }`}>
+                          Total ingresado: <span className="font-bold">
+                            COP {formatCOP(paymentCash + paymentTransfer + paymentOther)}
+                          </span>
+                        </p>
+                        {Math.abs((paymentCash + paymentTransfer + paymentOther) - Math.abs(priceDifference)) > 0.01 && (
+                          <p className="text-sm text-red-600 dark:text-red-400 mt-1">
+                            ⚠️ Debe sumar exactamente COP {formatCOP(Math.abs(priceDifference))}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
+                  {priceDifference === 0 && (
+                    <p className="text-sm text-muted-foreground text-center py-4">
+                      No hay diferencia de precio
+                    </p>
+                  )}
+                </div>
+
+                {/* Botones */}
+                <div className="flex justify-between pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => setFlowStep('select-new-products')}
+                  >
+                    <ChevronLeft className="mr-2 h-4 w-4" />
+                    Volver
+                  </Button>
+                  <Button
+                    onClick={handleSubmit}
+                    disabled={isLoading}
+                  >
+                    {isLoading ? 'Procesando...' : 'Registrar Cambio'}
+                  </Button>
+                </div>
               </div>
             )}
-          </div>
-
-          <div className="flex justify-end pt-4 border-t">
-            <Button variant="outline" onClick={() => {
-              setProductSelectorOpen(false);
-              setTempProduct(null);
-              setTempQuantity(1);
-              setTempPrice(0);
-              setTempUnitIds([]);
-              setProductSearchTerm('');
-              setSearchedProducts([]);
-              setHasSearched(false);
-            }}>
-              Cancelar
-            </Button>
           </div>
         </DialogContent>
       </Dialog>
@@ -1568,197 +1479,308 @@ export default function Exchanges() {
           <DialogHeader>
             <DialogTitle>Finalizar Cambio Pendiente</DialogTitle>
             <DialogDescription>
-              Complete la información del producto nuevo y el método de pago
+              Selecciona los productos a entregar y configura el pago
             </DialogDescription>
           </DialogHeader>
 
           {exchangeToFinalize && (
             <div className="space-y-6">
               {/* Información del Producto Devuelto */}
-              <div className="p-4 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded-lg">
-                <h3 className="font-semibold text-lg mb-3 text-green-900 dark:text-green-100">
-                  Producto Devuelto
+              <div className="p-4 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded-lg">
+                <h3 className="font-semibold text-lg mb-3 text-red-900 dark:text-red-100">
+                  Productos Devueltos
                 </h3>
-                <div className="grid grid-cols-2 gap-4 text-sm">
-                  <div>
-                    <span className="text-muted-foreground">Producto:</span>
-                    <p className="font-semibold">{exchangeToFinalize.original_product_name}</p>
+                <div className="space-y-2">
+                  {exchangeToFinalize.original_products && exchangeToFinalize.original_products.length > 0 ? (
+                    exchangeToFinalize.original_products.map((prod, idx) => (
+                      <div key={idx} className="flex justify-between items-center">
+                        <div>
+                          <p className="font-semibold">{prod.productName}</p>
+                          <p className="text-sm text-muted-foreground">
+                            Cantidad: {prod.quantity} × COP {formatCOP(prod.price)}
+                          </p>
+                        </div>
+                        <p className="font-bold text-red-600 dark:text-red-400">
+                          COP {formatCOP(prod.total)}
+                        </p>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <p className="font-semibold">{exchangeToFinalize.original_product_name}</p>
+                        <p className="text-sm text-muted-foreground">
+                          Cantidad: {exchangeToFinalize.original_quantity}
+                        </p>
+                      </div>
+                      <p className="font-bold text-red-600 dark:text-red-400">
+                        COP {formatCOP(exchangeToFinalize.original_total)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <div className="mt-3 pt-3 border-t border-red-200 dark:border-red-800">
+                  <p className="font-bold text-lg text-red-600 dark:text-red-400">
+                    Total Devuelto: COP {formatCOP(exchangeToFinalize.original_total)}
+                  </p>
+                </div>
+              </div>
+
+              {/* Buscador de productos */}
+              <div className="space-y-2">
+                <Label>Buscar Productos a Entregar</Label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                    <Input
+                      placeholder="Buscar por código, nombre..."
+                      value={finalizeProductSearchTerm}
+                      onChange={(e) => setFinalizeProductSearchTerm(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          handleSearchFinalizeProducts();
+                        }
+                      }}
+                      className="pl-10"
+                    />
                   </div>
-                  <div>
-                    <span className="text-muted-foreground">Cantidad:</span>
-                    <p className="font-semibold">{exchangeToFinalize.original_quantity}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Precio Unitario:</span>
-                    <p className="font-semibold">COP {formatCOP(exchangeToFinalize.original_price)}</p>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground">Total:</span>
-                    <p className="font-semibold text-green-600 dark:text-green-400">
-                      COP {formatCOP(exchangeToFinalize.original_total)}
-                    </p>
+                  <Button
+                    onClick={handleSearchFinalizeProducts}
+                    disabled={isSearchingFinalizeProducts || !finalizeProductSearchTerm.trim()}
+                  >
+                    {isSearchingFinalizeProducts ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Buscando...
+                      </>
+                    ) : (
+                      <>
+                        <Search className="mr-2 h-4 w-4" />
+                        Buscar
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+
+              {/* Productos agregados */}
+              {finalizeNewProducts.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Productos a Entregar</Label>
+                  <div className="space-y-2">
+                    {finalizeNewProducts.map((product, index) => (
+                      <div key={index} className="flex items-center gap-2 border rounded p-2 bg-green-50 dark:bg-green-950/30">
+                        <div className="flex-1">
+                          <div className="font-medium text-sm">{product.productName}</div>
+                          <div className="text-xs text-gray-600 dark:text-gray-400">
+                            {product.quantity} × {formatCOP(product.price)} = {formatCOP(product.total)}
+                          </div>
+                          {product.unitIds && product.unitIds.length > 0 && (
+                            <div className="text-xs text-gray-500">
+                              IDs: {product.unitIds.join(', ')}
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => handleRemoveFinalizeProduct(index)}
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
                   </div>
                 </div>
-                {exchangeToFinalize.notes && (
-                  <div className="mt-3 pt-3 border-t border-green-200 dark:border-green-800">
-                    <span className="text-muted-foreground text-sm">Notas:</span>
-                    <p className="text-sm mt-1">{exchangeToFinalize.notes}</p>
+              )}
+
+              {/* Resultados de búsqueda */}
+              <div className="border border-border rounded-lg min-h-[200px] max-h-[300px] overflow-y-auto">
+                {!hasSearchedFinalizeProducts ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p className="font-medium">Busca productos para entregar</p>
+                  </div>
+                ) : finalizeSearchedProducts.filter(p => p.stock > 0).length === 0 ? (
+                  <div className="text-center py-12 text-muted-foreground">
+                    <Package2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                    <p>No se encontraron productos con stock</p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4">
+                    {finalizeSearchedProducts.filter(p => p.stock > 0).map((product) => (
+                      <button
+                        key={product.id}
+                        onClick={() => {
+                          setFinalizeTempProduct(product);
+                          setFinalizeTempPrice(product.final_price);
+                          setFinalizeTempQuantity(1);
+                          setFinalizeTempUnitIds([]);
+                        }}
+                        className={`p-3 border rounded-lg text-left hover:border-green-500 transition-all ${
+                          finalizeTempProduct?.id === product.id ? 'border-green-500 bg-green-50 dark:bg-green-950/30' : 'border-border'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs font-mono bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+                            {product.code}
+                          </span>
+                          {product.use_unit_ids && (
+                            <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-1 rounded">
+                              IDs
+                            </span>
+                          )}
+                        </div>
+                        <h4 className="font-semibold text-sm mb-1">{product.name}</h4>
+                        <div className="flex items-center justify-between text-xs">
+                          <span>Stock: {product.stock}</span>
+                          <span className="font-bold text-green-600">
+                            {formatCOP(product.final_price)}
+                          </span>
+                        </div>
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
 
-              {/* Productos a Entregar */}
-              <div className="space-y-3">
-                <Label>Productos a Entregar</Label>
+              {/* Configuración de producto */}
+              {finalizeTempProduct && (
+                <div className="p-4 border-2 border-green-500 rounded-lg bg-green-50 dark:bg-green-950/30 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-semibold">Configurar: {finalizeTempProduct.name}</h4>
+                    <Button variant="ghost" size="sm" onClick={() => setFinalizeTempProduct(null)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
 
-                {/* Lista de productos agregados */}
-                <div className="space-y-2">
-                  {finalizeNewProducts.map((product, index) => (
-                    <div key={index} className="flex items-center gap-2 border rounded p-2 bg-green-50 dark:bg-green-950/30">
-                      <div className="flex-1">
-                        <div className="font-medium text-sm">{product.productName}</div>
-                        <div className="text-xs text-gray-600 dark:text-gray-400">
-                          {product.quantity} × {formatCOP(product.price)} = {formatCOP(product.total)}
-                        </div>
-                        {product.unitIds && product.unitIds.length > 0 && (
-                          <div className="text-xs text-gray-500">
-                            IDs: {product.unitIds.join(', ')}
-                          </div>
-                        )}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => handleRemoveFinalizeProduct(index)}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-1">
+                      <Label className="text-sm">Cantidad</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        max={finalizeTempProduct.stock}
+                        value={finalizeTempQuantity}
+                        onChange={(e) => setFinalizeTempQuantity(parseInt(e.target.value) || 1)}
+                      />
                     </div>
-                  ))}
+
+                    <div className="space-y-1">
+                      <Label className="text-sm">Precio</Label>
+                      <Input
+                        type="number"
+                        min="0"
+                        value={finalizeTempPrice}
+                        onChange={(e) => setFinalizeTempPrice(parseFloat(e.target.value) || 0)}
+                      />
+                    </div>
+                  </div>
+
+                  {finalizeTempProduct.use_unit_ids && (
+                    <div className="space-y-2">
+                      <Label className="text-sm">IDs Únicas ({finalizeTempQuantity} requerida(s))</Label>
+                      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                        {Array.from({ length: finalizeTempQuantity }).map((_, index) => {
+                          const availableIds = getAvailableIds(finalizeTempProduct).filter(
+                            idObj => !finalizeTempUnitIds.includes(idObj.id)
+                          );
+
+                          return (
+                            <div key={index} className="space-y-1">
+                              <Label className="text-xs">ID #{index + 1}</Label>
+                              <Select
+                                value={finalizeTempUnitIds[index] || ''}
+                                onValueChange={(value) => {
+                                  const newIds = [...finalizeTempUnitIds];
+                                  newIds[index] = value;
+                                  setFinalizeTempUnitIds(newIds.filter(id => id));
+                                }}
+                              >
+                                <SelectTrigger className="font-mono text-xs h-8">
+                                  <SelectValue placeholder="Sel." />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {availableIds.map((idObj) => (
+                                    <SelectItem key={idObj.id} value={idObj.id} className="font-mono text-xs">
+                                      {idObj.id} {idObj.note && `(${idObj.note})`}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <Button onClick={handleAddFinalizeProduct} className="w-full">
+                    <Plus className="h-4 w-4 mr-2" />
+                    Agregar
+                  </Button>
                 </div>
+              )}
 
-                {/* Botón agregar */}
-                <Button
-                  onClick={() => {
-                    setSelectingFor('new');
-                    setProductSearchTerm('');
-                    setSearchedProducts([]);
-                    setHasSearched(false);
-                    setProductSelectorOpen(true);
-                  }}
-                  className="w-full"
-                  variant="outline"
-                >
-                  <Plus className="h-4 w-4 mr-2" />
-                  Agregar Producto a Entregar
-                </Button>
-              </div>
-
-              {/* Diferencia de Precio y Métodos de Pago */}
+              {/* Diferencia de Precio */}
               {finalizeNewProducts.length > 0 && (() => {
                 const newTotal = finalizeNewProducts.reduce((sum, p) => sum + p.total, 0);
-                const originalTotal = exchangeToFinalize.original_total;
-                const difference = newTotal - originalTotal;
+                const difference = newTotal - exchangeToFinalize.original_total;
 
                 return (
                   <div className="p-4 border-2 border-dashed rounded-lg">
                     <div className="flex items-center justify-between mb-4">
-                      <h3 className="font-semibold text-lg">Diferencia de Precio</h3>
+                      <h3 className="font-semibold">Diferencia de Precio</h3>
                       <div className={`text-2xl font-bold ${
-                        difference > 0
-                          ? 'text-green-600 dark:text-green-400'
-                          : difference < 0
-                          ? 'text-orange-600 dark:text-orange-400'
-                          : 'text-muted-foreground'
+                        difference > 0 ? 'text-green-600' : difference < 0 ? 'text-orange-600' : ''
                       }`}>
                         {difference > 0 ? '+' : ''}COP {formatCOP(Math.abs(difference))}
                       </div>
                     </div>
 
                     {difference !== 0 && (
-                      <div className="space-y-4">
-                        <p className={`text-sm font-medium ${
-                          difference > 0
-                            ? 'text-green-700 dark:text-green-300'
-                            : 'text-orange-700 dark:text-orange-300'
-                        }`}>
-                          {difference > 0 ? 'Cliente paga diferencia' : 'Se devuelve al cliente'}
-                        </p>
-
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                          <div className="space-y-2">
-                            <Label>Efectivo</Label>
+                      <div className="space-y-3">
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="space-y-1">
+                            <Label className="text-sm">Efectivo</Label>
                             <Input
                               type="number"
                               min="0"
-                              placeholder="0"
                               value={finalizePaymentCash || ''}
                               onChange={(e) => setFinalizePaymentCash(parseFloat(e.target.value) || 0)}
-                              className="text-lg font-semibold"
                             />
                           </div>
-                          <div className="space-y-2">
-                            <Label>Transferencia</Label>
+                          <div className="space-y-1">
+                            <Label className="text-sm">Transferencia</Label>
                             <Input
                               type="number"
                               min="0"
-                              placeholder="0"
                               value={finalizePaymentTransfer || ''}
                               onChange={(e) => setFinalizePaymentTransfer(parseFloat(e.target.value) || 0)}
-                              className="text-lg font-semibold"
                             />
                           </div>
-                          <div className="space-y-2">
-                            <Label>Nequi / Daviplata</Label>
+                          <div className="space-y-1">
+                            <Label className="text-sm">Nequi/Otros</Label>
                             <Input
                               type="number"
                               min="0"
-                              placeholder="0"
                               value={finalizePaymentOther || ''}
                               onChange={(e) => setFinalizePaymentOther(parseFloat(e.target.value) || 0)}
-                              className="text-lg font-semibold"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="opacity-50">Otro</Label>
-                            <Input
-                              type="number"
-                              min="0"
-                              placeholder="0"
-                              disabled
-                              title="Usar el campo Nequi/Daviplata"
-                              className="text-lg font-semibold opacity-50"
                             />
                           </div>
                         </div>
 
-                        <div className={`p-2 rounded ${
-                          difference > 0
-                            ? 'bg-green-50 dark:bg-green-950/30'
-                            : 'bg-orange-50 dark:bg-orange-950/30'
-                        }`}>
-                          <p className={`text-xs ${
-                            difference > 0
-                              ? 'text-green-700 dark:text-green-300'
-                              : 'text-orange-700 dark:text-orange-300'
-                          }`}>
-                            Total ingresado: <span className="font-bold">
-                              COP {formatCOP(finalizePaymentCash + finalizePaymentTransfer + finalizePaymentOther)}
-                            </span>
-                          </p>
+                        <div className="p-2 bg-muted rounded text-sm">
+                          Total: <span className="font-bold">
+                            COP {formatCOP(finalizePaymentCash + finalizePaymentTransfer + finalizePaymentOther)}
+                          </span>
                           {Math.abs((finalizePaymentCash + finalizePaymentTransfer + finalizePaymentOther) - Math.abs(difference)) > 0.01 && (
-                            <p className="text-xs text-red-600 dark:text-red-400 mt-1">
-                              ⚠️ Debe sumar exactamente COP {formatCOP(Math.abs(difference))}
+                            <p className="text-red-600 text-xs mt-1">
+                              ⚠️ Debe ser COP {formatCOP(Math.abs(difference))}
                             </p>
                           )}
                         </div>
                       </div>
-                    )}
-
-                    {difference === 0 && (
-                      <p className="text-sm text-muted-foreground">
-                        No hay diferencia de precio
-                      </p>
                     )}
                   </div>
                 );
@@ -1766,13 +1788,13 @@ export default function Exchanges() {
 
               {/* Botones */}
               <div className="flex justify-end gap-3">
-                <Button variant="outline" onClick={() => setFinalizeDialogOpen(false)} disabled={isLoading}>
+                <Button variant="outline" onClick={() => setFinalizeDialogOpen(false)}>
                   Cancelar
                 </Button>
                 <Button
                   onClick={async () => {
                     if (finalizeNewProducts.length === 0) {
-                      toast.error('Debes agregar al menos un producto a entregar');
+                      toast.error('Agrega al menos un producto');
                       return;
                     }
 
@@ -1782,36 +1804,18 @@ export default function Exchanges() {
                     if (difference !== 0) {
                       const totalPayment = finalizePaymentCash + finalizePaymentTransfer + finalizePaymentOther;
                       if (Math.abs(totalPayment - Math.abs(difference)) > 0.01) {
-                        toast.error(`El total de pagos debe ser igual a la diferencia: ${formatCOP(Math.abs(difference))}`);
+                        toast.error(`El pago debe ser ${formatCOP(Math.abs(difference))}`);
                         return;
                       }
                     }
 
                     setIsLoading(true);
                     try {
-                      // Calcular payment_method
-                      const paymentCount = (finalizePaymentCash > 0 ? 1 : 0) +
-                                          (finalizePaymentTransfer > 0 ? 1 : 0) +
-                                          (finalizePaymentOther > 0 ? 1 : 0);
-
-                      let calculatedPaymentMethod = undefined;
-                      if (difference !== 0) {
-                        if (paymentCount > 1) {
-                          calculatedPaymentMethod = 'Mixto';
-                        } else if (finalizePaymentCash > 0) {
-                          calculatedPaymentMethod = 'Efectivo';
-                        } else if (finalizePaymentTransfer > 0) {
-                          calculatedPaymentMethod = 'Transferencia';
-                        } else if (finalizePaymentOther > 0) {
-                          calculatedPaymentMethod = 'Nequi';
-                        }
-                      }
-
                       const success = await finalizeExchange(
                         exchangeToFinalize.id,
                         {
                           new_products: finalizeNewProducts,
-                          payment_method: calculatedPaymentMethod,
+                          payment_method: difference > 0 ? 'Mixto' : undefined,
                           payment_cash: finalizePaymentCash,
                           payment_transfer: finalizePaymentTransfer,
                           payment_other: finalizePaymentOther,
@@ -1819,22 +1823,21 @@ export default function Exchanges() {
                       );
 
                       if (success) {
-                        toast.success('Cambio finalizado exitosamente');
+                        toast.success('Cambio finalizado');
                         setFinalizeDialogOpen(false);
                         await loadData();
                       } else {
-                        toast.error('Error al finalizar el cambio');
+                        toast.error('Error al finalizar');
                       }
                     } catch (error) {
-                      console.error('Error finalizing exchange:', error);
-                      toast.error('Error al procesar la finalización');
+                      toast.error('Error al procesar');
                     } finally {
                       setIsLoading(false);
                     }
                   }}
                   disabled={isLoading}
                 >
-                  {isLoading ? 'Procesando...' : 'Finalizar Cambio'}
+                  {isLoading ? 'Procesando...' : 'Finalizar'}
                 </Button>
               </div>
             </div>

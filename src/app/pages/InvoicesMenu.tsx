@@ -103,7 +103,25 @@ export function InvoicesMenu() {
         getAllProducts(),
         getExchanges()
       ]);
-      
+
+      // DEBUG: Verificar facturas con cambios
+      const invoicesWithExchanges = invoices.filter(inv =>
+        inv.items && inv.items.some((item: any) => item.exchanged === true)
+      );
+      if (invoicesWithExchanges.length > 0) {
+        console.log('🔄 [InvoicesMenu] Facturas con cambios:', invoicesWithExchanges.length);
+        invoicesWithExchanges.forEach(inv => {
+          console.log(`  📋 Factura ${inv.number}:`, {
+            items: inv.items.map(item => ({
+              productName: item.productName,
+              exchanged: item.exchanged,
+              exchangeId: item.exchangeId,
+              exchangedFor: item.exchangedFor
+            }))
+          });
+        });
+      }
+
       // Obtener fecha actual en zona horaria de Colombia (GMT-5)
       const todayStr = getColombiaDate(); // YYYY-MM-DD en zona Colombia
       const thisMonth = todayStr.slice(0, 7); // YYYY-MM para comparar mes
@@ -1403,11 +1421,20 @@ export function InvoicesMenu() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                          {selectedInvoice.items.map((item: any, idx: number) => (
+                          {selectedInvoice.items
+                            .filter((item: any) => !item.fromExchange) // Excluir items agregados por cambios (ya se muestran en el panel verde)
+                            .map((item: any, idx: number) => (
                             <tr key={idx}>
                               <td className="px-2 sm:px-3 py-2 bg-white dark:bg-zinc-950">
-                                <div className="font-medium text-zinc-900 dark:text-zinc-100 text-xs sm:text-sm break-words">
-                                  {item.productName || item.product_name || 'Sin nombre'}
+                                <div className="flex items-center gap-2">
+                                  <div className="font-medium text-zinc-900 dark:text-zinc-100 text-xs sm:text-sm break-words flex-1">
+                                    {item.productName || item.product_name || 'Sin nombre'}
+                                  </div>
+                                  {item.exchanged && (
+                                    <span className="flex-shrink-0 px-1.5 sm:px-2 py-0.5 sm:py-1 bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 text-[10px] sm:text-xs font-medium rounded border border-orange-300 dark:border-orange-700">
+                                      🔄 Cambiado
+                                    </span>
+                                  )}
                                 </div>
                                 {item.productCode && (
                                   <div className="text-[10px] sm:text-xs text-zinc-500 dark:text-zinc-400">
@@ -1417,6 +1444,32 @@ export function InvoicesMenu() {
                                 <div className="sm:hidden text-[10px] text-zinc-600 dark:text-zinc-400 mt-0.5">
                                   {formatCOP(item.price)} × {item.quantity}
                                 </div>
+                                {/* Mostrar información del cambio */}
+                                {item.exchanged && item.exchangedFor && item.exchangedFor.length > 0 && (
+                                  <div className="mt-2 p-2 bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 rounded">
+                                    <div className="text-[10px] sm:text-xs font-medium text-green-700 dark:text-green-300 mb-1.5">
+                                      ✅ Producto(s) entregado(s) en cambio:
+                                    </div>
+                                    {item.exchangedFor.map((exchangedProd: any, exIdx: number) => (
+                                      <div key={exIdx} className="text-[10px] sm:text-xs text-green-600 dark:text-green-400 ml-2 mb-1">
+                                        • {exchangedProd.productName} (Cant: {exchangedProd.quantity} × {formatCOP(exchangedProd.price)})
+                                        {exchangedProd.unitIds && exchangedProd.unitIds.length > 0 && (
+                                          <div className="text-[9px] text-green-500 dark:text-green-500 ml-3 mt-0.5">
+                                            IDs: {exchangedProd.unitIds.join(', ')}
+                                          </div>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                                {/* Mostrar si está pendiente de finalizar */}
+                                {item.exchanged && (!item.exchangedFor || item.exchangedFor.length === 0) && (
+                                  <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded">
+                                    <div className="text-[10px] sm:text-xs font-medium text-yellow-700 dark:text-yellow-300">
+                                      ⏳ Cambio pendiente de finalizar
+                                    </div>
+                                  </div>
+                                )}
                                 {item.unitIds && item.unitIds.length > 0 && (
                                   <div className="mt-1.5 sm:mt-2 space-y-1">
                                     <div className="text-[10px] sm:text-xs font-medium text-blue-600 dark:text-blue-400">IDs vendidos:</div>
@@ -1440,7 +1493,13 @@ export function InvoicesMenu() {
                                 {formatCOP(item.price)}
                               </td>
                               <td className="px-2 sm:px-3 py-2 text-right text-xs sm:text-sm font-medium text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-950 align-top whitespace-nowrap">
-                                {formatCOP(item.total || item.subtotal || (item.price * item.quantity))}
+                                {item.exchanged ? (
+                                  <span className="line-through text-zinc-400 dark:text-zinc-600">
+                                    {formatCOP(item.total || item.subtotal || (item.price * item.quantity))}
+                                  </span>
+                                ) : (
+                                  formatCOP(item.total || item.subtotal || (item.price * item.quantity))
+                                )}
                               </td>
                             </tr>
                           ))}
@@ -1513,7 +1572,9 @@ export function InvoicesMenu() {
                   <div className="mt-3 sm:mt-4 border-t border-zinc-200 dark:border-zinc-800 pt-3 sm:pt-4">
                     <div className="flex justify-between items-center text-base sm:text-lg font-bold">
                       <span className="text-zinc-700 dark:text-zinc-300">Total:</span>
-                      <span className="text-emerald-600 dark:text-emerald-400">{formatCOP(selectedInvoice.total)}</span>
+                      <span className="text-emerald-600 dark:text-emerald-400">
+                        {formatCOP(selectedInvoice.total)}
+                      </span>
                     </div>
                     {selectedInvoice.is_credit && selectedInvoice.credit_balance && selectedInvoice.credit_balance > 0 && (
                       <div className="flex justify-between items-center text-xs sm:text-sm mt-2">

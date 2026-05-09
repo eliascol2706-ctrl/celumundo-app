@@ -1241,14 +1241,24 @@ export function FinancialManagement() {
               </div>
             </div>
 
-            <Button
-              className="bg-emerald-600 hover:bg-emerald-700"
-              onClick={handleExportReport}
-              disabled={isExporting}
-            >
-              <Download className="w-4 h-4 mr-2" />
-              {isExporting ? 'Generando...' : 'Exportar Reporte'}
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button
+                variant="outline"
+                className="border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
+                onClick={() => navigate('/facturacion/cierre-finanzas')}
+              >
+                <FileText className="w-4 h-4 mr-2" />
+                Finalizar Finanzas
+              </Button>
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700"
+                onClick={handleExportReport}
+                disabled={isExporting}
+              >
+                <Download className="w-4 h-4 mr-2" />
+                {isExporting ? 'Generando...' : 'Exportar Reporte'}
+              </Button>
+            </div>
           </div>
         </div>
       </div>
