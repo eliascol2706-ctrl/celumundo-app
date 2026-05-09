@@ -13,6 +13,7 @@ const InvoicesMenu = React.lazy(() => import('./pages/InvoicesMenu').then(m => (
 const RegularInvoice = React.lazy(() => import('./pages/RegularInvoice').then(m => ({ default: m.RegularInvoice })));
 const CreditInvoice = React.lazy(() => import('./pages/CreditInvoice').then(m => ({ default: m.CreditInvoice })));
 const FinancialManagement = React.lazy(() => import('./pages/FinancialManagement').then(m => ({ default: m.FinancialManagement })));
+const FinancialClosures = React.lazy(() => import('./pages/FinancialClosures').then(m => ({ default: m.FinancialClosures })));
 const Movements = React.lazy(() => import('./pages/Movements').then(m => ({ default: m.default || m.Movements })));
 const Expenses = React.lazy(() => import('./pages/Expenses').then(m => ({ default: m.Expenses })));
 const Reports = React.lazy(() => import('./pages/Reports').then(m => ({ default: m.default || m.Reports })));
@@ -157,6 +158,16 @@ export const router = createBrowserRouter([
           <ProtectedRoute allowedRoles={['admin']}>
             <SuspenseWrapper>
               <FinancialManagement />
+            </SuspenseWrapper>
+          </ProtectedRoute>
+        )
+      },
+      {
+        path: 'facturacion/cierre-finanzas',
+        element: (
+          <ProtectedRoute allowedRoles={['admin']}>
+            <SuspenseWrapper>
+              <FinancialClosures />
             </SuspenseWrapper>
           </ProtectedRoute>
         )
