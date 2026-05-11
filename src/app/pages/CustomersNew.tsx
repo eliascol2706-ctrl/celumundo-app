@@ -287,7 +287,7 @@ export function CustomersNew() {
             <Button
               onClick={() => {
                 setViewMode('dashboard');
-                navigate('/clientes?mode=dashboard');
+                navigate('/sistema/clientes?mode=dashboard');
               }}
               className="bg-emerald-600 hover:bg-emerald-700"
             >
@@ -297,7 +297,7 @@ export function CustomersNew() {
             <Button
               onClick={() => {
                 setViewMode('list');
-                navigate('/clientes?mode=list');
+                navigate('/sistema/clientes?mode=list');
               }}
               variant="outline"
             >
@@ -444,7 +444,7 @@ export function CustomersNew() {
           <Button
             onClick={() => {
               setViewMode('dashboard');
-              navigate('/clientes?mode=dashboard');
+              navigate('/sistema/clientes?mode=dashboard');
             }}
             variant="outline"
           >
@@ -454,7 +454,7 @@ export function CustomersNew() {
           <Button
             onClick={() => {
               setViewMode('list');
-              navigate('/clientes?mode=list');
+              navigate('/sistema/clientes?mode=list');
             }}
             className="bg-emerald-600 hover:bg-emerald-700"
           >
@@ -585,7 +585,7 @@ export function CustomersNew() {
                               onClick={() => {
                                 console.log('Navegando al perfil del cliente:', customer.document);
                                 console.log('Datos completos del cliente:', customer);
-                                navigate(`/clientes/${encodeURIComponent(customer.document)}`);
+                                navigate(`/sistema/clientes/${encodeURIComponent(customer.document)}`);
                               }}
                               className="hover:bg-emerald-50 hover:border-emerald-300 dark:hover:bg-emerald-900/30 dark:hover:border-emerald-700"
                             >

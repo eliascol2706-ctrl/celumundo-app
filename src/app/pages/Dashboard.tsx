@@ -481,7 +481,7 @@ export function Dashboard() {
             <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
               {stats.totalCustomers}
             </div>
-            <Link to="/clientes" className="text-xs text-blue-600 dark:text-blue-400 hover:underline mt-1 inline-block">
+            <Link to="/sistema/clientes" className="text-xs text-blue-600 dark:text-blue-400 hover:underline mt-1 inline-block">
               Ver clientes →
             </Link>
           </CardContent>

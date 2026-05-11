@@ -78,7 +78,7 @@ export function CustomerProfile() {
       if (!customerData) {
         console.error('Cliente no encontrado con documento:', decodedDocument);
         toast.error('Cliente no encontrado');
-        navigate('/clientes');
+        navigate('/sistema/clientes');
         return;
       }
 
@@ -278,7 +278,7 @@ export function CustomerProfile() {
       {/* Header */}
       <div className="border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900">
         <div className="p-6">
-          <Button variant="ghost" onClick={() => navigate('/clientes')} className="mb-4">
+          <Button variant="ghost" onClick={() => navigate('/sistema/clientes')} className="mb-4">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Volver a Clientes
           </Button>

@@ -131,7 +131,7 @@ export function CreditDashboard() {
           <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Panel de control de cartera de clientes</p>
         </div>
         <Button
-          onClick={() => navigate('/clientes?mode=list')}
+          onClick={() => navigate('/sistema/clientes?mode=list')}
           className="bg-emerald-600 hover:bg-emerald-700"
         >
           <Users className="w-4 h-4 mr-2" />
@@ -227,10 +227,10 @@ export function CreditDashboard() {
             ) : (
               <div className="divide-y divide-zinc-100">
                 {topDebtors.map((debtor) => (
-                  <div 
+                  <div
                     key={debtor.id}
                     className="p-4 hover:bg-zinc-50 dark:bg-zinc-800 transition-colors cursor-pointer flex items-center justify-between"
-                    onClick={() => navigate(`/clientes/${debtor.document}`)}
+                    onClick={() => navigate(`/sistema/clientes/${debtor.document}`)}
                   >
                     <div className="flex-1">
                       <div className="flex items-center gap-2">

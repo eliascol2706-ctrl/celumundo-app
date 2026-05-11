@@ -1738,7 +1738,7 @@ export function CreditInvoice() {
           overdueDays={warningData.overdueDays}
           onRegisterPayment={() => {
             setShowWarningModal(false);
-            navigate(`/clientes/${selectedCustomer.document}`);
+            navigate(`/sistema/clientes/${selectedCustomer.document}`);
           }}
           onContinueAnyway={async () => {
             // Solo admin puede continuar

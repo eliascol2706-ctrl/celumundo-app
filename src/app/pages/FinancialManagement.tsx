@@ -1880,7 +1880,7 @@ export function FinancialManagement() {
                 <Wallet className="w-4 h-4 mr-2" />
                 Gestionar Gastos
               </Button>
-              <Button variant="outline" onClick={() => navigate('/clientes')}>
+              <Button variant="outline" onClick={() => navigate('/sistema/clientes')}>
                 <Users className="w-4 h-4 mr-2" />
                 Ver Clientes
               </Button>
