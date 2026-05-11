@@ -1421,31 +1421,24 @@ export const addInvoice = async (invoice: Omit<Invoice, 'id' | 'number' | 'compa
     return null;
   }
   
-  // Registrar movimientos y actualizar stock
-  for (const item of invoice.items) {
-    // Saltar productos comunes (no están en inventario)
-    if (item.productId.startsWith('common-')) continue;
+  // NOTA: La actualización de stock se maneja en el frontend para manejar correctamente
+  // las unit_ids y agrupar items del mismo producto. Aquí solo registramos movimientos
+  // si la factura está pagada (las facturas en confirmación no registran movimiento aún)
+  if (invoice.status === 'paid') {
+    for (const item of invoice.items) {
+      // Saltar productos comunes (no están en inventario)
+      if (item.productId.startsWith('common-')) continue;
 
-    await addMovement({
-      type: 'exit',
-      product_id: item.productId,
-      product_name: item.productName,
-      quantity: item.quantity,
-      reason: 'Venta - Factura',
-      reference: nextNumber || '',
-      user_name: getCurrentUser()?.username || 'Sistema',
-      unit_ids: item.unitIds || []
-    });
-
-    // Actualizar stock
-    const { data: product } = await supabase
-      .from('products')
-      .select('stock')
-      .eq('id', item.productId)
-      .single();
-
-    if (product) {
-      await updateProduct(item.productId, { stock: product.stock - item.quantity });
+      await addMovement({
+        type: 'exit',
+        product_id: item.productId,
+        product_name: item.productName,
+        quantity: item.quantity,
+        reason: 'Venta - Factura',
+        reference: nextNumber || '',
+        user_name: getCurrentUser()?.username || 'Sistema',
+        unit_ids: item.unitIds || []
+      });
     }
   }
   

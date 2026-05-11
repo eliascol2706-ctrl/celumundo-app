@@ -449,35 +449,54 @@ export function RegularInvoice() {
         }
       }
 
-      // Actualizar inventario
+      // Actualizar inventario - Agrupar items por productId para manejar correctamente
+      // casos donde el mismo producto aparece múltiples veces
+      const productGroups = new Map<string, typeof items>();
+
       for (const item of items) {
         // Saltar productos comunes (no están en inventario)
         if (item.productId.startsWith('common-')) continue;
 
-        const product = products.find((p) => p.id === item.productId);
-        if (product) {
-          const newStock = product.stock - item.quantity;
-          let newRegisteredIds = product.registered_ids;
+        if (!productGroups.has(item.productId)) {
+          productGroups.set(item.productId, []);
+        }
+        productGroups.get(item.productId)!.push(item);
+      }
 
+      // Procesar cada grupo de productos
+      for (const [productId, groupItems] of productGroups) {
+        const product = products.find((p) => p.id === productId);
+        if (!product) continue;
+
+        // Sumar cantidades totales para este producto
+        const totalQuantity = groupItems.reduce((sum, item) => sum + item.quantity, 0);
+        const newStock = product.stock - totalQuantity;
+        let newRegisteredIds = product.registered_ids;
+
+        // Procesar unit_ids de todos los items de este producto
+        for (const item of groupItems) {
           if (item.useUnitIds && item.unitIds && item.unitIds.length > 0) {
             if (invoiceStatus === 'paid') {
               // Si está paga: MARCAR como vendidas (no eliminar, para poder restaurar en devoluciones)
               const { markIdsAsSold } = await import('../lib/unit-ids-utils');
-              newRegisteredIds = markIdsAsSold(product.registered_ids, item.unitIds);
+              newRegisteredIds = markIdsAsSold(newRegisteredIds, item.unitIds);
             } else {
               // Si está en confirmación: INHABILITAR las IDs temporalmente
               const { disableIds } = await import('../lib/unit-ids-utils');
-              newRegisteredIds = disableIds(product.registered_ids, item.unitIds, invoice.id);
+              newRegisteredIds = disableIds(newRegisteredIds, item.unitIds, invoice.id);
             }
           }
+        }
 
-          await updateProduct(item.productId, {
-            stock: newStock,
-            registered_ids: newRegisteredIds
-          });
+        // Actualizar producto una sola vez con el stock total descontado
+        await updateProduct(productId, {
+          stock: newStock,
+          registered_ids: newRegisteredIds
+        });
 
-          // Registrar movimiento solo si está paga
-          if (invoiceStatus === 'paid') {
+        // Registrar movimiento solo si está paga
+        if (invoiceStatus === 'paid') {
+          for (const item of groupItems) {
             await addMovement({
               type: 'exit',
               product_id: item.productId,
@@ -834,9 +853,26 @@ export function RegularInvoice() {
 
     // Filtrar solo IDs disponibles (no inhabilitadas)
     const { getAvailableIds } = await import('../lib/unit-ids-utils');
-    const availableIds = product.use_unit_ids
+    let availableIds = product.use_unit_ids
       ? getAvailableIds(product.registered_ids || [])
       : product.registered_ids || [];
+
+    // Filtrar IDs que ya fueron seleccionadas en otros items del mismo producto
+    if (product.use_unit_ids) {
+      const alreadySelectedIds = items
+        .filter(item => item.productId === product.id && item.unitIds && item.unitIds.length > 0)
+        .flatMap(item => item.unitIds || []);
+
+      availableIds = availableIds.filter(idObj => {
+        const idString = typeof idObj === 'object' ? idObj.id : idObj;
+        return !alreadySelectedIds.includes(idString);
+      });
+
+      if (availableIds.length === 0) {
+        toast.error(`${product.name}: Todas las IDs disponibles ya han sido seleccionadas en esta factura`);
+        return;
+      }
+    }
 
     const newItem: InvoiceItem = {
       productId: product.id,
@@ -935,21 +971,49 @@ export function RegularInvoice() {
   };
 
   // Funciones para manejo de IDs únicas
-  const handleOpenUnitIdSelector = (index: number) => {
+  const handleOpenUnitIdSelector = async (index: number) => {
+    const currentItem = items[index];
+
+    // Recalcular availableIds filtrando las ya usadas en otros items del mismo producto
+    let availableIds = currentItem.availableIds || [];
+
+    if (currentItem.useUnitIds) {
+      // Obtener IDs seleccionadas en otros items del mismo producto (excluyendo el actual)
+      const alreadySelectedIds = items
+        .filter((item, idx) => idx !== index && item.productId === currentItem.productId && item.unitIds && item.unitIds.length > 0)
+        .flatMap(item => item.unitIds || []);
+
+      // Filtrar las availableIds excluyendo las ya seleccionadas en otros items
+      availableIds = availableIds.filter(idObj => {
+        const idString = typeof idObj === 'object' ? idObj.id : idObj;
+        return !alreadySelectedIds.includes(idString);
+      });
+
+      // Actualizar el item con las nuevas availableIds filtradas
+      const updatedItems = [...items];
+      updatedItems[index] = {
+        ...updatedItems[index],
+        availableIds: availableIds
+      };
+      setItems(updatedItems);
+    }
+
     setCurrentItemIndex(index);
-    setSelectedUnitIds([...(items[index].unitIds || [])]);
-    
+    setSelectedUnitIds([...(currentItem.unitIds || [])]);
+
     // Cargar notas existentes o crear objeto vacío con notas del producto
-    const existingNotes = items[index].unitIdNotes || {};
+    const existingNotes = currentItem.unitIdNotes || {};
     const productNotesMap: { [id: string]: string } = {};
-    
+
     // Pre-cargar las notas del producto si existen
-    if (items[index].availableIds) {
-      items[index].availableIds!.forEach((item) => {
-        productNotesMap[item.id] = item.note || '';
+    if (availableIds) {
+      availableIds.forEach((item) => {
+        const idString = typeof item === 'object' ? item.id : item;
+        const note = typeof item === 'object' ? item.note : '';
+        productNotesMap[idString] = note || '';
       });
     }
-    
+
     // Combinar notas existentes con las del producto
     setUnitIdNotes({ ...productNotesMap, ...existingNotes });
     setUnitIdDialogOpen(true);
