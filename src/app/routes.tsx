@@ -25,7 +25,7 @@ const CustomersNew = React.lazy(() => import('./pages/CustomersNew').then(m => (
 const CustomerProfile = React.lazy(() => import('./pages/CustomerProfile').then(m => ({ default: m.CustomerProfile })));
 const Exchanges = React.lazy(() => import('./pages/Exchanges').then(m => ({ default: m.default || m.Exchanges })));
 const Warranties = React.lazy(() => import('./pages/Warranties').then(m => ({ default: m.default || m.Warranties })));
-const ServiceOrders = React.lazy(() => import('./pages/ServiceOrders').then(m => ({ default: m.default || m.ServiceOrders })));
+const CommonProducts = React.lazy(() => import('./pages/CommonProducts').then(m => ({ default: m.default || m.CommonProducts })));
 const TrackingPage = React.lazy(() => import('./pages/TrackingPage').then(m => ({ default: m.default || m.TrackingPage })));
 const CatalogAdmin = React.lazy(() => import('./pages/CatalogAdmin').then(m => ({ default: m.CatalogAdmin })));
 const PublicCatalog = React.lazy(() => import('./pages/PublicCatalog').then(m => ({ default: m.PublicCatalog })));
@@ -263,11 +263,11 @@ export const router = createBrowserRouter([
         )
       },
       {
-        path: 'ordenes-servicio',
+        path: 'comunes',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
             <SuspenseWrapper>
-              <ServiceOrders />
+              <CommonProducts />
             </SuspenseWrapper>
           </ProtectedRoute>
         )

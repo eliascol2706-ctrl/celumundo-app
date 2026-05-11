@@ -1423,6 +1423,9 @@ export const addInvoice = async (invoice: Omit<Invoice, 'id' | 'number' | 'compa
   
   // Registrar movimientos y actualizar stock
   for (const item of invoice.items) {
+    // Saltar productos comunes (no están en inventario)
+    if (item.productId.startsWith('common-')) continue;
+
     await addMovement({
       type: 'exit',
       product_id: item.productId,
@@ -1433,14 +1436,14 @@ export const addInvoice = async (invoice: Omit<Invoice, 'id' | 'number' | 'compa
       user_name: getCurrentUser()?.username || 'Sistema',
       unit_ids: item.unitIds || []
     });
-    
+
     // Actualizar stock
     const { data: product } = await supabase
       .from('products')
       .select('stock')
       .eq('id', item.productId)
       .single();
-    
+
     if (product) {
       await updateProduct(item.productId, { stock: product.stock - item.quantity });
     }
@@ -1491,6 +1494,9 @@ export const deleteInvoice = async (id: string): Promise<boolean> => {
       console.log(`[DeleteInvoice] Restaurando inventario (status: ${invoice.status})`);
 
       for (const item of invoice.items) {
+        // Saltar productos comunes (no están en inventario)
+        if (item.productId.startsWith('common-')) continue;
+
         console.log('[DeleteInvoice] Procesando item:', {
           productId: item.productId,
           productName: item.productName,
@@ -1583,6 +1589,13 @@ export const deleteInvoice = async (id: string): Promise<boolean> => {
       console.log(`[DeleteInvoice] Factura pagada, NO se restaura inventario`);
     }
 
+    // 2.5. Eliminar productos comunes asociados a esta factura
+    await supabase
+      .from('common_products')
+      .delete()
+      .eq('invoice_id', id)
+      .eq('company', company);
+
     // 3. Eliminar la factura
     const { error: deleteError } = await supabase
       .from('invoices')
@@ -1624,6 +1637,9 @@ export const cancelCreditInvoice = async (invoiceId: string): Promise<boolean> =
 
     // 2. Reintegrar productos al inventario
     for (const item of invoice.items) {
+      // Saltar productos comunes (no están en inventario)
+      if (item.productId.startsWith('common-')) continue;
+
       // Obtener el producto actual
       const { data: product, error: productError } = await supabase
         .from('products')
@@ -1631,7 +1647,7 @@ export const cancelCreditInvoice = async (invoiceId: string): Promise<boolean> =
         .eq('id', item.productId)
         .eq('company', company)
         .single();
-      
+
       if (productError || !product) {
         console.error('Error fetching product:', productError);
         continue; // Continuar con el siguiente producto
@@ -1683,11 +1699,18 @@ export const cancelCreditInvoice = async (invoiceId: string): Promise<boolean> =
       .delete()
       .eq('invoice_id', invoiceId)
       .eq('company', company);
-    
+
     if (paymentsError) {
       console.error('Error deleting credit payments:', paymentsError);
       // Continuar con la eliminación de la factura
     }
+
+    // 3.5. Eliminar productos comunes asociados a esta factura
+    await supabase
+      .from('common_products')
+      .delete()
+      .eq('invoice_id', invoiceId)
+      .eq('company', company);
 
     // 4. Eliminar la factura
     const { error: deleteError } = await supabase
@@ -2169,6 +2192,9 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
   
   // Actualizar inventario
   for (const item of returnData.items) {
+    // Saltar productos comunes (no están en inventario)
+    if (item.productId.startsWith('common-')) continue;
+
     // Crear movimiento de entrada
     await addMovement({
       type: 'entry',
@@ -2180,7 +2206,7 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
       user_name: returnData.processed_by,
       unit_ids: item.unitIds || []
     });
-    
+
     // Actualizar stock y IDs registradas
     const { data: product } = await supabase
       .from('products')
@@ -2312,6 +2338,9 @@ export const revertReturn = async (returnId: string): Promise<boolean> => {
 
     // Procesar cada item devuelto
     for (const item of returnData.items) {
+      // Saltar productos comunes (no están en inventario)
+      if (item.productId.startsWith('common-')) continue;
+
       // Crear movimiento de salida (restar del inventario)
       await addMovement({
         type: 'exit',
@@ -2554,22 +2583,13 @@ export const calculateNetRevenue = (invoices: Invoice[], returns: Return[], exch
 
   const totalRevenue = totalCash + totalTransfer + totalOthers;
 
-  // Calcular impacto de CAMBIOS
-  // - Si price_difference > 0: El cliente pagó más (SUMA)
-  // - Si price_difference < 0: Se le devolvió dinero (RESTA)
-  // - Si price_difference === 0: No afecta ingresos
-  const exchangesImpact = exchanges.reduce((sum, exchange) => {
-    if (exchange.price_difference > 0) {
-      return sum + exchange.price_difference; // Cliente pagó diferencia
-    } else if (exchange.price_difference < 0) {
-      return sum + exchange.price_difference; // Se devolvió dinero (negativo)
-    }
-    return sum; // Sin impacto si es 0
-  }, 0);
+  // NOTA: Ya NO sumamos exchangesImpact porque ahora los cambios modifican directamente
+  // el campo invoice.total y los métodos de pago (payment_cash, payment_transfer, etc.)
+  // Por lo tanto, el impacto ya está incluido en totalRevenue
 
   // No restamos totalReturns porque las facturas 'returned' ya no se cuentan en totalRevenue
   // Solo incluimos facturas 'paid' y 'partial_return'
-  return totalRevenue + exchangesImpact;
+  return totalRevenue;
 };
 
 // ============================================
@@ -3229,6 +3249,9 @@ export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_
   // PROCESAR PRODUCTOS ORIGINALES (MÚLTIPLES)
   // ============================================
   for (const originalProd of exchangeData.original_products) {
+    // Saltar productos comunes (no están en inventario)
+    if (originalProd.productId.startsWith('common-')) continue;
+
     // 1. Registrar movimiento de entrada
     await addMovement({
       type: 'entry',
@@ -3285,6 +3308,9 @@ export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_
   // ============================================
   if (!isPendingExchange && exchangeData.new_products.length > 0) {
     for (const newProd of exchangeData.new_products) {
+      // Saltar productos comunes (no están en inventario)
+      if (newProd.productId.startsWith('common-')) continue;
+
       // 1. Registrar movimiento de salida
       await addMovement({
         type: 'exit',
@@ -3521,6 +3547,9 @@ export const finalizeExchange = async (
 
     // 3. Procesar cada producto nuevo (sacar del inventario)
     for (const newProd of finalizeData.new_products) {
+      // Saltar productos comunes (no están en inventario)
+      if (newProd.productId.startsWith('common-')) continue;
+
       // Registrar movimiento de salida
       await addMovement({
         type: 'exit',
@@ -3811,6 +3840,9 @@ export const cancelExchange = async (exchangeId: string): Promise<boolean> => {
         }];
 
     for (const originalProd of originalProducts) {
+      // Saltar productos comunes (no están en inventario)
+      if (originalProd.productId.startsWith('common-')) continue;
+
       await addMovement({
         type: 'exit',
         product_id: originalProd.productId,
@@ -3988,10 +4020,10 @@ export const calculateNetRevenueWithExchanges = (invoices: Invoice[], exchanges:
     .filter(inv => inv.status === 'paid' || inv.status === 'partial_return')
     .reduce((sum, inv) => sum + inv.total, 0);
 
-  // Sumar el impacto de los cambios (positivo si se cobró, negativo si se devolvió)
-  const exchangeImpact = calculateExchangeImpact(exchanges);
+  // NOTA: Ya NO sumamos exchangeImpact porque ahora los cambios modifican directamente
+  // el campo invoice.total y los métodos de pago. El impacto ya está incluido en totalRevenue.
 
-  return totalRevenue + exchangeImpact;
+  return totalRevenue;
 };
 
 /**
@@ -4034,6 +4066,9 @@ export const deleteExchange = async (exchangeId: string): Promise<boolean> => {
         }];
 
     for (const originalProd of originalProducts) {
+      // Saltar productos comunes (no están en inventario)
+      if (originalProd.productId.startsWith('common-')) continue;
+
       await addMovement({
         type: 'exit',
         product_id: originalProd.productId,
@@ -4097,6 +4132,9 @@ export const deleteExchange = async (exchangeId: string): Promise<boolean> => {
           }];
 
       for (const newProd of newProducts) {
+        // Saltar productos comunes (no están en inventario)
+        if (newProd.productId.startsWith('common-')) continue;
+
         await addMovement({
           type: 'entry',
           product_id: newProd.productId,
@@ -4310,7 +4348,7 @@ export const addWarranty = async (warrantyData: Omit<Warranty, 'id' | 'warranty_
     return null;
   }
   
-  if (warrantyData.discount_from_stock) {
+  if (warrantyData.discount_from_stock && !warrantyData.product_id.startsWith('common-')) {
     await addMovement({
       type: 'exit',
       product_id: warrantyData.product_id,
@@ -4321,7 +4359,7 @@ export const addWarranty = async (warrantyData: Omit<Warranty, 'id' | 'warranty_
       user_name: warrantyData.registered_by,
       unit_ids: warrantyData.unit_ids || []
     });
-    
+
     const { data: product } = await supabase
       .from('products')
       .select('*')
@@ -4391,7 +4429,7 @@ export const updateWarrantyStatus = async (
       .eq('id', id)
       .single();
 
-    if (warranty && warranty.discount_from_stock) {
+    if (warranty && warranty.discount_from_stock && !warranty.product_id.startsWith('common-')) {
       // Solo añadir movimiento de entrada si se resolvió (producto devuelto)
       if (status === 'resolved') {
         await addMovement({

@@ -63,6 +63,7 @@ import { jsPDF } from 'jspdf';
 import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
 import { printThermalInvoice as printThermalDirect } from '../lib/thermal-printer';
 import { printPDFInvoice } from '../lib/pdf-printer';
+import { isPrintingAvailable } from '../lib/platform-detector';
 import {
   LineChart,
   Line,
@@ -342,7 +343,8 @@ export function FinancialManagement() {
 
       // No restamos totalDevoluciones porque las facturas 'returned' ya no se cuentan en facturasPagas
       // MODIFICADO: Incluir ingresos de servicio técnico y abonos a crédito
-      const ingresoNeto = facturasPagas + impactoCambios + ingresosServicioTecnico + abonosDelMes;
+      // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
+      const ingresoNeto = facturasPagas + ingresosServicioTecnico + abonosDelMes;
 
       // NUEVO: Total de Facturas En Confirmación (solo facturas pending e in_confirmation)
       const totalFacturasEnConfirmacion = monthInvoices
@@ -700,7 +702,8 @@ export function FinancialManagement() {
       .reduce((sum, payment) => sum + payment.amount, 0);
 
     // MODIFICADO: Incluir ingresos de servicio técnico y abonos
-    const ingresosNetos = facturasPagas + impactoCambios + ingresosServicioTecnico + abonosDelDia;
+    // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
+    const ingresosNetos = facturasPagas + ingresosServicioTecnico + abonosDelDia;
 
     // Calcular costos de productos
     let costos = 0;
@@ -935,7 +938,8 @@ export function FinancialManagement() {
       });
       const ingresosServicioTecnico = monthServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
 
-      const ingresos = facturasPagas + impactoCambios + abonosDelMes + ingresosServicioTecnico;
+      // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
+      const ingresos = facturasPagas + abonosDelMes + ingresosServicioTecnico;
 
       const gastos = monthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
@@ -2212,6 +2216,26 @@ export function FinancialManagement() {
               />
             </div>
           )}
+
+          <DialogFooter className="flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsThermalPrintDialogOpen(false);
+                setIsPrintDialogOpen(true);
+              }}
+            >
+              Volver
+            </Button>
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-700"
+              onClick={handleThermalPrint}
+              disabled={!isPrintingAvailable()}
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              Imprimir Tirilla
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

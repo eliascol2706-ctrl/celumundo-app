@@ -59,6 +59,9 @@ export const revertInvoice = async (invoiceId: string): Promise<RevertInvoiceRes
 
     // 4. Restaurar el stock de cada producto
     for (const item of invoice.items) {
+      // Saltar productos comunes (no están en inventario)
+      if (item.productId.startsWith('common-')) continue;
+
       const { data: product, error: productError } = await supabase
         .from('products')
         .select('*')
@@ -118,6 +121,13 @@ export const revertInvoice = async (invoiceId: string): Promise<RevertInvoiceRes
         .eq('invoice_id', invoiceId)
         .eq('company', company);
     }
+
+    // 5.5. Eliminar productos comunes asociados a esta factura
+    await supabase
+      .from('common_products')
+      .delete()
+      .eq('invoice_id', invoiceId)
+      .eq('company', company);
 
     // 6. Eliminar la factura
     const { error: deleteError } = await supabase

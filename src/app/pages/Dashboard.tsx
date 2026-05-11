@@ -103,7 +103,7 @@ export function Dashboard() {
           .filter(i => i.is_credit && i.status === 'pending')
           .length;
 
-        // Calcular impacto de cambios para totalRevenue
+        // Calcular impacto de cambios (solo para visualización, NO se suma al total)
         const exchangesImpact = exchanges.reduce((sum, exchange) => {
           if (exchange.price_difference > 0) {
             return sum + exchange.price_difference;
@@ -118,7 +118,7 @@ export function Dashboard() {
         setStats({
           totalProducts: products.length,
           totalInvoices: invoices.length,
-          totalRevenue: invoicesTotalRevenue + exchangesImpact,
+          totalRevenue: invoicesTotalRevenue, // Ya NO sumamos exchangesImpact porque está incluido en invoice.total
           lowStockProducts: lowStock.length,
           recentMovements: recentMovs.length,
           totalExpenses,

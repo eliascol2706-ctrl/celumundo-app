@@ -39,6 +39,8 @@ import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
 import { jsPDF } from 'jspdf';
 import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
+import { printThermalInvoice } from '../lib/thermal-printer';
+import { isPrintingAvailable } from '../lib/platform-detector';
 
 interface InvoiceItem {
   productId: string;
@@ -251,6 +253,14 @@ export function InvoicesHistory() {
   const handleApproveInvoice = async (invoice: Invoice) => {
     if (isApproving) return;
 
+    // ✅ VALIDAR CIERRES ANTES DE CONFIRMAR
+    const { canCreateInvoice } = await import('../lib/supabase');
+    const validation = await canCreateInvoice();
+    if (!validation.canCreate) {
+      alert(validation.message || 'No se pueden confirmar facturas en este momento.');
+      return;
+    }
+
     setIsApproving(true);
     try {
       // Confirmar el pago y actualizar la fecha al día de hoy
@@ -264,6 +274,9 @@ export function InvoicesHistory() {
 
       // Actualizar inventario
       for (const item of invoice.items) {
+        // Saltar productos comunes (no están en inventario)
+        if (item.productId.startsWith('common-')) continue;
+
         // Obtener el producto actual para tener el stock correcto
         const { data: productData } = await (await import('../lib/supabase')).supabase
           .from('products')
@@ -990,12 +1003,32 @@ export function InvoicesHistory() {
 
           {selectedInvoice && (
             <div ref={thermalPrintRef}>
-              <ThermalInvoicePrint 
-                invoice={selectedInvoice} 
+              <ThermalInvoicePrint
+                invoice={selectedInvoice}
                 creditPayments={creditPayments}
               />
             </div>
           )}
+
+          <DialogFooter className="flex-wrap gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setIsThermalPrintDialogOpen(false);
+                setIsPrintDialogOpen(true);
+              }}
+            >
+              Volver
+            </Button>
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-700"
+              onClick={handleThermalPrint}
+              disabled={!isPrintingAvailable()}
+            >
+              <Printer className="h-4 w-4 mr-2" />
+              Imprimir Tirilla
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

@@ -11,14 +11,25 @@ export const detectPlatform = (): Platform => {
   return 'web';
 };
 
-// Verificar si la impresión está disponible
+/**
+ * isPrintingAvailable — retorna true solo en Electron.
+ * La impresión solo está disponible en la aplicación de escritorio.
+ */
 export const isPrintingAvailable = (): boolean => {
   return detectPlatform() === 'electron';
 };
 
-// Obtener mensaje de advertencia para web
+// Verificar si la plataforma es Electron (impresoras físicas directas)
+export const isElectronPlatform = (): boolean => {
+  return detectPlatform() === 'electron';
+};
+
+// Obtener mensaje informativo sobre el modo de impresión activo
 export const getWebPrintingWarning = (): string => {
-  return 'La impresión directa solo está disponible en la aplicación de escritorio. Por favor, usa la versión de escritorio para imprimir documentos.';
+  if (isElectronPlatform()) {
+    return '';
+  }
+  return 'Modo web: la impresión usará el diálogo del navegador. Para impresión directa a impresora térmica usa la app de escritorio.';
 };
 
 // Clase de error específica para impresión no disponible

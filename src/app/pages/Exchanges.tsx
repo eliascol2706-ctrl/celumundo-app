@@ -235,6 +235,12 @@ export default function Exchanges() {
 
   const handleToggleReturnProduct = (item: any, checked: boolean) => {
     if (checked) {
+      // Los productos comunes no se pueden intercambiar
+      if (item.productId.startsWith('common-')) {
+        toast.error('Los productos comunes no se pueden intercambiar');
+        return;
+      }
+
       // Agregar producto a la lista de devolución
       const product = products.find(p => p.id === item.productId);
       if (!product) return;

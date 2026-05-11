@@ -50,7 +50,6 @@ interface FinancialClosure {
   credit_invoices_revenue: number;
   partial_returns_adjustment: number;
   service_revenue: number;
-  exchanges_impact: number;
   pending_credit: number;
   credit_payments: number;
   product_costs: number;
@@ -148,9 +147,6 @@ export function FinancialClosures() {
     const company = getCurrentCompany();
     const periodStart = getPeriodStart();
 
-    console.log('[Cierre Finanzas] Calculando desde:', periodStart || 'Inicio de los tiempos');
-    console.log('[Cierre Finanzas] Hasta:', new Date().toISOString());
-
     // Filtrar facturas del periodo actual
     const periodInvoices = invoices.filter(inv => {
       if (inv.company !== company) return false;
@@ -166,8 +162,6 @@ export function FinancialClosures() {
       // Si no hay cierres anteriores, contar todas las facturas
       return true;
     });
-
-    console.log('[Cierre Finanzas] Facturas en el periodo:', periodInvoices.length);
 
     // 1. Ingresos por tipo de factura
     const paidInvoices = periodInvoices.filter(inv =>
@@ -196,10 +190,9 @@ export function FinancialClosures() {
     });
     const serviceRevenue = periodServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
 
-    // 3. Impacto de cambios
+    // 2b. Impacto de cambios (solo para visualización, NO se suma al total)
     const periodExchanges = exchanges.filter(exchange => {
       if (!exchange.date) return false;
-      if (exchange.status !== 'completed') return false; // Solo cambios completados
 
       if (periodStart) {
         const exchangeDate = new Date(exchange.date);
@@ -211,10 +204,12 @@ export function FinancialClosures() {
     });
     const exchangesImpact = calculateExchangeImpact(periodExchanges);
 
-    // 4. Total de ingresos
-    const totalRevenue = paidInvoicesRevenue + creditInvoicesRevenue + partialReturnsAdjustment + serviceRevenue + exchangesImpact;
+    // 3. Total de ingresos
+    // Los totales de las facturas (invoice.total) YA incluyen el impacto de cambios
+    // Por eso NO sumamos exchangesImpact aquí
+    const totalRevenue = paidInvoicesRevenue + creditInvoicesRevenue + partialReturnsAdjustment + serviceRevenue;
 
-    // 5. Crédito pendiente (TODOS los créditos pendientes, no solo del periodo)
+    // 4. Crédito pendiente (TODOS los créditos pendientes, no solo del periodo)
     const allCreditInvoices = invoices.filter(inv =>
       inv.company === company && inv.is_credit
     );
@@ -222,7 +217,7 @@ export function FinancialClosures() {
       .filter(inv => inv.status === 'pending')
       .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
 
-    // 6. Abonos a créditos del periodo
+    // 5. Abonos a créditos del periodo
     const periodCreditPayments = creditPayments.filter(payment => {
       if (!payment.date) return false;
 
@@ -236,7 +231,7 @@ export function FinancialClosures() {
     });
     const creditPaymentsTotal = periodCreditPayments.reduce((sum, p) => sum + p.amount, 0);
 
-    // 7. Costo de productos vendidos
+    // 6. Costo de productos vendidos
     const invoicesForCost = periodInvoices.filter(inv =>
       inv.status !== 'returned' && inv.status !== 'cancelled'
     );
@@ -245,6 +240,11 @@ export function FinancialClosures() {
     invoicesForCost.forEach(invoice => {
       if (invoice.items && Array.isArray(invoice.items)) {
         invoice.items.forEach((item: any) => {
+          // Excluir items que fueron devueltos en un cambio (exchanged: true sin fromExchange: true)
+          if (item.exchanged && !item.fromExchange) {
+            return; // No contar este item en los costos
+          }
+
           const product = products.find(p => p.id === item.productId);
           if (product && product.current_cost) {
             productCosts += product.current_cost * item.quantity;
@@ -253,7 +253,7 @@ export function FinancialClosures() {
       }
     });
 
-    // 8. Gastos del periodo
+    // 7. Gastos del periodo
     const periodExpenses = expenses.filter(expense => {
       if (!expense.date) return false;
 
@@ -267,14 +267,9 @@ export function FinancialClosures() {
     });
     const totalExpenses = periodExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
-    // 9. Ganancias
+    // 8. Ganancias
     const grossProfit = totalRevenue - productCosts;
     const netProfit = grossProfit - totalExpenses;
-
-    console.log('[Cierre Finanzas] Total Revenue:', totalRevenue);
-    console.log('[Cierre Finanzas] Product Costs:', productCosts);
-    console.log('[Cierre Finanzas] Total Expenses:', totalExpenses);
-    console.log('[Cierre Finanzas] Net Profit:', netProfit);
 
     return {
       totalRevenue,
@@ -316,7 +311,6 @@ export function FinancialClosures() {
         credit_invoices_revenue: closureData.creditInvoicesRevenue,
         partial_returns_adjustment: closureData.partialReturnsAdjustment,
         service_revenue: closureData.serviceRevenue,
-        exchanges_impact: closureData.exchangesImpact,
         pending_credit: closureData.pendingCredit,
         credit_payments: closureData.creditPayments,
         product_costs: closureData.productCosts,
@@ -330,8 +324,6 @@ export function FinancialClosures() {
         notes: closureNotes,
         closed_by: currentUser
       };
-
-      console.log('[Cierre Finanzas] Guardando cierre:', newClosure);
 
       const { error } = await supabase
         .from('closures_finances')
@@ -531,11 +523,16 @@ export function FinancialClosures() {
                     </div>
                   )}
                   {closureData.exchangesImpact !== 0 && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-zinc-600 dark:text-zinc-400">Impacto cambios</span>
-                      <span className={`font-medium ${closureData.exchangesImpact >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-                        {closureData.exchangesImpact >= 0 ? '+' : ''}{formatCOP(closureData.exchangesImpact)}
-                      </span>
+                    <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                      <div className="flex justify-between text-xs">
+                        <span className="text-zinc-600 dark:text-zinc-400">Impacto de cambios</span>
+                        <span className={`font-medium ${closureData.exchangesImpact >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                          {formatCOP(closureData.exchangesImpact)}
+                        </span>
+                      </div>
+                      <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1 italic">
+                        (Ya incluido en las facturas, no se suma al total)
+                      </p>
                     </div>
                   )}
                 </div>

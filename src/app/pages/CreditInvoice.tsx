@@ -114,6 +114,14 @@ export function CreditInvoice() {
   // Estados para selector de IDs únicas
   const [unitIdDialogOpen, setUnitIdDialogOpen] = useState(false);
   const [currentItemIndex, setCurrentItemIndex] = useState<number | null>(null);
+
+  // Estados para productos comunes
+  const [showCommonProductModal, setShowCommonProductModal] = useState(false);
+  const [commonProductData, setCommonProductData] = useState({
+    name: '',
+    price: '',
+    quantity: '1'
+  });
   const [selectedUnitIds, setSelectedUnitIds] = useState<string[]>([]);
   const [unitIdNotes, setUnitIdNotes] = useState<{ [id: string]: string }>({});
 
@@ -460,8 +468,38 @@ export function CreditInvoice() {
         return;
       }
 
+      // Guardar productos comunes en la base de datos
+      const commonProducts = items.filter(item => item.productId.startsWith('common-'));
+      if (commonProducts.length > 0) {
+        const { supabase, getCurrentCompany } = await import('../lib/supabase');
+        const company = getCurrentCompany();
+        const user = getCurrentUser();
+
+        const commonProductsData = commonProducts.map(item => ({
+          company,
+          invoice_id: invoice.id,
+          invoice_number: invoice.number,
+          product_name: item.productName.replace('[COMÚN] ', ''),
+          price: item.price,
+          quantity: item.quantity,
+          total: item.total,
+          created_by: user?.username || 'Usuario'
+        }));
+
+        const { error: commonProductsError } = await supabase
+          .from('common_products')
+          .insert(commonProductsData);
+
+        if (commonProductsError) {
+          console.error('Error saving common products:', commonProductsError);
+        }
+      }
+
       // Actualizar inventario
       for (const item of items) {
+        // Saltar productos comunes (no están en inventario)
+        if (item.productId.startsWith('common-')) continue;
+
         const product = products.find((p) => p.id === item.productId);
         if (product) {
           const newStock = product.stock - item.quantity;
@@ -748,6 +786,50 @@ export function CreditInvoice() {
       setSelectedUnitIds([]);
       setUnitIdDialogOpen(true);
     }
+  };
+
+  // Función para agregar producto común
+  const addCommonProduct = () => {
+    const productName = commonProductData.name.trim();
+    const price = parseFloat(commonProductData.price);
+    const quantity = parseInt(commonProductData.quantity) || 1;
+
+    if (!productName) {
+      toast.error('Ingresa el nombre del producto');
+      return;
+    }
+
+    if (!price || price <= 0) {
+      toast.error('Ingresa un precio válido');
+      return;
+    }
+
+    if (quantity <= 0) {
+      toast.error('La cantidad debe ser mayor a 0');
+      return;
+    }
+
+    const total = quantity * price;
+
+    const commonItem: InvoiceItem = {
+      productId: `common-${Date.now()}`,
+      productName: `[COMÚN] ${productName}`,
+      productCode: 'COMÚN',
+      quantity,
+      price,
+      total,
+      useUnitIds: false,
+      unitIds: [],
+      availableIds: [],
+      unitIdNotes: {}
+    };
+
+    setItems([...items, commonItem]);
+    toast.success('Producto común agregado');
+
+    // Limpiar y cerrar
+    setCommonProductData({ name: '', price: '', quantity: '1' });
+    setShowCommonProductModal(false);
   };
 
   const selectProduct = (index: number, product: Product) => {
@@ -1190,10 +1272,16 @@ export function CreditInvoice() {
                     <Package className="w-5 h-5" />
                     Productos
                   </CardTitle>
-                  <Button onClick={addItem} size="sm" className="bg-emerald-600 hover:bg-emerald-700">
-                    <Plus className="w-4 h-4 mr-2" />
-                    Agregar
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button onClick={addItem} size="sm" className="bg-emerald-600 hover:bg-emerald-700">
+                      <Plus className="w-4 h-4 mr-2" />
+                      Agregar
+                    </Button>
+                    <Button onClick={() => setShowCommonProductModal(true)} size="sm" className="bg-purple-600 hover:bg-purple-700">
+                      <Package className="w-4 h-4 mr-2" />
+                      Común
+                    </Button>
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="pt-6">
@@ -1817,6 +1905,89 @@ export function CreditInvoice() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setShowLoadDialog(false)}>
               Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Producto Común */}
+      <Dialog open={showCommonProductModal} onOpenChange={setShowCommonProductModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5 text-purple-600" />
+              Agregar Producto Común
+            </DialogTitle>
+            <DialogDescription>
+              Agrega un producto que no está en el inventario
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="commonProductName">Nombre del Producto</Label>
+              <Input
+                id="commonProductName"
+                type="text"
+                placeholder="Ej: Cable USB, Funda, etc."
+                value={commonProductData.name}
+                onChange={(e) => setCommonProductData({ ...commonProductData, name: e.target.value })}
+                autoFocus
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="commonProductPrice">Precio</Label>
+                <Input
+                  id="commonProductPrice"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  value={commonProductData.price}
+                  onChange={(e) => setCommonProductData({ ...commonProductData, price: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="commonProductQuantity">Cantidad</Label>
+                <Input
+                  id="commonProductQuantity"
+                  type="number"
+                  min="1"
+                  value={commonProductData.quantity}
+                  onChange={(e) => setCommonProductData({ ...commonProductData, quantity: e.target.value })}
+                />
+              </div>
+            </div>
+
+            {commonProductData.price && commonProductData.quantity && (
+              <div className="bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800 rounded-lg p-3">
+                <p className="text-sm text-purple-700 dark:text-purple-400">
+                  Total: <span className="font-bold">{formatCOP(parseFloat(commonProductData.price || '0') * parseInt(commonProductData.quantity || '1'))}</span>
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCommonProductData({ name: '', price: '', quantity: '1' });
+                setShowCommonProductModal(false);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={addCommonProduct}
+              className="bg-purple-600 hover:bg-purple-700"
+              disabled={!commonProductData.name || !commonProductData.price}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Agregar
             </Button>
           </DialogFooter>
         </DialogContent>

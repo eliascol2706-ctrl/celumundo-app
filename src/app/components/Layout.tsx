@@ -28,10 +28,15 @@ import {
   Shield,
   Wallet,
   Wrench,
-  Printer
+  Printer,
+  Code,
+  Trash2,
+  Edit,
+  Calendar,
+  AlertTriangle
 } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { getCurrentUser, logoutUser, getSession, searchProductsForInvoice, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession, canCreateInvoice } from '../lib/supabase';
+import { getCurrentUser, logoutUser, getSession, searchProductsForInvoice, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession, canCreateInvoice, supabase } from '../lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -62,7 +67,7 @@ const adminNavigation = [
       { name: 'Cambios', href: '/cambios', icon: RefreshCw },
       { name: 'Clientes', href: '/clientes', icon: Users },
       { name: 'Movimientos', href: '/movimientos', icon: ArrowRightLeft },
-      { name: 'Servicio Técnico', href: '/ordenes-servicio', icon: Wrench, repuestosOnly: true },
+      { name: 'Comunes', href: '/comunes', icon: Package },
     ]
   },
   // Sección 3: Finanzas y Reportes
@@ -173,6 +178,12 @@ export function Layout() {
   // Estados para configuración de impresora de etiquetas
   const [labelPrinterConfigDialogOpen, setLabelPrinterConfigDialogOpen] = useState(false);
   const [labelPrinterSettings, setLabelPrinterSettings] = useState<LabelPrinterSettings>(defaultLabelSettings);
+
+  // Estados para Developer Panel
+  const [devPanelTokenDialogOpen, setDevPanelTokenDialogOpen] = useState(false);
+  const [devPanelDialogOpen, setDevPanelDialogOpen] = useState(false);
+  const [devPanelToken, setDevPanelToken] = useState("");
+  const [devPanelTab, setDevPanelTab] = useState<'closures' | 'invoices'>('closures');
 
   // Enfocar input cuando se abre el diálogo
   useEffect(() => {
@@ -466,6 +477,131 @@ export function Layout() {
     navigate('/login', { replace: true });
   };
 
+  // Funciones del Developer Panel
+  const handleDevPanelTokenSubmit = () => {
+    if (devPanelToken === "010101") {
+      setDevPanelTokenDialogOpen(false);
+      setDevPanelDialogOpen(true);
+      setDevPanelToken("");
+    } else {
+      alert("Token incorrecto");
+      setDevPanelToken("");
+    }
+  };
+
+  const handleDeleteClosure = async (type: 'daily' | 'monthly' | 'finance', closureId: string) => {
+    if (!session) return;
+
+    const confirmation = confirm(
+      `¿Estás seguro de que deseas eliminar este cierre ${
+        type === 'daily' ? 'diario' : type === 'monthly' ? 'mensual' : 'de finanzas'
+      }? Esta acción no se puede deshacer.`
+    );
+
+    if (!confirmation) return;
+
+    try {
+      let tableName = '';
+      if (type === 'daily') tableName = 'daily_closures';
+      else if (type === 'monthly') tableName = 'monthly_closures';
+      else if (type === 'finance') tableName = 'closures_finances';
+
+      const { error } = await supabase
+        .from(tableName)
+        .delete()
+        .eq('id', closureId)
+        .eq('company', session.company);
+
+      if (error) throw error;
+
+      alert('Cierre eliminado exitosamente');
+    } catch (error) {
+      console.error('Error deleting closure:', error);
+      alert('Error al eliminar el cierre');
+    }
+  };
+
+  const handleDeleteInvoice = async (invoiceId: string) => {
+    if (!session) return;
+
+    const confirmation = confirm(
+      '¿Estás seguro de que deseas eliminar esta factura? Se revertirán todos los cambios (stock, IDs únicas, etc.). Esta acción no se puede deshacer.'
+    );
+
+    if (!confirmation) return;
+
+    try {
+      // Obtener la factura
+      const { data: invoice, error: fetchError } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('id', invoiceId)
+        .eq('company', session.company)
+        .single();
+
+      if (fetchError) throw fetchError;
+      if (!invoice) throw new Error('Factura no encontrada');
+
+      // Revertir stock y IDs únicas
+      for (const item of invoice.items) {
+        const { data: product } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', item.productId)
+          .eq('company', session.company)
+          .single();
+
+        if (product) {
+          const updates: any = {
+            stock: product.stock + item.quantity
+          };
+
+          // Si el producto usa IDs únicas, restaurarlas
+          if (product.use_unit_ids && item.unitIds && item.unitIds.length > 0) {
+            const restoredIds = item.unitIds.map((id: string) => ({
+              id,
+              note: item.unitIdNotes?.[id] || ''
+            }));
+
+            updates.registered_ids = [
+              ...(product.registered_ids || []),
+              ...restoredIds
+            ];
+          }
+
+          await supabase
+            .from('products')
+            .update(updates)
+            .eq('id', item.productId)
+            .eq('company', session.company);
+        }
+      }
+
+      // Si es crédito, eliminar pagos asociados
+      if (invoice.is_credit) {
+        await supabase
+          .from('credit_payments')
+          .delete()
+          .eq('invoice_id', invoiceId)
+          .eq('company', session.company);
+      }
+
+      // Eliminar la factura
+      const { error: deleteError } = await supabase
+        .from('invoices')
+        .delete()
+        .eq('id', invoiceId)
+        .eq('company', session.company);
+
+      if (deleteError) throw deleteError;
+
+      alert('Factura eliminada exitosamente y stock restaurado');
+    } catch (error) {
+      console.error('Error deleting invoice:', error);
+      alert('Error al eliminar la factura');
+    }
+  };
+
   return (
     <div className="flex h-screen bg-background">
       {/* Sidebar para móvil */}
@@ -636,6 +772,16 @@ export function Layout() {
                 day: 'numeric'
               })}
             </div>
+            {currentUser?.role === 'admin' && (
+              <button
+                onClick={() => setDevPanelTokenDialogOpen(true)}
+                className="p-2 rounded-lg transition-all duration-200 hover:bg-purple-100 dark:hover:bg-purple-900/20 border border-purple-300 dark:border-purple-700"
+                aria-label="Developer Panel"
+                title="Developer Panel"
+              >
+                <Code className="h-5 w-5 text-purple-600 dark:text-purple-400" />
+              </button>
+            )}
             <button
               onClick={toggleTheme}
               className="p-2 rounded-lg transition-all duration-200 hover:bg-amber-100 dark:hover:bg-amber-900/20 border border-amber-300 dark:border-amber-700"
@@ -1270,6 +1416,385 @@ export function Layout() {
         settings={labelPrinterSettings}
         onSave={handleSaveLabelPrinterSettings}
       />
+
+      {/* Diálogo de Token del Developer Panel */}
+      {currentUser?.role === 'admin' && (
+        <Dialog open={devPanelTokenDialogOpen} onOpenChange={setDevPanelTokenDialogOpen}>
+          <DialogContent className="max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Code className="h-5 w-5 text-purple-600" />
+                Developer Panel
+              </DialogTitle>
+              <DialogDescription>
+                Ingresa el token de acceso para continuar
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="devToken">Token de Acceso</Label>
+                <Input
+                  id="devToken"
+                  type="password"
+                  placeholder="Ingresa el token..."
+                  value={devPanelToken}
+                  onChange={(e) => setDevPanelToken(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleDevPanelTokenSubmit();
+                    }
+                  }}
+                  autoFocus
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setDevPanelTokenDialogOpen(false);
+                    setDevPanelToken("");
+                  }}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleDevPanelTokenSubmit}
+                  className="bg-purple-600 hover:bg-purple-700 text-white"
+                >
+                  Acceder
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* Diálogo del Developer Panel */}
+      {currentUser?.role === 'admin' && (
+        <Dialog open={devPanelDialogOpen} onOpenChange={setDevPanelDialogOpen}>
+          <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Code className="h-5 w-5 text-purple-600" />
+                Developer Panel
+              </DialogTitle>
+              <DialogDescription>
+                Panel de administración avanzada del sistema
+              </DialogDescription>
+            </DialogHeader>
+
+            {/* Tabs */}
+            <div className="flex gap-2 border-b pb-2">
+              <button
+                onClick={() => setDevPanelTab('closures')}
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  devPanelTab === 'closures'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Calendar className="h-4 w-4" />
+                  Gestión de Cierres
+                </div>
+              </button>
+              <button
+                onClick={() => setDevPanelTab('invoices')}
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  devPanelTab === 'invoices'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <FileText className="h-4 w-4" />
+                  Gestión de Facturas
+                </div>
+              </button>
+            </div>
+
+            {/* Contenido de tabs */}
+            {devPanelTab === 'closures' && (
+              <DevPanelClosuresTab
+                session={session}
+                onDelete={handleDeleteClosure}
+              />
+            )}
+
+            {devPanelTab === 'invoices' && (
+              <DevPanelInvoicesTab
+                session={session}
+                onDelete={handleDeleteInvoice}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
+    </div>
+  );
+}
+
+// Componente para la pestaña de Gestión de Cierres
+function DevPanelClosuresTab({ session, onDelete }: any) {
+  const [closureType, setClosureType] = useState<'daily' | 'monthly' | 'finance'>('daily');
+  const [closures, setClosures] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    loadClosures();
+  }, [closureType, session]);
+
+  const loadClosures = async () => {
+    if (!session) return;
+
+    setLoading(true);
+    try {
+      let tableName = '';
+      if (closureType === 'daily') tableName = 'daily_closures';
+      else if (closureType === 'monthly') tableName = 'monthly_closures';
+      else if (closureType === 'finance') tableName = 'closures_finances';
+
+      const { data, error } = await supabase
+        .from(tableName)
+        .select('*')
+        .eq('company', session.company)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) throw error;
+
+      setClosures(data || []);
+    } catch (error) {
+      console.error('Error loading closures:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (closureId: string) => {
+    await onDelete(closureType, closureId);
+    loadClosures();
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-4">
+        <Label>Tipo de Cierre</Label>
+        <Select value={closureType} onValueChange={(value: any) => setClosureType(value)}>
+          <SelectTrigger className="w-[200px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="daily">Cierres Diarios</SelectItem>
+            <SelectItem value="monthly">Cierres Mensuales</SelectItem>
+            <SelectItem value="finance">Cierres de Finanzas</SelectItem>
+          </SelectContent>
+        </Select>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={loadClosures}
+          disabled={loading}
+        >
+          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          Actualizar
+        </Button>
+      </div>
+
+      <div className="border rounded-lg overflow-hidden">
+        {loading ? (
+          <div className="text-center py-12">
+            <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Cargando cierres...</p>
+          </div>
+        ) : closures.length === 0 ? (
+          <div className="text-center py-12">
+            <AlertTriangle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+            <p className="text-muted-foreground">No hay cierres disponibles</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 dark:bg-gray-900 sticky top-0">
+                <tr>
+                  <th className="text-left text-xs font-semibold text-gray-600 dark:text-gray-400 px-4 py-3">ID</th>
+                  <th className="text-left text-xs font-semibold text-gray-600 dark:text-gray-400 px-4 py-3">
+                    {closureType === 'daily' ? 'Fecha' : closureType === 'monthly' ? 'Mes/Año' : 'Fecha'}
+                  </th>
+                  <th className="text-left text-xs font-semibold text-gray-600 dark:text-gray-400 px-4 py-3">Total</th>
+                  <th className="text-center text-xs font-semibold text-gray-600 dark:text-gray-400 px-4 py-3">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                {closures.map((closure) => (
+                  <tr key={closure.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/50">
+                    <td className="px-4 py-3 text-sm font-mono text-gray-900 dark:text-gray-100">
+                      {closure.id.substring(0, 8)}...
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
+                      {closureType === 'daily' && closure.date}
+                      {closureType === 'monthly' && `${closure.month}/${closure.year}`}
+                      {closureType === 'finance' && new Date(closure.closure_timestamp || closure.period_end).toLocaleDateString('es-ES')}
+                    </td>
+                    <td className="px-4 py-3 text-sm font-bold text-green-600">
+                      {formatCOP(closure.total || closure.total_revenue || closure.net_profit || 0)}
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDelete(closure.id)}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Componente para la pestaña de Gestión de Facturas
+function DevPanelInvoicesTab({ session, onDelete }: any) {
+  const [invoices, setInvoices] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+
+  useEffect(() => {
+    loadInvoices();
+  }, [session]);
+
+  const loadInvoices = async () => {
+    if (!session) return;
+
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('company', session.company)
+        .order('created_at', { ascending: false })
+        .limit(100);
+
+      if (error) throw error;
+
+      setInvoices(data || []);
+    } catch (error) {
+      console.error('Error loading invoices:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (invoiceId: string) => {
+    await onDelete(invoiceId);
+    loadInvoices();
+  };
+
+  const filteredInvoices = invoices.filter(inv =>
+    inv.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (inv.customer_name || '').toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-4">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+          <Input
+            type="text"
+            placeholder="Buscar por número de factura o cliente..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={loadInvoices}
+          disabled={loading}
+        >
+          <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+          Actualizar
+        </Button>
+      </div>
+
+      <div className="border rounded-lg overflow-hidden">
+        {loading ? (
+          <div className="text-center py-12">
+            <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Cargando facturas...</p>
+          </div>
+        ) : filteredInvoices.length === 0 ? (
+          <div className="text-center py-12">
+            <AlertTriangle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+            <p className="text-muted-foreground">
+              {searchTerm ? 'No se encontraron facturas' : 'No hay facturas disponibles'}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto max-h-[500px] overflow-y-auto">
+            <table className="w-full">
+              <thead className="bg-gray-50 dark:bg-gray-900 sticky top-0">
+                <tr>
+                  <th className="text-left text-xs font-semibold text-gray-600 dark:text-gray-400 px-4 py-3">Factura</th>
+                  <th className="text-left text-xs font-semibold text-gray-600 dark:text-gray-400 px-4 py-3">Cliente</th>
+                  <th className="text-left text-xs font-semibold text-gray-600 dark:text-gray-400 px-4 py-3">Fecha</th>
+                  <th className="text-left text-xs font-semibold text-gray-600 dark:text-gray-400 px-4 py-3">Total</th>
+                  <th className="text-left text-xs font-semibold text-gray-600 dark:text-gray-400 px-4 py-3">Estado</th>
+                  <th className="text-center text-xs font-semibold text-gray-600 dark:text-gray-400 px-4 py-3">Acciones</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                {filteredInvoices.map((invoice) => (
+                  <tr key={invoice.id} className="hover:bg-gray-50 dark:hover:bg-gray-900/50">
+                    <td className="px-4 py-3 text-sm font-mono font-semibold text-gray-900 dark:text-gray-100">
+                      #{invoice.number}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-900 dark:text-gray-100">
+                      {invoice.customer_name || 'Sin cliente'}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                      {new Date(invoice.date).toLocaleDateString('es-ES')}
+                    </td>
+                    <td className="px-4 py-3 text-sm font-bold text-green-600">
+                      {formatCOP(invoice.total)}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      <span className={`px-2 py-1 rounded text-xs ${
+                        invoice.status === 'paid' ? 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400' :
+                        invoice.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-400' :
+                        'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-400'
+                      }`}>
+                        {invoice.status}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-center">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleDelete(invoice.id)}
+                        className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

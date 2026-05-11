@@ -3,6 +3,7 @@
 import { getPrinterConfig, printDirect } from './printer-config';
 import { formatCOP } from './currency';
 import { getCurrentCompany } from './supabase';
+import { toast } from 'sonner';
 
 interface ThermalInvoiceOptions {
   invoice: any;
@@ -141,17 +142,14 @@ const generateThermalInvoiceHTML = (
           body {
             width: 70mm;
             max-width: 70mm;
-            font-family: 'Arial', 'Helvetica', sans-serif;
-            font-size: 9px;
-            font-weight: 900;
+            font-family: 'Arial', 'Helvetica Neue', Helvetica, sans-serif;
+            font-size: 11px;
+            font-weight: 500;
             padding: 2mm 3mm;
             background: white;
-            color: black;
+            color: #000;
             margin: 0;
-            line-height: 1.4;
-          }
-          div, span, p, b, strong {
-            font-weight: 900 !important;
+            line-height: 1.5;
           }
           .header {
             text-align: center;
@@ -161,7 +159,7 @@ const generateThermalInvoiceHTML = (
           }
           .info {
             margin-bottom: 3mm;
-            font-size: 8px;
+            font-size: 10px;
             border-bottom: 1px solid black;
             padding-bottom: 2mm;
           }
@@ -172,7 +170,7 @@ const generateThermalInvoiceHTML = (
           }
           .product-item {
             margin-bottom: 2mm;
-            font-size: 8px;
+            font-size: 10px;
           }
           .total-section {
             margin: 3mm 0;
@@ -183,35 +181,40 @@ const generateThermalInvoiceHTML = (
             background: #f0f0f0;
           }
           .total-label {
-            font-size: 11px;
+            font-size: 13px;
+            font-weight: 800;
             margin-bottom: 2mm;
+            color: #000;
           }
           .total-amount {
-            font-size: 14px;
+            font-size: 18px;
+            font-weight: 800;
+            color: #000;
           }
           .footer {
             text-align: center;
-            font-size: 8px;
+            font-size: 10px;
             margin-top: 3mm;
             padding-top: 2mm;
+            color: #000;
           }
         </style>
       </head>
       <body>
         <div class="header">
-          <div style="font-size: 12px; margin-bottom: 2mm;">${companyName}</div>
-          <div style="font-size: 10px; margin-bottom: 1mm;">FACTURA</div>
-          <div style="font-size: 9px;">No. ${invoice.number}</div>
+          <div style="font-size: 15px; font-weight: 800; margin-bottom: 2mm; color: #000;">${companyName}</div>
+          <div style="font-size: 13px; font-weight: 700; margin-bottom: 1mm; color: #000;">FACTURA</div>
+          <div style="font-size: 12px; font-weight: 500; color: #000;">No. ${invoice.number}</div>
         </div>
 
         <div class="info">
-          <div style="margin-bottom: 1mm;">Cliente: ${invoice.customer_name || 'Consumidor Final'}</div>
+          <div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Cliente: ${invoice.customer_name || 'Consumidor Final'}</div>
           ${
             invoice.customer_document
-              ? `<div style="margin-bottom: 1mm;">Doc: ${invoice.customer_document}</div>`
+              ? `<div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Doc: ${invoice.customer_document}</div>`
               : ''
           }
-          <div style="margin-bottom: 1mm;">Fecha: ${new Date(invoice.date).toLocaleString('es-ES', {
+          <div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Fecha: ${new Date(invoice.date).toLocaleString('es-ES', {
             day: '2-digit',
             month: '2-digit',
             year: 'numeric',
@@ -220,13 +223,13 @@ const generateThermalInvoiceHTML = (
           })}</div>
           ${
             invoice.attended_by
-              ? `<div>Vendedor: ${invoice.attended_by}</div>`
+              ? `<div style="font-size: 11px; color: #000;">Vendedor: ${invoice.attended_by}</div>`
               : ''
           }
         </div>
 
         <div class="products">
-          <div style="text-align: center; font-size: 9px; margin-bottom: 2mm;">PRODUCTOS</div>
+          <div style="text-align: center; font-size: 12px; font-weight: 800; margin-bottom: 2mm; color: #000;">PRODUCTOS</div>
           ${productsHTML}
         </div>
 
@@ -240,10 +243,10 @@ const generateThermalInvoiceHTML = (
 
         <div class="footer">
           <div style="margin: 2mm 0; border-top: 1px solid black; padding-top: 2mm;"></div>
-          <div style="font-size: 10px; margin-bottom: 2mm;">GRACIAS POR SU COMPRA</div>
-          <div style="font-size: 9px; margin-bottom: 1mm;">${companyName}</div>
-          <div style="margin-bottom: 1mm;">www.celumundovip.com</div>
-          <div style="font-size: 7px;">${new Date().toLocaleString('es-ES')}</div>
+          <div style="font-size: 12px; font-weight: 800; margin-bottom: 2mm; color: #000;">GRACIAS POR SU COMPRA</div>
+          <div style="font-size: 11px; font-weight: 500; margin-bottom: 1mm; color: #000;">${companyName}</div>
+          <div style="font-size: 11px; font-weight: 500; margin-bottom: 1mm; color: #000;">www.celumundovip.com</div>
+          <div style="font-size: 10px; color: #333;">${new Date().toLocaleString('es-ES')}</div>
         </div>
 
         <!-- Espacio adicional para que la factura salga completa -->
@@ -259,19 +262,18 @@ const generateThermalInvoiceHTML = (
 // Imprimir factura térmica directamente
 export const printThermalInvoice = async (options: ThermalInvoiceOptions): Promise<boolean> => {
   try {
-    const config = await getPrinterConfig();
-
-    if (!config.thermal) {
-      throw new Error('No se ha configurado una impresora térmica. Ve a Configuración para configurarla.');
-    }
-
     const html = generateThermalInvoiceHTML(
       options.invoice,
       options.creditPayments || [],
       options.products || []
     );
 
-    const success = await printDirect(config.thermal, html, 'thermal');
+    // En web: printDirect hace fallback automático al navegador
+    // En Electron: usa la impresora física configurada
+    const config = await getPrinterConfig();
+    const printerName = config.thermal || 'web-fallback';
+
+    const success = await printDirect(printerName, html, 'thermal');
 
     if (!success) {
       throw new Error('Error al enviar el documento a la impresora');
@@ -282,4 +284,92 @@ export const printThermalInvoice = async (options: ThermalInvoiceOptions): Promi
     console.error('Error al imprimir factura térmica:', error);
     throw error;
   }
+};
+
+/**
+ * Impresión térmica vía navegador web (para testing sin impresora física).
+ * Crea un iframe oculto y lanza window.print() directamente.
+ * @param htmlRef - Ref del elemento React que contiene el <ThermalInvoicePrint>
+ */
+export const printThermalWeb = (htmlRef: HTMLElement | null): void => {
+  if (!htmlRef) {
+    console.error('printThermalWeb: ref es null');
+    toast.error('Error: No se pudo obtener el contenido de la factura');
+    return;
+  }
+
+  const content = htmlRef.innerHTML;
+
+  // Crear un iframe oculto para la impresión
+  const iframe = document.createElement('iframe');
+  iframe.style.position = 'fixed';
+  iframe.style.right = '0';
+  iframe.style.bottom = '0';
+  iframe.style.width = '0';
+  iframe.style.height = '0';
+  iframe.style.border = 'none';
+
+  document.body.appendChild(iframe);
+
+  const iframeDoc = iframe.contentWindow?.document;
+  if (!iframeDoc) {
+    console.error('No se pudo acceder al documento del iframe');
+    document.body.removeChild(iframe);
+    toast.error('Error al preparar la impresión');
+    return;
+  }
+
+  iframeDoc.open();
+  iframeDoc.write(`<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Factura Térmica 80mm</title>
+    <style>
+      @page {
+        size: 80mm auto;
+        margin: 0;
+      }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: white;
+        width: 80mm;
+      }
+      * {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    ${content}
+  </body>
+</html>`);
+  iframeDoc.close();
+
+  // Dar un pequeño delay para que el contenido se renderice completamente
+  setTimeout(() => {
+    try {
+      if (iframe.contentWindow) {
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      }
+
+      // Remover el iframe después de la impresión
+      setTimeout(() => {
+        if (document.body.contains(iframe)) {
+          document.body.removeChild(iframe);
+        }
+      }, 1000);
+    } catch (error) {
+      console.error('Error al imprimir:', error);
+      if (document.body.contains(iframe)) {
+        document.body.removeChild(iframe);
+      }
+      toast.error('Error al abrir el diálogo de impresión');
+    }
+  }, 100);
 };

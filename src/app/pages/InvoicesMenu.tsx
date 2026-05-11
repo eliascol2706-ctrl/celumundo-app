@@ -463,6 +463,15 @@ export function InvoicesMenu() {
     }
 
     try {
+      // ✅ VALIDAR CIERRES ANTES DE CONFIRMAR
+      const { canCreateInvoice } = await import('../lib/supabase');
+      const validation = await canCreateInvoice();
+
+      if (!validation.canCreate) {
+        toast.error(validation.message || 'No se pueden confirmar facturas en este momento.');
+        return;
+      }
+
       const user = getCurrentUser();
       const company = getCurrentCompany();
 
@@ -531,6 +540,9 @@ export function InvoicesMenu() {
       // 1. Marcar IDs como vendidas (disabled permanente, sin eliminar)
       // 2. Registrar los movimientos de salida
       for (const item of selectedInvoice.items) {
+        // Saltar productos comunes (no están en inventario)
+        if (item.productId.startsWith('common-')) continue;
+
         const product = products.find(p => p.id === item.productId);
         if (!product) continue;
 
@@ -743,15 +755,15 @@ export function InvoicesMenu() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{formatCOP(stats.totalSalesToday + stats.exchangeImpactToday)}</div>
-              <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-1">Solo facturas pagadas</p>
+              <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{formatCOP(stats.totalSalesToday)}</div>
+              <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-1">Solo facturas pagadas (incluye impacto de cambios)</p>
               {stats.exchangeImpactToday !== 0 && (
                 <p className={`text-xs mt-1 font-medium ${
                   stats.exchangeImpactToday > 0
                     ? 'text-emerald-600 dark:text-emerald-400'
                     : 'text-orange-600 dark:text-orange-400'
                 }`}>
-                  Excedente Cambios: COP {formatCOP(stats.exchangeImpactToday)}
+                  Impacto de cambios del día: {stats.exchangeImpactToday > 0 ? '+' : ''}{formatCOP(stats.exchangeImpactToday)}
                 </p>
               )}
             </CardContent>
@@ -1101,9 +1113,17 @@ export function InvoicesMenu() {
               {!loading && getFilteredInvoices().length > 0 && getTotalPages() > 1 && (
                 <div className="px-4 sm:px-6 py-3 sm:py-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/50">
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                    <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400">
-                      Mostrando {(currentPage - 1) * itemsPerPage + 1} a {Math.min(currentPage * itemsPerPage, getFilteredInvoices().length)} de {getFilteredInvoices().length} facturas
-                    </p>
+                    <div className="flex flex-col sm:flex-row items-center gap-2 sm:gap-4">
+                      <p className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400">
+                        Mostrando {(currentPage - 1) * itemsPerPage + 1} a {Math.min(currentPage * itemsPerPage, getFilteredInvoices().length)} de {getFilteredInvoices().length} facturas
+                      </p>
+                      <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800">
+                        <DollarSign className="w-3.5 h-3.5 text-green-600 dark:text-green-400" />
+                        <span className="text-xs sm:text-sm font-bold text-green-700 dark:text-green-400">
+                          {formatCOP(getPaginatedInvoices().reduce((sum, inv) => sum + inv.total, 0))}
+                        </span>
+                      </div>
+                    </div>
                     <div className="flex items-center gap-2">
                       <Button
                         variant="outline"

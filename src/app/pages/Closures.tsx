@@ -295,7 +295,7 @@ export function Closures() {
     console.log(`[DEBUG Cierres] Órdenes de servicio técnico: ${todayServiceOrders.length}`);
     console.log(`[DEBUG Cierres] Ingresos servicio técnico: ${formatCOP(serviceRevenue)}`);
 
-    // Calcular impacto de cambios del día (suma de todos los price_difference)
+    // Calcular impacto de cambios del día (solo para visualización, NO se suma)
     const exchangeImpact = todayExchanges.reduce((sum, exchange) => {
       const diff = Number(exchange.price_difference) || 0;
       return sum + diff;
@@ -313,7 +313,7 @@ export function Closures() {
       grossRevenue,
       totalReturns,
       serviceRevenue, // NUEVO: Ingresos de servicio técnico
-      netRevenue: grossRevenue - totalReturns + serviceRevenue + exchangeImpact, // MODIFICADO: Incluir servicio técnico y cambios
+      netRevenue: grossRevenue - totalReturns + serviceRevenue, // Ya NO sumamos exchangeImpact (incluido en grossRevenue)
       totalProductsSold: todayInvoices
         .filter(inv => inv.status === 'paid')
         .reduce((sum, inv) => {
@@ -383,7 +383,8 @@ export function Closures() {
       });
       const previousMonthServiceRevenue = previousMonthServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
 
-      previousMonthNetRevenue = previousMonthRevenue + previousMonthExchangeImpact + previousMonthServiceRevenue;
+      // NOTA: Ya NO sumamos previousMonthExchangeImpact porque está incluido en invoice.total
+      previousMonthNetRevenue = previousMonthRevenue + previousMonthServiceRevenue;
     }
 
     // IMPORTANTE: Solo facturas REGULARES pagadas (excluir crédito para evitar doble contabilidad con abonos)
@@ -462,24 +463,26 @@ export function Closures() {
     });
     const totalExpenses = currentMonthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
-    // Los ingresos netos incluyen las facturas pagadas + el impacto de cambios + servicio técnico
+    // Los ingresos netos incluyen las facturas pagadas + servicio técnico
     // Las facturas 'returned' ya no se cuentan en currentMonthRevenue
+    // NOTA: Ya NO sumamos currentMonthExchangeImpact porque está incluido en invoice.total
     console.log('[CIERRE MENSUAL] Calculando netRevenue:', {
       currentMonthRevenue,
       currentMonthExchangeImpact,
       currentMonthServiceRevenue,
-      suma: currentMonthRevenue + currentMonthExchangeImpact + currentMonthServiceRevenue
+      suma: currentMonthRevenue + currentMonthServiceRevenue
     });
-    const netRevenue = currentMonthRevenue + currentMonthExchangeImpact + currentMonthServiceRevenue;
+    const netRevenue = currentMonthRevenue + currentMonthServiceRevenue;
 
-    // NUEVO: Ingresos por Factura (TODAS las facturas excepto devueltas completamente y canceladas + impacto por cambios)
+    // NUEVO: Ingresos por Factura (TODAS las facturas excepto devueltas completamente y canceladas)
+    // NOTA: Ya NO sumamos currentMonthExchangeImpact porque está incluido en invoice.total
     const allMonthInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
       const invDate = extractColombiaDate(inv.date);
       return invDate.substring(0, 7) === currentMonthStr && inv.status !== 'returned' && inv.status !== 'cancelled';
     });
     const totalFacturas = allMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
-    const ingresosPorFactura = totalFacturas + currentMonthExchangeImpact;
+    const ingresosPorFactura = totalFacturas;
 
     // Calcular costo de productos vendidos en el mes (TODAS las facturas incluidas en ingresosPorFactura)
     // Debe ser consistente con el filtro de ingresosPorFactura

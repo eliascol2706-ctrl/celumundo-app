@@ -726,9 +726,9 @@ export function MonthlyClosureDialog({
                               <p>• Evalúa cada factura individualmente según su estado actual</p>
                               <p>• Solo cuenta facturas con estado "Pagada" o "Parcialmente Devuelta"</p>
                               <p>• Excluye automáticamente facturas con estado "Devuelta Completa"</p>
-                              <p>• Incluye el impacto de cambios (diferencias de precio)</p>
+                              <p>• Los cambios ya están reflejados en el total de cada factura</p>
                               <p className="font-mono text-xs bg-emerald-100 dark:bg-emerald-900/30 p-2 rounded mt-2">
-                                = Facturas Pagadas + Facturas Parcialmente Devueltas + Impacto Cambios = COP {formatCOP(monthlyStats.netRevenue)}
+                                = Facturas Pagadas + Facturas Parcialmente Devueltas = COP {formatCOP(monthlyStats.netRevenue)}
                               </p>
                             </div>
                           </div>

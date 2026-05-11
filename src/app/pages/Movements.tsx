@@ -852,8 +852,9 @@ export default function Movements() {
     if (!completedMovement) return;
 
     // Validar que la impresora de etiquetas esté configurada
+    let config;
     try {
-      const config = await getPrinterConfig();
+      config = await getPrinterConfig();
       if (!config.labels) {
         toast.error('No se ha configurado una impresora de etiquetas. Ve a Configuración para configurarla.');
         return;
@@ -866,6 +867,7 @@ export default function Movements() {
 
     let labelsHTML = "";
     let pageLabels: string[] = [];
+    let barcodeGenerationCode = "";
 
     completedMovement.items.forEach((item: any, itemIndex: number) => {
       const qty = labelQuantities[itemIndex] || 0;
@@ -908,6 +910,24 @@ export default function Movements() {
           </div>
         `;
 
+        // Generar código para el código de barras
+        barcodeGenerationCode += `
+          (function() {
+            var elem = document.getElementById("${barcodeId}");
+            if (elem) {
+              JsBarcode(elem, "${numericCode}", {
+                format: "CODE128",
+                width: 2,
+                height: 50,
+                displayValue: false,
+                margin: 8,
+                background: "#ffffff",
+                lineColor: "#000000"
+              });
+            }
+          })();
+        `;
+
         pageLabels.push(labelHTML);
 
         if (pageLabels.length === 3) {
@@ -924,23 +944,8 @@ export default function Movements() {
       labelsHTML += `<div class="label-page">${pageLabels.join("")}</div>`;
     }
 
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "absolute";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "none";
-    iframe.style.left = "-9999px";
-    iframe.style.top = "-9999px";
-    document.body.appendChild(iframe);
-
-    const iframeDoc = iframe.contentWindow?.document;
-    if (!iframeDoc) {
-      toast.error("Error al crear ventana de impresión");
-      return;
-    }
-
-    iframeDoc.open();
-    iframeDoc.write(`
+    // Generar HTML completo
+    const fullHTML = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -948,41 +953,41 @@ export default function Movements() {
           <title>Etiquetas</title>
           <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
           <style>
-            @page { 
-              size: 100mm 25mm; 
-              margin: 0; 
+            @page {
+              size: 100mm 25mm;
+              margin: 0;
             }
-            
-            * { 
-              margin: 0; 
-              padding: 0; 
-              box-sizing: border-box; 
+
+            * {
+              margin: 0;
+              padding: 0;
+              box-sizing: border-box;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
               color-adjust: exact !important;
             }
-            
-            html, body { 
-              margin: 0 !important; 
-              padding: 0 !important; 
-              width: 100mm !important; 
+
+            html, body {
+              margin: 0 !important;
+              padding: 0 !important;
+              width: 100mm !important;
               height: auto !important;
-              background: white; 
+              background: white;
               overflow: visible;
             }
-            
-            body { 
-              font-family: Arial, sans-serif; 
+
+            body {
+              font-family: Arial, sans-serif;
             }
-            
-            .label-page { 
-              width: 100mm !important; 
-              height: 25mm !important; 
-              display: flex !important; 
+
+            .label-page {
+              width: 100mm !important;
+              height: 25mm !important;
+              display: flex !important;
               flex-direction: row !important;
               justify-content: center !important;
               align-items: center !important;
-              page-break-after: always !important; 
+              page-break-after: always !important;
               page-break-inside: avoid !important;
               padding: 0 1mm !important;
               background: white !important;
@@ -990,11 +995,11 @@ export default function Movements() {
               position: relative;
               gap: 4mm;
             }
-            
-            .label { 
-              width: 30mm !important; 
-              height: 25mm !important; 
-              display: flex !important; 
+
+            .label {
+              width: 30mm !important;
+              height: 25mm !important;
+              display: flex !important;
               flex-direction: column !important;
               justify-content: flex-start !important;
               align-items: center !important;
@@ -1003,11 +1008,11 @@ export default function Movements() {
               position: relative !important;
               overflow: hidden !important;
             }
-            
-            .label-empty { 
-              visibility: hidden !important; 
+
+            .label-empty {
+              visibility: hidden !important;
             }
-            
+
             .label-product-name {
               font-size: 6.1pt !important;
               font-weight: bold !important;
@@ -1025,25 +1030,25 @@ export default function Movements() {
               -webkit-line-clamp: 2 !important;
               -webkit-box-orient: vertical !important;
             }
-            
-            .label-barcode-container { 
-              width: 100% !important; 
-              height: 13mm !important; 
-              display: flex !important; 
-              justify-content: center !important; 
-              align-items: center !important; 
+
+            .label-barcode-container {
+              width: 100% !important;
+              height: 13mm !important;
+              display: flex !important;
+              justify-content: center !important;
+              align-items: center !important;
               flex-shrink: 0 !important;
-              margin: 0.5mm 0 !important; 
+              margin: 0.5mm 0 !important;
               padding: 0 !important;
               overflow: visible !important;
             }
-            
-            .label-barcode-container svg { 
+
+            .label-barcode-container svg {
               display: block !important;
-              max-width: 28mm !important; 
-              height: auto !important; 
+              max-width: 28mm !important;
+              height: auto !important;
             }
-            
+
             .label-numeric-code {
               font-size: 7pt !important;
               font-weight: bold !important;
@@ -1065,18 +1070,18 @@ export default function Movements() {
               color: #000000 !important;
             }
 
-            .label-reference { 
-              font-size: 6pt !important; 
-              font-weight: 700 !important; 
-              text-align: left !important; 
-              line-height: 1 !important; 
-              position: absolute !important; 
-              bottom: 1.2mm !important; 
-              left: 2mm !important; 
+            .label-reference {
+              font-size: 6pt !important;
+              font-weight: 700 !important;
+              text-align: left !important;
+              line-height: 1 !important;
+              position: absolute !important;
+              bottom: 1.2mm !important;
+              left: 2mm !important;
               color: #000000 !important;
               text-transform: uppercase !important;
             }
-            
+
             @media print {
               @page {
                 size: 100mm 25mm !important;
@@ -1127,14 +1132,14 @@ export default function Movements() {
                 -webkit-line-clamp: 2 !important;
                 -webkit-box-orient: vertical !important;
               }
-              
+
               .label-barcode-container svg,
               .label-barcode-container svg * {
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
                 color-adjust: exact !important;
               }
-              
+
               .label-barcode-container svg rect[fill="#000000"],
               .label-barcode-container svg rect[fill="black"] {
                 fill: #000000 !important;
@@ -1161,68 +1166,14 @@ export default function Movements() {
                 setTimeout(initPrint, 50);
                 return;
               }
-              
+
               try {
-                ${completedMovement.items
-                  .map((item: any, itemIndex: number) => {
-                    const qty = labelQuantities[itemIndex] || 0;
-                    let code = "";
-
-                    for (let i = 0; i < qty; i++) {
-                      let displayCode = item.productCode;
-                      if (item.useUnitIds && item.unitIds && item.unitIds[i]) {
-                        // Remover la "A" final del código base antes de agregar la ID
-                        const baseCode = item.productCode.slice(0, -1);
-                        displayCode = `${baseCode}-${item.unitIds[i]}A`;
-                      }
-                      const numericCode = displayCode.replace(/[^0-9]/g, "");
-
-                      code += `
-                      (function() {
-                        var elem = document.getElementById("barcode-${itemIndex}-${i}");
-                        if (elem) {
-                          JsBarcode(elem, "${numericCode}", {
-                            format: "CODE128",
-                            width: 2,
-                            height: 50,
-                            displayValue: false,
-                            margin: 8,
-                            background: "#ffffff",
-                            lineColor: "#000000"
-                          });
-                        }
-                      })();
-                    `;
-                    }
-
-                    return code;
-                  })
-                  .join("")}
-                
-                setTimeout(function() {
-                  window.print();
-                  
-                  window.onafterprint = function() {
-                    setTimeout(function() {
-                      try {
-                        parent.document.body.removeChild(parent.document.querySelector('iframe'));
-                      } catch(e) {}
-                    }, 500);
-                  };
-                  
-                  setTimeout(function() {
-                    try {
-                      parent.document.body.removeChild(parent.document.querySelector('iframe'));
-                    } catch(e) {}
-                  }, 5000);
-                }, 250);
-                
+                ${barcodeGenerationCode}
               } catch(e) {
                 console.error('Error:', e);
-                alert('Error generando etiquetas: ' + e.message);
               }
             }
-            
+
             if (document.readyState === 'complete') {
               initPrint();
             } else {
@@ -1231,10 +1182,20 @@ export default function Movements() {
           </script>
         </body>
       </html>
-    `);
-    iframeDoc.close();
+    `;
 
-    toast.success("Preparando etiquetas para impresión...");
+    // Enviar directamente a la impresora configurada
+    try {
+      const success = await printDirect(config.labels, fullHTML, 'label');
+      if (success) {
+        toast.success("Etiquetas enviadas a la impresora");
+      } else {
+        toast.error("Error al enviar etiquetas a la impresora");
+      }
+    } catch (error) {
+      console.error('Error al imprimir etiquetas:', error);
+      toast.error(`Error al imprimir: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+    }
   };
 
   // Función para reimprimir etiquetas de un movimiento existente
@@ -1248,8 +1209,9 @@ export default function Movements() {
     if (!selectedMovement) return;
 
     // Validar que la impresora de etiquetas esté configurada
+    let config;
     try {
-      const config = await getPrinterConfig();
+      config = await getPrinterConfig();
       if (!config.labels) {
         toast.error('No se ha configurado una impresora de etiquetas. Ve a Configuración para configurarla.');
         return;
@@ -1311,6 +1273,7 @@ export default function Movements() {
 
     let labelsHTML = "";
     let pageLabels: string[] = [];
+    let barcodeGenerationCode = "";
     const productName = product.name || selectedMovement.product_name || 'Producto';
     const escapedProductName = productName
       .replace(/&/g, '&amp;')
@@ -1348,6 +1311,22 @@ export default function Movements() {
           </div>
         `;
 
+        barcodeGenerationCode += `
+          (function() {
+            var elem = document.getElementById("${barcodeId}");
+            if (elem) {
+              JsBarcode(elem, "${numericCode}", {
+                format: "CODE128",
+                width: 1.8,
+                height: 38,
+                displayValue: false,
+                margin: 0,
+                fontSize: 0
+              });
+            }
+          })();
+        `;
+
         pageLabels.push(labelHTML);
 
         if (pageLabels.length === 3) {
@@ -1374,6 +1353,22 @@ export default function Movements() {
           </div>
         `;
 
+        barcodeGenerationCode += `
+          (function() {
+            var elem = document.getElementById("${barcodeId}");
+            if (elem) {
+              JsBarcode(elem, "${numericCode}", {
+                format: "CODE128",
+                width: 1.8,
+                height: 38,
+                displayValue: false,
+                margin: 0,
+                fontSize: 0
+              });
+            }
+          })();
+        `;
+
         pageLabels.push(labelHTML);
 
         if (pageLabels.length === 3) {
@@ -1390,23 +1385,8 @@ export default function Movements() {
       labelsHTML += `<div class="label-page">${pageLabels.join("")}</div>`;
     }
 
-    const iframe = document.createElement("iframe");
-    iframe.style.position = "absolute";
-    iframe.style.width = "0";
-    iframe.style.height = "0";
-    iframe.style.border = "none";
-    iframe.style.left = "-9999px";
-    iframe.style.top = "-9999px";
-    document.body.appendChild(iframe);
-
-    const iframeDoc = iframe.contentWindow?.document;
-    if (!iframeDoc) {
-      toast.error("Error al crear ventana de impresión");
-      return;
-    }
-
-    iframeDoc.open();
-    iframeDoc.write(`
+    // Generar HTML completo
+    const fullHTML = `
       <!DOCTYPE html>
       <html>
         <head>
@@ -1559,59 +1539,9 @@ export default function Movements() {
               }
 
               try {
-                ${hasUnitIds
-                  ? idsToPrint.map((unitId, index) => {
-                      const displayCode = `${product.code}-${unitId}A`;
-                      const numericCode = displayCode.replace(/[^0-9]/g, "");
-
-                      return `
-                      (function() {
-                        var elem = document.getElementById("barcode-reprint-${index}");
-                        if (elem) {
-                          JsBarcode(elem, "${numericCode}", {
-                            format: "CODE128",
-                            width: 1.8,
-                            height: 38,
-                            displayValue: false,
-                            margin: 0,
-                            fontSize: 0
-                          });
-                        }
-                      })();
-                      `;
-                    }).join('\n')
-                  : Array.from({ length: quantityToPrint }).map((_, index) => {
-                      const displayCode = product.code;
-                      const numericCode = displayCode.replace(/[^0-9]/g, "");
-
-                      return `
-                      (function() {
-                        var elem = document.getElementById("barcode-reprint-${index}");
-                        if (elem) {
-                          JsBarcode(elem, "${numericCode}", {
-                            format: "CODE128",
-                            width: 1.8,
-                            height: 38,
-                            displayValue: false,
-                            margin: 0,
-                            fontSize: 0
-                          });
-                        }
-                      })();
-                      `;
-                    }).join('\n')
-                }
-
-                setTimeout(function() {
-                  window.print();
-                  setTimeout(function() {
-                    document.body.parentElement.remove();
-                  }, 5000);
-                }, 250);
-
+                ${barcodeGenerationCode}
               } catch(e) {
                 console.error('Error:', e);
-                alert('Error generando etiquetas: ' + e.message);
               }
             }
 
@@ -1623,11 +1553,21 @@ export default function Movements() {
           </script>
         </body>
       </html>
-    `);
-    iframeDoc.close();
+    `;
 
-    toast.success("Preparando etiquetas para impresión...");
-    setReprintDialogOpen(false);
+    // Enviar directamente a la impresora configurada
+    try {
+      const success = await printDirect(config.labels, fullHTML, 'label');
+      if (success) {
+        toast.success("Etiquetas enviadas a la impresora");
+        setReprintDialogOpen(false);
+      } else {
+        toast.error("Error al enviar etiquetas a la impresora");
+      }
+    } catch (error) {
+      console.error('Error al imprimir etiquetas:', error);
+      toast.error(`Error al imprimir: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+    }
   };
 
   return (

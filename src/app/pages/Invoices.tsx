@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
-import { Plus, Search, Eye, FileText, Printer, Download, X, Info, Scan, Hash, RotateCcw, CreditCard, Trash2, Receipt, Calendar, Loader2, Check } from 'lucide-react';
+import { Plus, Search, Eye, FileText, Printer, Download, X, Info, Scan, Hash, RotateCcw, CreditCard, Trash2, Receipt, Calendar, Loader2, Check, Package } from 'lucide-react';
 import {
   getInvoices,
   getProducts,
@@ -35,6 +35,7 @@ import { ThermalInvoicePrint } from '../components/ThermalInvoicePrint';
 import { includesIgnoreAccents } from '../lib/string-utils';
 import { printThermalInvoice as printThermalDirect } from '../lib/thermal-printer';
 import { printPDFInvoice } from '../lib/pdf-printer';
+import { isPrintingAvailable } from '../lib/platform-detector';
 
 interface InvoiceItem {
   productId: string;
@@ -189,6 +190,14 @@ export function Invoices() {
   const [showExistingCustomers, setShowExistingCustomers] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [editingInvoiceId, setEditingInvoiceId] = useState<string | null>(null);
+
+  // Estados para productos comunes
+  const [isCommonProductDialogOpen, setIsCommonProductDialogOpen] = useState(false);
+  const [commonProductData, setCommonProductData] = useState({
+    name: '',
+    price: '',
+    quantity: '1'
+  });
 
   // Manejar entrada de código de barras
   useEffect(() => {
@@ -845,6 +854,50 @@ export function Invoices() {
     toast.success(`Producto seleccionado: ${product.name}`);
   };
 
+  // Función para agregar producto común
+  const handleAddCommonProduct = () => {
+    const productName = commonProductData.name.trim();
+    const price = parseFloat(commonProductData.price);
+    const quantity = parseInt(commonProductData.quantity) || 1;
+
+    if (!productName) {
+      toast.error('Ingresa el nombre del producto');
+      return;
+    }
+
+    if (!price || price <= 0) {
+      toast.error('Ingresa un precio válido');
+      return;
+    }
+
+    if (quantity <= 0) {
+      toast.error('La cantidad debe ser mayor a 0');
+      return;
+    }
+
+    const total = quantity * price;
+
+    // Agregar como item regular pero con un ID especial para identificarlo como común
+    const commonItem: InvoiceItem = {
+      productId: `common-${Date.now()}`, // ID temporal único
+      productName: `[COMÚN] ${productName}`,
+      productCode: 'COMÚN',
+      quantity,
+      price,
+      total,
+      useUnitIds: false,
+      unitIds: [],
+      availableIds: undefined,
+    };
+
+    setInvoiceItems([...invoiceItems, commonItem]);
+    toast.success('Producto común agregado');
+
+    // Limpiar y cerrar
+    setCommonProductData({ name: '', price: '', quantity: '1' });
+    setIsCommonProductDialogOpen(false);
+  };
+
   const handleRemoveItem = (index: number) => {
     setInvoiceItems(invoiceItems.filter((_, i) => i !== index));
   };
@@ -852,29 +905,31 @@ export function Invoices() {
   const handleUpdateItemQuantity = (index: number, quantity: number) => {
     const updated = [...invoiceItems];
     const item = updated[index];
-    
+
     if (quantity <= 0) return;
-    
-    // Verificar stock
-    const product = products.find(p => p.id === item.productId);
-    if (product && product.stock < quantity) {
-      toast.error('Stock insuficiente');
-      return;
-    }
-    
-    // Si usa IDs, verificar disponibilidad y ajustar IDs
-    if (item.useUnitIds && item.availableIds) {
-      if (quantity > item.availableIds.length) {
-        toast.error(`Solo hay ${item.availableIds.length} unidades disponibles`);
+
+    // Verificar stock solo para productos que NO sean comunes
+    if (!item.productId.startsWith('common-')) {
+      const product = products.find(p => p.id === item.productId);
+      if (product && product.stock < quantity) {
+        toast.error('Stock insuficiente');
         return;
       }
-      
-      // Ajustar IDs seleccionadas
-      if (quantity < item.unitIds!.length) {
-        item.unitIds = item.unitIds!.slice(0, quantity);
+
+      // Si usa IDs, verificar disponibilidad y ajustar IDs
+      if (item.useUnitIds && item.availableIds) {
+        if (quantity > item.availableIds.length) {
+          toast.error(`Solo hay ${item.availableIds.length} unidades disponibles`);
+          return;
+        }
+
+        // Ajustar IDs seleccionadas
+        if (quantity < item.unitIds!.length) {
+          item.unitIds = item.unitIds!.slice(0, quantity);
+        }
       }
     }
-    
+
     updated[index].quantity = quantity;
     updated[index].total = quantity * item.price;
     setInvoiceItems(updated);
@@ -1046,6 +1101,9 @@ export function Invoices() {
 
         // Registrar movimientos de inventario para los nuevos productos
         for (const item of invoiceItems) {
+          // Saltar productos comunes (no están en inventario)
+          if (item.productId.startsWith('common-')) continue;
+
           await addMovement({
             type: 'exit',
             product_id: item.productId,
@@ -1117,6 +1175,30 @@ export function Invoices() {
         throw new Error('Error al crear factura');
       }
 
+      // Guardar productos comunes en la base de datos
+      const commonProducts = invoiceItems.filter(item => item.productId.startsWith('common-'));
+      if (commonProducts.length > 0) {
+        const commonProductsData = commonProducts.map(item => ({
+          company,
+          invoice_id: newInvoice.id,
+          invoice_number: newInvoice.number,
+          product_name: item.productName.replace('[COMÚN] ', ''), // Quitar el prefijo
+          price: item.price,
+          quantity: item.quantity,
+          total: item.total,
+          created_by: user?.username || 'Usuario'
+        }));
+
+        const { error: commonProductsError } = await supabase
+          .from('common_products')
+          .insert(commonProductsData);
+
+        if (commonProductsError) {
+          console.error('Error saving common products:', commonProductsError);
+          // No lanzar error, solo registrar - la factura ya se creó exitosamente
+        }
+      }
+
       // Si es crédito, crear o actualizar el cliente
       if (isCredit && formData.customerDocument) {
         const { data: existingCustomer } = await supabase
@@ -1153,6 +1235,9 @@ export function Invoices() {
       // Las facturas en confirmación NO modifican el stock hasta que se aprueben
       if (!isPendingConfirmation) {
         for (const item of invoiceItems) {
+          // Saltar productos comunes (no están en inventario)
+          if (item.productId.startsWith('common-')) continue;
+
           const product = products.find(p => p.id === item.productId);
           if (!product) continue;
 
@@ -1229,16 +1314,23 @@ export function Invoices() {
   // Manejar confirmación de pago de factura pendiente
   const handleConfirmInvoicePayment = async () => {
     if (!invoiceToConfirm) return;
-    
+
+    // ✅ VALIDAR CIERRES ANTES DE CONFIRMAR
+    const validation = await canCreateInvoice();
+    if (!validation.canCreate) {
+      toast.error(validation.message || 'No se pueden confirmar facturas en este momento.');
+      return;
+    }
+
     // Validar que el total coincida
     const paymentTotal = paymentData.cash + paymentData.transfer + paymentData.other;
     if (Math.abs(paymentTotal - invoiceToConfirm.total) > 0.01) {
       toast.error(`El total de los pagos debe ser igual al total de la factura (${formatCOP(invoiceToConfirm.total)})`);
       return;
     }
-    
+
     setIsSubmitting(true);
-    
+
     try {
       // Formatear método de pago
       const paymentMethods = [];
@@ -1259,6 +1351,9 @@ export function Invoices() {
       if (result) {
         // AHORA reducir stock y registrar movimientos (porque la factura se está aprobando)
         for (const item of invoiceToConfirm.items) {
+          // Saltar productos comunes (no están en inventario)
+          if (item.productId.startsWith('common-')) continue;
+
           const product = products.find(p => p.id === item.productId);
           if (!product) continue;
 
@@ -1396,8 +1491,15 @@ export function Invoices() {
 
     try {
       const user = getCurrentUser();
+
+      // Saltar productos comunes (no se pueden devolver porque no están en inventario)
+      if (item.productId.startsWith('common-')) {
+        toast.error('Los productos comunes no se pueden devolver al inventario');
+        return;
+      }
+
       const product = products.find(p => p.id === item.productId);
-      
+
       if (!product) {
         toast.error('Producto no encontrado');
         return;
@@ -1454,8 +1556,11 @@ export function Invoices() {
 
       // Procesar cada item
       for (const item of selectedInvoiceForReturn.items) {
+        // Saltar productos comunes (no se pueden devolver al inventario)
+        if (item.productId.startsWith('common-')) continue;
+
         const product = products.find(p => p.id === item.productId);
-        
+
         if (!product) {
           console.error(`Producto ${item.productId} no encontrado`);
           continue;
@@ -2631,15 +2736,25 @@ export function Invoices() {
                       </div>
                     </div>
 
-                    <Button
-                      type="button"
-                      onClick={handleAddItem}
-                      className="w-full"
-                      disabled={!currentItem.productId}
-                    >
-                      <Plus className="h-4 w-4 mr-2" />
-                      Agregar Producto
-                    </Button>
+                    <div className="grid grid-cols-2 gap-2">
+                      <Button
+                        type="button"
+                        onClick={handleAddItem}
+                        className="w-full"
+                        disabled={!currentItem.productId}
+                      >
+                        <Plus className="h-4 w-4 mr-2" />
+                        Agregar
+                      </Button>
+                      <Button
+                        type="button"
+                        onClick={() => setIsCommonProductDialogOpen(true)}
+                        className="w-full bg-purple-600 hover:bg-purple-700"
+                      >
+                        <Package className="h-4 w-4 mr-2" />
+                        Producto Común
+                      </Button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -3649,7 +3764,7 @@ export function Invoices() {
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className="flex-wrap gap-2">
             <Button
               variant="outline"
               onClick={() => {
@@ -3659,9 +3774,95 @@ export function Invoices() {
             >
               Volver
             </Button>
-            <Button onClick={handleThermalPrint}>
-              <Receipt className="h-4 w-4 mr-2" />
+            <Button
+              onClick={handleThermalPrint}
+              disabled={!isPrintingAvailable()}
+            >
+              <Printer className="h-4 w-4 mr-2" />
               Imprimir Tirilla
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Producto Común */}
+      <Dialog open={isCommonProductDialogOpen} onOpenChange={setIsCommonProductDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="h-5 w-5 text-purple-600" />
+              Agregar Producto Común
+            </DialogTitle>
+            <DialogDescription>
+              Agrega un producto que no está en el inventario
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="commonProductName">Nombre del Producto</Label>
+              <Input
+                id="commonProductName"
+                type="text"
+                placeholder="Ej: Cable USB, Funda, etc."
+                value={commonProductData.name}
+                onChange={(e) => setCommonProductData({ ...commonProductData, name: e.target.value })}
+                autoFocus
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="commonProductPrice">Precio</Label>
+                <Input
+                  id="commonProductPrice"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  placeholder="0.00"
+                  value={commonProductData.price}
+                  onChange={(e) => setCommonProductData({ ...commonProductData, price: e.target.value })}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="commonProductQuantity">Cantidad</Label>
+                <Input
+                  id="commonProductQuantity"
+                  type="number"
+                  min="1"
+                  value={commonProductData.quantity}
+                  onChange={(e) => setCommonProductData({ ...commonProductData, quantity: e.target.value })}
+                />
+              </div>
+            </div>
+
+            {commonProductData.price && commonProductData.quantity && (
+              <div className="bg-purple-50 dark:bg-purple-950 border border-purple-200 dark:border-purple-800 rounded-lg p-3">
+                <p className="text-sm text-purple-700 dark:text-purple-400">
+                  Total: <span className="font-bold">{formatCOP(parseFloat(commonProductData.price || '0') * parseInt(commonProductData.quantity || '1'))}</span>
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setCommonProductData({ name: '', price: '', quantity: '1' });
+                setIsCommonProductDialogOpen(false);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleAddCommonProduct}
+              className="bg-purple-600 hover:bg-purple-700"
+              disabled={!commonProductData.name || !commonProductData.price}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Agregar
             </Button>
           </DialogFooter>
         </DialogContent>
