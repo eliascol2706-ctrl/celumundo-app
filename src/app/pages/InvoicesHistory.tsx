@@ -505,7 +505,7 @@ export function InvoicesHistory() {
       {/* Header */}
       <div className="bg-white border-b border-zinc-200">
         <div className="p-6">
-          <Button variant="ghost" onClick={() => navigate('/facturacion')} className="mb-4">
+          <Button variant="ghost" onClick={() => navigate('/sistema/facturacion')} className="mb-4">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Volver a Facturación
           </Button>

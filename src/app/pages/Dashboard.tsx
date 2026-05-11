@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { 
-  Package, 
-  ShoppingCart, 
-  TrendingUp, 
+import {
+  Package,
+  ShoppingCart,
+  TrendingUp,
   AlertTriangle,
   Activity,
   DollarSign,
@@ -26,7 +26,7 @@ export function Dashboard() {
   // Redirigir vendedor a facturación
   useEffect(() => {
     if (currentUser?.role === 'seller') {
-      navigate('/facturacion', { replace: true });
+      navigate('/sistema/facturacion', { replace: true });
     }
   }, [currentUser, navigate]);
 
@@ -255,7 +255,7 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.totalProducts}</div>
-            <Link to="/productos" className="text-xs text-green-600 dark:text-green-400 hover:underline mt-1 inline-block">
+            <Link to="/sistema/productos" className="text-xs text-green-600 dark:text-green-400 hover:underline mt-1 inline-block">
               Ver inventario →
             </Link>
           </CardContent>
@@ -270,7 +270,7 @@ export function Dashboard() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{stats.totalInvoices}</div>
-            <Link to="/facturacion" className="text-xs text-green-600 dark:text-green-400 hover:underline mt-1 inline-block">
+            <Link to="/sistema/facturacion" className="text-xs text-green-600 dark:text-green-400 hover:underline mt-1 inline-block">
               Ver facturas →
             </Link>
           </CardContent>
@@ -318,7 +318,7 @@ export function Dashboard() {
             </div>
             <div className="flex items-center justify-between mt-1">
               <p className="text-xs text-red-600 dark:text-red-400">{stats.totalReturns} devoluciones</p>
-              <Link to="/devoluciones" className="text-xs text-red-600 dark:text-red-400 hover:underline">
+              <Link to="/sistema/devoluciones" className="text-xs text-red-600 dark:text-red-400 hover:underline">
                 Ver →
               </Link>
             </div>
@@ -336,7 +336,7 @@ export function Dashboard() {
             <div className="text-2xl font-bold text-blue-700 dark:text-blue-300">
               {formatCOP(stats.totalExpenses)}
             </div>
-            <Link to="/gastos" className="text-xs text-blue-600 dark:text-blue-400 hover:underline mt-1 inline-block">
+            <Link to="/sistema/gastos" className="text-xs text-blue-600 dark:text-blue-400 hover:underline mt-1 inline-block">
               Ver gastos →
             </Link>
           </CardContent>
@@ -375,7 +375,7 @@ export function Dashboard() {
                 ))}
                 {lowStockItems.length > 0 && (
                   <Link 
-                    to="/productos" 
+                    to="/sistema/productos" 
                     className="text-sm text-blue-600 dark:text-blue-400 hover:underline block mt-2"
                   >
                     Ver todos los productos →
@@ -427,7 +427,7 @@ export function Dashboard() {
                   </div>
                 ))}
                 <Link 
-                  to="/facturacion" 
+                  to="/sistema/facturacion" 
                   className="text-sm text-blue-600 dark:text-blue-400 hover:underline block mt-2"
                 >
                   Ver todas las facturas →
@@ -458,7 +458,7 @@ export function Dashboard() {
             <div className="h-16 w-px bg-gray-200 dark:bg-gray-700" />
             <div className="text-center">
               <Link 
-                to="/movimientos"
+                to="/sistema/movimientos"
                 className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors"
               >
                 Ver todos los movimientos →
@@ -500,7 +500,7 @@ export function Dashboard() {
             </div>
             <div className="flex items-center justify-between mt-1">
               <p className="text-xs text-red-600 dark:text-red-400">{stats.pendingCreditInvoices} facturas pendientes</p>
-              <Link to="/facturacion" className="text-xs text-red-600 dark:text-red-400 hover:underline">
+              <Link to="/sistema/facturacion" className="text-xs text-red-600 dark:text-red-400 hover:underline">
                 Ver →
               </Link>
             </div>

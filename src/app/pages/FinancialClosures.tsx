@@ -425,7 +425,7 @@ export function FinancialClosures() {
       {/* Header */}
       <div className="bg-white dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">
         <div className="p-6">
-          <Button variant="ghost" onClick={() => navigate('/facturacion/historial')} className="mb-4">
+          <Button variant="ghost" onClick={() => navigate('/sistema/facturacion/historial')} className="mb-4">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Volver a Gestión de Finanzas
           </Button>

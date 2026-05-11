@@ -327,13 +327,13 @@ export function InvoicesMenu() {
           duration: toastDuration,
           action: {
             label: validation.requiresMonthlyClose ? '🔒 Realizar Cierre Mensual' : 'Ir a Cierres',
-            onClick: () => navigate('/cierres')
+            onClick: () => navigate('/sistema/cierres')
           }
         });
         return;
       }
 
-      navigate('/facturacion/regular');
+      navigate('/sistema/facturacion/regular');
     } catch (error) {
       console.error('Error validating invoice creation:', error);
       toast.error('Error al validar permisos de facturación');
@@ -355,13 +355,13 @@ export function InvoicesMenu() {
           duration: toastDuration,
           action: {
             label: validation.requiresMonthlyClose ? '🔒 Realizar Cierre Mensual' : 'Ir a Cierres',
-            onClick: () => navigate('/cierres')
+            onClick: () => navigate('/sistema/cierres')
           }
         });
         return;
       }
 
-      navigate('/facturacion/credito');
+      navigate('/sistema/facturacion/credito');
     } catch (error) {
       console.error('Error validating invoice creation:', error);
       toast.error('Error al validar permisos de facturación');

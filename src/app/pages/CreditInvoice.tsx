@@ -416,7 +416,7 @@ export function CreditInvoice() {
         duration: toastDuration,
         action: {
           label: validation.requiresMonthlyClose ? '🔒 Realizar Cierre Mensual' : 'Ir a Cierres',
-          onClick: () => navigate('/cierres')
+          onClick: () => navigate('/sistema/cierres')
         }
       });
       return;
@@ -527,7 +527,7 @@ export function CreditInvoice() {
       shouldProceedRef.current = true;
 
       // Navegar (el blocker procederá automáticamente)
-      navigate('/facturacion');
+      navigate('/sistema/facturacion');
     } catch (error) {
       console.error('Error creating credit invoice:', error);
       toast.error('Error al crear la factura a crédito');
@@ -1089,10 +1089,10 @@ export function CreditInvoice() {
       );
       if (confirmExit) {
         shouldProceedRef.current = true;
-        navigate('/facturacion');
+        navigate('/sistema/facturacion');
       }
     } else {
-      navigate('/facturacion');
+      navigate('/sistema/facturacion');
     }
   };
 
@@ -1579,7 +1579,7 @@ export function CreditInvoice() {
 
                 <Button
                   variant="outline"
-                  onClick={() => navigate('/facturacion')}
+                  onClick={() => navigate('/sistema/facturacion')}
                   className="w-full"
                   disabled={isSubmitting}
                 >

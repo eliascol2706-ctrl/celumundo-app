@@ -1168,7 +1168,7 @@ export function FinancialManagement() {
         {/* Header */}
         <div className="bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 dark:border-zinc-800">
         <div className="p-6">
-          <Button variant="ghost" onClick={() => navigate('/facturacion')} className="mb-4">
+          <Button variant="ghost" onClick={() => navigate('/sistema/facturacion')} className="mb-4">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Volver a Facturación
           </Button>
@@ -1249,7 +1249,7 @@ export function FinancialManagement() {
               <Button
                 variant="outline"
                 className="border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
-                onClick={() => navigate('/facturacion/cierre-finanzas')}
+                onClick={() => navigate('/sistema/facturacion/cierre-finanzas')}
               >
                 <FileText className="w-4 h-4 mr-2" />
                 Finalizar Finanzas
@@ -1876,7 +1876,7 @@ export function FinancialManagement() {
                 <CreditCard className="w-4 h-4 mr-2" />
                 Ver Créditos
               </Button>
-              <Button variant="outline" onClick={() => navigate('/gastos')}>
+              <Button variant="outline" onClick={() => navigate('/sistema/gastos')}>
                 <Wallet className="w-4 h-4 mr-2" />
                 Gestionar Gastos
               </Button>

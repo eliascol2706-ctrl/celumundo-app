@@ -33,7 +33,8 @@ import {
   Trash2,
   Edit,
   Calendar,
-  AlertTriangle
+  AlertTriangle,
+  Fingerprint
 } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getCurrentUser, logoutUser, getSession, searchProductsForInvoice, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession, canCreateInvoice, supabase } from '../lib/supabase';
@@ -46,6 +47,7 @@ import { getPrinterConfig, savePrinterConfig, getAvailablePrinters, getLabelPrin
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { isPrintingAvailable } from '../lib/platform-detector';
 import { LabelPrinterConfigDialog } from './LabelPrinterConfigDialog';
+import { UnitIDManager } from './UnitIDManager';
 
 const adminNavigation = [
   // Sección 1: Gestión de Inventario
@@ -183,7 +185,7 @@ export function Layout() {
   const [devPanelTokenDialogOpen, setDevPanelTokenDialogOpen] = useState(false);
   const [devPanelDialogOpen, setDevPanelDialogOpen] = useState(false);
   const [devPanelToken, setDevPanelToken] = useState("");
-  const [devPanelTab, setDevPanelTab] = useState<'closures' | 'invoices'>('closures');
+  const [devPanelTab, setDevPanelTab] = useState<'closures' | 'invoices' | 'unit_ids'>('closures');
 
   // Enfocar input cuando se abre el diálogo
   useEffect(() => {
@@ -1513,6 +1515,19 @@ export function Layout() {
                   Gestión de Facturas
                 </div>
               </button>
+              <button
+                onClick={() => setDevPanelTab('unit_ids')}
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  devPanelTab === 'unit_ids'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Fingerprint className="h-4 w-4" />
+                  Gestión de ID's
+                </div>
+              </button>
             </div>
 
             {/* Contenido de tabs */}
@@ -1527,6 +1542,14 @@ export function Layout() {
               <DevPanelInvoicesTab
                 session={session}
                 onDelete={handleDeleteInvoice}
+              />
+            )}
+
+            {devPanelTab === 'unit_ids' && (
+              <UnitIDManager
+                isOpen={true}
+                onClose={() => {}}
+                inline={true}
               />
             )}
           </DialogContent>
