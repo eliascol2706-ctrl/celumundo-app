@@ -15,6 +15,7 @@ interface Product {
   name: string;
   description: string;
   stock: number;
+  cost: number;
   price1: number;
   price2: number;
   final_price: number;
@@ -74,11 +75,18 @@ export function ProductConsultation() {
       scannerRef.current = null;
     }
 
+    // Si es código de barras, eliminar las letras "A"
+    let processedCode = decodedText;
+    if (scannerType === 'barcode') {
+      processedCode = decodedText.replace(/A/g, '');
+      console.log('Código procesado (sin A):', processedCode);
+    }
+
     setIsScannerOpen(false);
     setScannerType(null);
 
     // Buscar el producto
-    searchProduct(decodedText);
+    searchProduct(processedCode);
   };
 
   const handleScanError = (error: any) => {
@@ -290,6 +298,15 @@ export function ProductConsultation() {
                   </p>
                 </div>
 
+                <div className="bg-orange-50 dark:bg-orange-950 p-4 rounded-lg">
+                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
+                    Costo
+                  </p>
+                  <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+                    {formatCOP(product.cost)}
+                  </p>
+                </div>
+
                 <div className="bg-purple-50 dark:bg-purple-950 p-4 rounded-lg">
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
                     Precio 1
@@ -308,7 +325,7 @@ export function ProductConsultation() {
                   </p>
                 </div>
 
-                <div className="bg-green-50 dark:bg-green-950 p-4 rounded-lg">
+                <div className="bg-green-50 dark:bg-green-950 p-4 rounded-lg col-span-2">
                   <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
                     Precio Final
                   </p>
