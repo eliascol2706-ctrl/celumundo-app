@@ -15,7 +15,7 @@ interface Product {
   name: string;
   description: string;
   stock: number;
-  cost: number;
+  current_cost: number;
   price1: number;
   price2: number;
   final_price: number;
@@ -303,7 +303,7 @@ export function ProductConsultation() {
                     Costo
                   </p>
                   <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-                    {formatCOP(product.cost)}
+                    {formatCOP(product.current_cost)}
                   </p>
                 </div>
 
