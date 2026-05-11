@@ -6,6 +6,8 @@ import { getCurrentUser } from './lib/supabase';
 import { Layout } from './components/Layout';
 import { Login } from './pages/Login';
 import { Dashboard } from './pages/Dashboard';
+import { SelectMode } from './pages/SelectMode';
+import { ProductConsultation } from './pages/ProductConsultation';
 
 // Lazy loading para componentes pesados
 const Products = React.lazy(() => import('./pages/Products').then(m => ({ default: m.Products })));
@@ -54,16 +56,16 @@ const ProtectedRoute = React.memo(({ children, allowedRoles }: { children: React
   const currentUser = getCurrentUser();
 
   if (!currentUser) {
-    return <Navigate to="/login" replace />;
+    return <Navigate to="/" replace />;
   }
 
   // Si el usuario es catalog_admin y no está en una ruta permitida, redirigir a catálogo
   if (currentUser.role === 'catalog_admin' && allowedRoles && !allowedRoles.includes('catalog_admin')) {
-    return <Navigate to="/catalogo" replace />;
+    return <Navigate to="/sistema/catalogo" replace />;
   }
 
   if (allowedRoles && !allowedRoles.includes(currentUser.role)) {
-    return <Navigate to="/" replace />;
+    return <Navigate to="/sistema" replace />;
   }
 
   return <>{children}</>;
@@ -71,8 +73,16 @@ const ProtectedRoute = React.memo(({ children, allowedRoles }: { children: React
 
 export const router = createBrowserRouter([
   {
+    path: '/',
+    Component: SelectMode,
+  },
+  {
     path: '/login',
     Component: Login,
+  },
+  {
+    path: '/consulta-productos',
+    Component: ProductConsultation,
   },
   {
     path: '/seguimiento/:trackingCode',
@@ -91,11 +101,11 @@ export const router = createBrowserRouter([
     Component: PublicCatalog,
   },
   {
-    path: '/',
+    path: '/sistema',
     Component: Layout,
     children: [
-      { 
-        index: true, 
+      {
+        index: true,
         element: (
           <ProtectedRoute>
             <Dashboard />

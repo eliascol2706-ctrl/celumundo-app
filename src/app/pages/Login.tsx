@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { LogIn, Building2 } from 'lucide-react';
+import { LogIn, Building2, ArrowLeft } from 'lucide-react';
 import { saveSession, type User, type Session, authenticateUser } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -41,9 +41,9 @@ export function Login() {
 
         // Redirigir según el rol
         if (user.role === 'catalog_admin') {
-          navigate('/catalogo');
+          navigate('/sistema/catalogo');
         } else {
-          navigate('/');
+          navigate('/sistema');
         }
       } else {
         toast.error('Usuario o contraseña incorrectos para esta empresa');
@@ -58,14 +58,24 @@ export function Login() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-green-50 dark:from-green-950 dark:via-background dark:to-green-950 flex items-center justify-center p-4 relative">
-      <Card className="w-full max-w-md shadow-2xl border-green-200 dark:border-green-800 animate-scale-in">
-        <CardHeader className="text-center pb-4">
-          <div className="mx-auto mb-4 h-20 w-20 bg-gradient-to-br from-green-600 to-green-700 rounded-full flex items-center justify-center shadow-lg">
-            <LogIn className="h-10 w-10 text-white" />
-          </div>
-          <CardTitle className="text-3xl font-bold bg-gradient-to-r from-green-600 to-green-700 bg-clip-text text-transparent">GESTION Y MANEJO</CardTitle>
-          <p className="text-muted-foreground mt-2">CELUMUNDO VIP&nbsp;&nbsp;&nbsp;</p>
-        </CardHeader>
+      <div className="w-full max-w-md">
+        <Button
+          variant="outline"
+          onClick={() => navigate('/')}
+          className="mb-4"
+        >
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Volver
+        </Button>
+
+        <Card className="shadow-2xl border-green-200 dark:border-green-800 animate-scale-in">
+          <CardHeader className="text-center pb-4">
+            <div className="mx-auto mb-4 h-20 w-20 bg-gradient-to-br from-green-600 to-green-700 rounded-full flex items-center justify-center shadow-lg">
+              <LogIn className="h-10 w-10 text-white" />
+            </div>
+            <CardTitle className="text-3xl font-bold bg-gradient-to-r from-green-600 to-green-700 bg-clip-text text-transparent">GESTION Y MANEJO</CardTitle>
+            <p className="text-muted-foreground mt-2">CELUMUNDO VIP&nbsp;&nbsp;&nbsp;</p>
+          </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
@@ -140,6 +150,7 @@ export function Login() {
           </div>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

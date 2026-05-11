@@ -52,32 +52,32 @@ const adminNavigation = [
   {
     section: 'Gestión de Inventario',
     items: [
-      { name: 'Dashboard', href: '/', icon: LayoutDashboard },
-      { name: 'Departamentos', href: '/departamentos', icon: FolderOpen },
-      { name: 'Productos', href: '/productos', icon: Package },
-      { name: 'Garantías', href: '/garantias', icon: Shield },
+      { name: 'Dashboard', href: '/sistema', icon: LayoutDashboard },
+      { name: 'Departamentos', href: '/sistema/departamentos', icon: FolderOpen },
+      { name: 'Productos', href: '/sistema/productos', icon: Package },
+      { name: 'Garantías', href: '/sistema/garantias', icon: Shield },
     ]
   },
   // Sección 2: Operaciones
   {
     section: 'Operaciones',
     items: [
-      { name: 'Facturación', href: '/facturacion', icon: FileText },
-      { name: 'Devoluciones', href: '/devoluciones', icon: RotateCcw },
-      { name: 'Cambios', href: '/cambios', icon: RefreshCw },
-      { name: 'Clientes', href: '/clientes', icon: Users },
-      { name: 'Movimientos', href: '/movimientos', icon: ArrowRightLeft },
-      { name: 'Comunes', href: '/comunes', icon: Package },
+      { name: 'Facturación', href: '/sistema/facturacion', icon: FileText },
+      { name: 'Devoluciones', href: '/sistema/devoluciones', icon: RotateCcw },
+      { name: 'Cambios', href: '/sistema/cambios', icon: RefreshCw },
+      { name: 'Clientes', href: '/sistema/clientes', icon: Users },
+      { name: 'Movimientos', href: '/sistema/movimientos', icon: ArrowRightLeft },
+      { name: 'Comunes', href: '/sistema/comunes', icon: Package },
     ]
   },
   // Sección 3: Finanzas y Reportes
   {
     section: 'Finanzas y Reportes',
     items: [
-      { name: 'Gestión de Finanzas', href: '/facturacion/historial', icon: Wallet },
-      { name: 'Gastos', href: '/gastos', icon: Receipt },
-      { name: 'Cierres', href: '/cierres', icon: DoorOpen },
-      { name: 'Reportes', href: '/reportes', icon: BarChart3 },
+      { name: 'Gestión de Finanzas', href: '/sistema/facturacion/historial', icon: Wallet },
+      { name: 'Gastos', href: '/sistema/gastos', icon: Receipt },
+      { name: 'Cierres', href: '/sistema/cierres', icon: DoorOpen },
+      { name: 'Reportes', href: '/sistema/reportes', icon: BarChart3 },
     ]
   }
 ];
@@ -87,17 +87,17 @@ const sellerNavigation = [
   {
     section: 'Ventas',
     items: [
-      { name: 'Facturación', href: '/facturacion', icon: FileText },
-      { name: 'Devoluciones', href: '/devoluciones', icon: RotateCcw },
-      { name: 'Cambios', href: '/cambios', icon: RefreshCw },
-      { name: 'Clientes', href: '/clientes', icon: Users },
+      { name: 'Facturación', href: '/sistema/facturacion', icon: FileText },
+      { name: 'Devoluciones', href: '/sistema/devoluciones', icon: RotateCcw },
+      { name: 'Cambios', href: '/sistema/cambios', icon: RefreshCw },
+      { name: 'Clientes', href: '/sistema/clientes', icon: Users },
     ]
   },
   // Sección 2: Consultas
   {
     section: 'Consultas',
     items: [
-      { name: 'Cierres', href: '/cierres', icon: DoorOpen },
+      { name: 'Cierres', href: '/sistema/cierres', icon: DoorOpen },
     ]
   }
 ];
@@ -107,7 +107,7 @@ const catalogAdminNavigation = [
   {
     section: 'Catálogo',
     items: [
-      { name: 'Administrar Catálogo', href: '/catalogo', icon: LayoutDashboard },
+      { name: 'Administrar Catálogo', href: '/sistema/catalogo', icon: LayoutDashboard },
     ]
   }
 ];
@@ -411,10 +411,10 @@ export function Layout() {
     };
   }, [productSearchTerm, performProductSearch]);
   
-  // Redirigir a login si no hay usuario
+  // Redirigir a select mode si no hay usuario
   useEffect(() => {
     if (!currentUser) {
-      navigate('/login', { replace: true });
+      navigate('/', { replace: true });
     }
   }, [currentUser, navigate]);
 
@@ -451,7 +451,7 @@ export function Layout() {
           }
 
           // Ir directo a factura regular
-          navigate('/facturacion/regular');
+          navigate('/sistema/facturacion/regular');
         }
       }
     };
@@ -474,7 +474,7 @@ export function Layout() {
 
   const handleLogout = () => {
     logoutUser();
-    navigate('/login', { replace: true });
+    navigate('/', { replace: true });
   };
 
   // Funciones del Developer Panel
@@ -830,7 +830,7 @@ export function Layout() {
           }
 
           // Ir directo a factura regular
-          navigate('/facturacion/regular');
+          navigate('/sistema/facturacion/regular');
         }}
         className="fixed bottom-4 right-4 lg:bottom-6 lg:right-6 z-50 p-3 lg:p-4 rounded-full shadow-xl transition-all duration-300 group bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 hover:scale-110 hover:shadow-2xl cursor-pointer text-white"
         aria-label="Nueva Factura"
