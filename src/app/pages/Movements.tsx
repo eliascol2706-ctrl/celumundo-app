@@ -1016,12 +1016,12 @@ export default function Movements() {
               font-size: 6.1pt !important;
               font-weight: bold !important;
               text-align: center !important;
-              max-height: 7mm !important;
+              max-height: 6.5mm !important;
               overflow: hidden !important;
-              line-height: 1.2 !important;
+              line-height: 1.15 !important;
               word-wrap: break-word !important;
               width: 100% !important;
-              margin-bottom: 0.3mm !important;
+              margin-bottom: 0.5mm !important;
               padding-top: 0mm;
               margin-top: 0mm;
               font-family: Arial, Helvetica, sans-serif !important;
@@ -1032,12 +1032,12 @@ export default function Movements() {
 
             .label-barcode-container {
               width: 100% !important;
-              height: 13mm !important;
+              height: 12mm !important;
               display: flex !important;
               justify-content: center !important;
               align-items: center !important;
               flex-shrink: 0 !important;
-              margin: 0.5mm 0 !important;
+              margin: 0.3mm 0 !important;
               padding: 0 !important;
               overflow: visible !important;
             }
@@ -1049,25 +1049,27 @@ export default function Movements() {
             }
 
             .label-numeric-code {
-              font-size: 9.5pt !important;
-              font-weight: 800 !important;
+              font-size: 7.5pt !important;
+              font-weight: 700 !important;
               text-align: center !important;
               letter-spacing: 0.3px !important;
-              line-height: 1.1 !important;
-              margin: 0.3mm 0 !important;
+              line-height: 1 !important;
+              margin: 0.2mm 0 !important;
               font-family: Arial, Helvetica, sans-serif !important;
               color: #000000 !important;
+              flex-shrink: 0 !important;
             }
 
             .label-note {
-              font-size: 7pt !important;
+              font-size: 6.5pt !important;
               font-weight: 700 !important;
               text-align: center !important;
               letter-spacing: 0.2px !important;
               line-height: 1 !important;
-              margin: 0.2mm 0 0.3mm 0 !important;
+              margin: 0.2mm 0 !important;
               font-family: Arial, Helvetica, sans-serif !important;
               color: #000000 !important;
+              flex-shrink: 0 !important;
             }
 
             .label-reference {
@@ -1121,12 +1123,12 @@ export default function Movements() {
                 font-size: 6.1pt !important;
                 font-weight: bold !important;
                 text-align: center !important;
-                max-height: 7mm !important;
+                max-height: 6.5mm !important;
                 overflow: hidden !important;
-                line-height: 1.2 !important;
+                line-height: 1.15 !important;
                 word-wrap: break-word !important;
                 width: 100% !important;
-                margin-bottom: 0.3mm !important;
+                margin-bottom: 0.5mm !important;
                 font-family: Arial, Helvetica, sans-serif !important;
                 display: -webkit-box !important;
                 -webkit-line-clamp: 2 !important;
@@ -1134,14 +1136,15 @@ export default function Movements() {
               }
 
               .label-note {
-                font-size: 7pt !important;
+                font-size: 6.5pt !important;
                 font-weight: 700 !important;
                 text-align: center !important;
                 letter-spacing: 0.2px !important;
                 line-height: 1 !important;
-                margin: 0.2mm 0 0.3mm 0 !important;
+                margin: 0.2mm 0 !important;
                 font-family: Arial, Helvetica, sans-serif !important;
                 color: #000000 !important;
+                flex-shrink: 0 !important;
               }
             }
           </style>
@@ -1503,12 +1506,12 @@ export default function Movements() {
               text-align: center !important;
               max-height: 6.5mm !important;
               overflow: hidden !important;
-              line-height: 1.1 !important;
+              line-height: 1.15 !important;
               word-wrap: break-word !important;
               word-break: break-word !important;
               hyphens: auto !important;
               width: 100% !important;
-              margin-bottom: 0.3mm !important;
+              margin-bottom: 0.5mm !important;
               padding: 0 !important;
               margin-top: 0mm;
               font-family: Arial, Helvetica, sans-serif !important;
@@ -1524,7 +1527,7 @@ export default function Movements() {
               justify-content: center !important;
               align-items: center !important;
               flex-shrink: 0 !important;
-              margin: 0.2mm 0 !important;
+              margin: 0.3mm 0 !important;
               padding: 0 !important;
               overflow: visible !important;
             }
@@ -1537,18 +1540,19 @@ export default function Movements() {
             }
 
             .label-numeric-code {
-              font-size: 9.5pt !important;
-              font-weight: 800 !important;
+              font-size: 7.5pt !important;
+              font-weight: 700 !important;
               text-align: center !important;
               letter-spacing: 0.3px !important;
-              line-height: 1.1 !important;
+              line-height: 1 !important;
               margin: 0.2mm 0 !important;
               font-family: Arial, Helvetica, sans-serif !important;
               color: #000000 !important;
+              flex-shrink: 0 !important;
             }
 
             .label-note {
-              font-size: 7pt !important;
+              font-size: 6.5pt !important;
               font-weight: 700 !important;
               text-align: center !important;
               letter-spacing: 0.2px !important;
@@ -1556,6 +1560,7 @@ export default function Movements() {
               margin: 0.2mm 0 !important;
               font-family: Arial, Helvetica, sans-serif !important;
               color: #000000 !important;
+              flex-shrink: 0 !important;
             }
 
             .label-reference {
