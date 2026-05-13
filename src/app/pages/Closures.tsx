@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar, FileText, TrendingUp, AlertTriangle } from 'lucide-react';
+import { Calendar, FileText, TrendingUp, AlertTriangle, Eye } from 'lucide-react';
 import {
   getInvoices,
   getDailyClosures,
@@ -18,6 +18,13 @@ import {
 import { getServiceOrders, type ServiceOrder } from '../lib/service-orders';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { formatCOP } from '../lib/currency';
 import { DailyClosureDialog } from '../components/DailyClosureDialog';
@@ -34,6 +41,8 @@ export function Closures() {
   const [currentPageMonthly, setCurrentPageMonthly] = useState(1);
   const [currentPageInvoices, setCurrentPageInvoices] = useState(1);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null); // NUEVO: Mes seleccionado para cierre
+  const [selectedClosure, setSelectedClosure] = useState<any | null>(null); // Cierre seleccionado para ver detalles
+  const [isClosureDetailsOpen, setIsClosureDetailsOpen] = useState(false); // Modal de detalles de cierre
   const itemsPerPage = 10;
   const invoicesPerPage = 20;
 
@@ -998,6 +1007,7 @@ export function Closures() {
                       <th className="text-right py-2 px-3 text-sm font-medium">💰 Del Día</th>
                       <th className="text-right py-2 px-3 text-sm font-medium">📊 Por Crédito</th>
                       <th className="text-left py-2 px-3 text-sm font-medium">Cerrado por</th>
+                      <th className="text-center py-2 px-3 text-sm font-medium">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1030,12 +1040,27 @@ export function Closures() {
                                   COP {formatCOP(profitGenerated)}
                                 </td>
                                 <td className="py-2 px-3 text-sm">{closure.closed_by}</td>
+                                <td className="py-2 px-3 text-center">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => {
+                                      console.log('=== CIERRE SELECCIONADO PARA VER DETALLES ===');
+                                      console.log(JSON.stringify(closure, null, 2));
+                                      setSelectedClosure(closure);
+                                      setIsClosureDetailsOpen(true);
+                                    }}
+                                    className="h-8 w-8 p-0"
+                                  >
+                                    <Eye className="h-4 w-4" />
+                                  </Button>
+                                </td>
                               </tr>
                             );
                           })}
                           {paginatedClosures.length === 0 && (
                             <tr>
-                              <td colSpan={6} className="py-8 text-center text-muted-foreground">
+                              <td colSpan={7} className="py-8 text-center text-muted-foreground">
                                 No hay cierres registrados
                               </td>
                             </tr>
@@ -1435,6 +1460,15 @@ export function Closures() {
         hourlyData={hourlyData}
         topProducts={topProducts}
         products={products}
+        expenses={(() => {
+          const dayToClose = getDayToClose();
+          if (!dayToClose) return [];
+          return expenses.filter(expense => {
+            if (!expense.date) return false;
+            const expenseDate = extractColombiaDate(expense.date);
+            return expenseDate === dayToClose;
+          });
+        })()}
         onSuccess={loadData}
       />
 
@@ -1451,6 +1485,182 @@ export function Closures() {
           loadData();
         }}
       />
+
+      {/* Dialog de detalles del cierre */}
+      <Dialog open={isClosureDetailsOpen} onOpenChange={setIsClosureDetailsOpen}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Detalles del Cierre Diario</DialogTitle>
+            <DialogDescription>
+              {selectedClosure && `Cierre del ${new Date(selectedClosure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedClosure && (
+            <div className="space-y-6">
+              {/* Información General */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Información General</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-muted-foreground">Fecha de Cierre</p>
+                      <p className="font-medium">{new Date(selectedClosure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Cerrado Por</p>
+                      <p className="font-medium">{selectedClosure.closed_by}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Total de Facturas</p>
+                      <p className="font-medium">{selectedClosure.total_invoices || 0}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-muted-foreground">Hora de Cierre</p>
+                      <p className="font-medium">
+                        {new Date(selectedClosure.date).toLocaleTimeString('es-ES', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' })}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Resumen Financiero */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Resumen Financiero</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="p-4 bg-green-50 dark:bg-green-950/30 rounded-lg">
+                      <p className="text-sm text-muted-foreground mb-1">Total Ingresos</p>
+                      <p className="text-2xl font-bold text-green-600 dark:text-green-400">
+                        COP {formatCOP(selectedClosure.total || 0)}
+                      </p>
+                    </div>
+                    <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
+                      <p className="text-sm text-muted-foreground mb-1">💰 Ganancia del Día</p>
+                      <p className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                        COP {formatCOP(selectedClosure.profit_collected || 0)}
+                      </p>
+                    </div>
+                    <div className="p-4 bg-purple-50 dark:bg-purple-950/30 rounded-lg">
+                      <p className="text-sm text-muted-foreground mb-1">📊 Ganancia Por Crédito</p>
+                      <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                        COP {formatCOP(selectedClosure.profit_generated || 0)}
+                      </p>
+                    </div>
+                    <div className="p-4 bg-orange-50 dark:bg-orange-950/30 rounded-lg">
+                      <p className="text-sm text-muted-foreground mb-1">Crédito Pendiente</p>
+                      <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
+                        COP {formatCOP(selectedClosure.pending_credit || 0)}
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Detalles de Pagos */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Métodos de Pago</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex justify-between items-center p-3 bg-muted rounded-lg">
+                      <span className="text-sm font-medium">💵 Efectivo</span>
+                      <span className="font-bold text-green-600 dark:text-green-400">
+                        COP {formatCOP(selectedClosure.total_cash || 0)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center p-3 bg-muted rounded-lg">
+                      <span className="text-sm font-medium">💳 Transferencias</span>
+                      <span className="font-bold text-blue-600 dark:text-blue-400">
+                        COP {formatCOP(selectedClosure.total_transfer || 0)}
+                      </span>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Abonos a Créditos */}
+              {(selectedClosure.credit_payments ?? 0) > 0 && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Abonos a Créditos del Día</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg">
+                      <div className="flex justify-between items-center">
+                        <span className="text-sm font-medium">Total en Abonos</span>
+                        <span className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                          COP {formatCOP(selectedClosure.credit_payments || 0)}
+                        </span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Información Adicional */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Información Adicional</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <div className="flex justify-between items-center py-2 border-b border-border">
+                    <span className="text-sm text-muted-foreground">Total Productos Vendidos</span>
+                    <span className="font-medium">{selectedClosure.total_products_sold ?? 0}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2 border-b border-border">
+                    <span className="text-sm text-muted-foreground">Costo de Productos</span>
+                    <span className="font-medium">COP {formatCOP(selectedClosure.product_costs ?? 0)}</span>
+                  </div>
+                  <div className="flex justify-between items-center py-2 border-b border-border">
+                    <span className="text-sm text-muted-foreground">Gastos del Día</span>
+                    <span className="font-medium">COP {formatCOP(selectedClosure.total_expenses ?? 0)}</span>
+                  </div>
+                  {selectedClosure.service_revenue !== null && selectedClosure.service_revenue !== undefined && selectedClosure.service_revenue > 0 && (
+                    <div className="flex justify-between items-center py-2 border-b border-border">
+                      <span className="text-sm text-muted-foreground">Ingresos Servicio Técnico</span>
+                      <span className="font-medium">COP {formatCOP(selectedClosure.service_revenue || 0)}</span>
+                    </div>
+                  )}
+                  {selectedClosure.total_returns && selectedClosure.total_returns > 0 && (
+                    <div className="flex justify-between items-center py-2 border-b border-border">
+                      <span className="text-sm text-muted-foreground">Devoluciones</span>
+                      <span className="font-medium text-red-600 dark:text-red-400">
+                        COP {formatCOP(selectedClosure.total_returns || 0)}
+                      </span>
+                    </div>
+                  )}
+                  {selectedClosure.exchange_impact !== undefined && selectedClosure.exchange_impact !== 0 && (
+                    <div className="flex justify-between items-center py-2">
+                      <span className="text-sm text-muted-foreground">Impacto de Cambios</span>
+                      <span className={`font-medium ${
+                        selectedClosure.exchange_impact > 0
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-red-600 dark:text-red-400'
+                      }`}>
+                        {selectedClosure.exchange_impact > 0 ? '+' : ''}COP {formatCOP(selectedClosure.exchange_impact || 0)}
+                      </span>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Botón de Cerrar */}
+              <div className="flex justify-end">
+                <Button onClick={() => setIsClosureDetailsOpen(false)}>
+                  Cerrar
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

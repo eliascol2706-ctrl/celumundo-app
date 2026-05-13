@@ -169,6 +169,14 @@ export interface DailyClosure {
   total: number;
   profit_generated?: number; // Ganancia de todas las ventas del día (regulares + crédito)
   profit_collected?: number; // Ganancia de ventas pagadas al 100% ese día
+  total_products_sold?: number; // Total de productos vendidos
+  product_costs?: number; // Costo de productos vendidos
+  total_expenses?: number; // Gastos del día
+  service_revenue?: number; // Ingresos de servicio técnico
+  total_returns?: number; // Devoluciones del día
+  pending_credit?: number; // Crédito pendiente
+  credit_payments?: number; // Abonos a créditos del día
+  exchange_impact?: number; // Impacto de cambios (diferencias de precio)
   closed_by: string;
   closed_at: string;
   created_at?: string;
@@ -1950,16 +1958,23 @@ export const getDailyClosures = async (): Promise<DailyClosure[]> => {
 
 export const addDailyClosure = async (closure: Omit<DailyClosure, 'id' | 'company' | 'created_at'>): Promise<DailyClosure | null> => {
   const company = getCurrentCompany();
+
+  const closureData = { ...closure, company };
+  console.log('=== GUARDANDO CIERRE DIARIO EN SUPABASE ===');
+  console.log('Datos a guardar:', JSON.stringify(closureData, null, 2));
+
   const { data, error } = await supabase
     .from('daily_closures')
-    .insert([{ ...closure, company }])
+    .insert([closureData])
     .select()
     .single();
-  
+
   if (error) {
-    console.error('Error adding daily closure:', error);
+    console.error('❌ Error adding daily closure:', error);
     return null;
   }
+
+  console.log('✅ Cierre guardado exitosamente:', JSON.stringify(data, null, 2));
   return data;
 };
 
@@ -2227,7 +2242,7 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
   // Actualizar estado de la factura y eliminar productos devueltos
   const { data: invoice } = await supabase
     .from('invoices')
-    .select('items, total, subtotal, tax, payment_cash, payment_transfer, payment_other')
+    .select('*')
     .eq('id', returnData.invoice_id)
     .single();
 
@@ -2295,8 +2310,71 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
       payment_transfer: newPaymentTransfer,
       payment_other: newPaymentOther
     });
+
+    // NUEVO: Ajustar cierre diario si la devolución es de una factura de un día anterior
+    const invoiceDateStr = extractColombiaDate(invoice.date);
+    const returnDateStr = extractColombiaDate(returnData.date);
+
+    if (invoiceDateStr !== returnDateStr) {
+      // La devolución es de una factura de un día diferente
+      // Buscar el cierre del día de la factura original
+      const { data: dailyClosure } = await supabase
+        .from('daily_closures')
+        .select('*')
+        .eq('company', company)
+        .eq('date', invoiceDateStr)
+        .single();
+
+      if (dailyClosure) {
+        // Calcular cuánto se devolvió en efectivo, transferencia, etc.
+        const returnAmount = returnData.total;
+        const returnedCash = (invoice.payment_cash || 0) - newPaymentCash;
+        const returnedTransfer = (invoice.payment_transfer || 0) - newPaymentTransfer;
+
+        // Calcular ganancia devuelta (costo de productos devueltos)
+        let returnedProductCost = 0;
+        for (const item of returnData.items) {
+          if (item.productId.startsWith('common-')) continue;
+
+          const { data: product } = await supabase
+            .from('products')
+            .select('current_cost')
+            .eq('id', item.productId)
+            .single();
+
+          if (product && product.current_cost) {
+            returnedProductCost += product.current_cost * item.quantity;
+          }
+        }
+
+        const returnedProfit = returnAmount - returnedProductCost;
+
+        // Preparar actualización del cierre diario
+        const closureUpdate: any = {
+          total: dailyClosure.total - returnAmount,
+          total_cash: dailyClosure.total_cash - returnedCash,
+          total_transfer: dailyClosure.total_transfer - returnedTransfer
+        };
+
+        // Solo actualizar profit_generated si la factura es a crédito
+        if (invoice.is_credit) {
+          closureUpdate.profit_generated = (dailyClosure.profit_generated || 0) - returnedProfit;
+        }
+
+        // Actualizar profit_collected solo si la factura estaba pagada (paid o partial_return)
+        if (invoice.status === 'paid' || invoice.status === 'partial_return') {
+          closureUpdate.profit_collected = (dailyClosure.profit_collected || 0) - returnedProfit;
+        }
+
+        // Actualizar el cierre diario
+        await supabase
+          .from('daily_closures')
+          .update(closureUpdate)
+          .eq('id', dailyClosure.id);
+      }
+    }
   }
-  
+
   return data;
 };
 
@@ -2458,6 +2536,72 @@ export const revertReturn = async (returnId: string): Promise<boolean> => {
     if (updateError) {
       console.error('Error actualizando factura:', updateError);
       return false;
+    }
+
+    // NUEVO: Restaurar valores en el cierre diario si la devolución fue de un día anterior
+    const company = getCurrentCompany();
+    const invoiceDateStr = extractColombiaDate(invoice.date);
+    const returnDateStr = extractColombiaDate(returnData.date);
+
+    if (invoiceDateStr !== returnDateStr) {
+      // La devolución fue de una factura de un día diferente
+      // Buscar el cierre del día de la factura original
+      const { data: dailyClosure } = await supabase
+        .from('daily_closures')
+        .select('*')
+        .eq('company', company)
+        .eq('date', invoiceDateStr)
+        .single();
+
+      if (dailyClosure) {
+        // Calcular cuánto se devolvió en efectivo, transferencia, etc.
+        const returnAmount = returnData.total;
+
+        // Calcular cuánto se había restado de efectivo y transferencia
+        const returnedCash = (newPaymentCash - (invoice.payment_cash || 0));
+        const returnedTransfer = (newPaymentTransfer - (invoice.payment_transfer || 0));
+
+        // Calcular ganancia devuelta (costo de productos devueltos)
+        let returnedProductCost = 0;
+        for (const item of returnData.items) {
+          if (item.productId.startsWith('common-')) continue;
+
+          const { data: product } = await supabase
+            .from('products')
+            .select('current_cost')
+            .eq('id', item.productId)
+            .single();
+
+          if (product && product.current_cost) {
+            returnedProductCost += product.current_cost * item.quantity;
+          }
+        }
+
+        const returnedProfit = returnAmount - returnedProductCost;
+
+        // Preparar actualización del cierre diario (RESTAURAR valores)
+        const closureUpdate: any = {
+          total: dailyClosure.total + returnAmount,
+          total_cash: dailyClosure.total_cash + Math.abs(returnedCash),
+          total_transfer: dailyClosure.total_transfer + Math.abs(returnedTransfer)
+        };
+
+        // Solo restaurar profit_generated si la factura es a crédito
+        if (invoice.is_credit) {
+          closureUpdate.profit_generated = (dailyClosure.profit_generated || 0) + returnedProfit;
+        }
+
+        // Restaurar profit_collected si después de revertir la factura queda pagada
+        if (newStatus === 'paid' || newStatus === 'partial_return') {
+          closureUpdate.profit_collected = (dailyClosure.profit_collected || 0) + returnedProfit;
+        }
+
+        // RESTAURAR (sumar de vuelta) los valores al cierre diario
+        await supabase
+          .from('daily_closures')
+          .update(closureUpdate)
+          .eq('id', dailyClosure.id);
+      }
     }
 
     // Eliminar el registro de devolución

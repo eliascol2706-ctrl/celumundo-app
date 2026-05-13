@@ -33,6 +33,7 @@ interface DailyClosureDialogProps {
   hourlyData: any[];
   topProducts: any[];
   products: any[]; // Lista de productos para calcular costos
+  expenses?: any[]; // Gastos del día
   onSuccess: () => void;
 }
 
@@ -44,6 +45,7 @@ export function DailyClosureDialog({
   hourlyData,
   topProducts,
   products,
+  expenses,
   onSuccess
 }: DailyClosureDialogProps) {
   const [phase, setPhase] = useState<Phase>(1);
@@ -339,7 +341,38 @@ export function DailyClosureDialog({
         const profitGenerated = calculateProfitGenerated();
         const profitCollected = calculateProfitCollected();
 
-        await addDailyClosure({
+        // Calcular total de productos vendidos
+        const totalProductsSold = dailyStats.invoices
+          .filter(inv => inv.status === 'paid' || inv.status === 'partial_return')
+          .reduce((sum, inv) => {
+            return sum + inv.items.reduce((itemSum: number, item: any) => itemSum + item.quantity, 0);
+          }, 0);
+
+        // Total de abonos a créditos
+        const creditPaymentsTotal = dailyStats.creditPayments?.reduce((sum, p) => sum + p.amount, 0) || 0;
+
+        // Total de gastos del día
+        const totalExpenses = expenses?.reduce((sum, exp) => sum + exp.amount, 0) || 0;
+
+        // Calcular impacto de cambios
+        const exchangeImpact = dailyStats.exchanges?.reduce((sum, ex) => sum + (ex.price_difference || 0), 0) || 0;
+
+        console.log('=== DATOS DEL CIERRE DIARIO ===');
+        console.log('Total de productos vendidos:', totalProductsSold);
+        console.log('Costo de productos:', totalCost);
+        console.log('Gastos del día:', totalExpenses);
+        console.log('Ingresos servicio técnico:', dailyStats.serviceRevenue || 0);
+        console.log('Devoluciones:', dailyStats.totalReturns || 0);
+        console.log('Crédito pendiente:', dailyStats.pendingCreditBalance || 0);
+        console.log('Abonos a créditos:', creditPaymentsTotal);
+        console.log('Impacto de cambios:', exchangeImpact);
+        console.log('Total efectivo:', totalCashValue);
+        console.log('Total transferencias:', totalTransferValue);
+        console.log('Total general:', total);
+        console.log('Ganancia generada (crédito):', profitGenerated);
+        console.log('Ganancia cobrada (del día):', profitCollected);
+
+        const closureResult = await addDailyClosure({
           date: dayToClose,
           total_invoices: dailyStats.totalInvoices,
           pending_invoices: dailyStats.invoices.filter(inv => inv.status === 'pending').length,
@@ -349,9 +382,23 @@ export function DailyClosureDialog({
           total,
           profit_generated: profitGenerated, // Ganancia por crédito (facturas a crédito del día)
           profit_collected: profitCollected, // Ganancias del día (ventas pagadas)
+          total_products_sold: totalProductsSold,
+          product_costs: totalCost,
+          total_expenses: totalExpenses,
+          service_revenue: dailyStats.serviceRevenue || 0,
+          total_returns: dailyStats.totalReturns || 0,
+          pending_credit: dailyStats.pendingCreditBalance || 0,
+          credit_payments: creditPaymentsTotal,
+          exchange_impact: exchangeImpact,
           closed_by: closedByName.trim(),
           closed_at: new Date().toISOString(),
         });
+
+        if (!closureResult) {
+          throw new Error('No se pudo guardar el cierre diario');
+        }
+
+        console.log('✅ CIERRE GUARDADO Y VERIFICADO:', closureResult);
 
         setIsLoading(false);
         setIsSuccess(true);

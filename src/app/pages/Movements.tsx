@@ -851,23 +851,8 @@ export default function Movements() {
 
     if (!completedMovement) return;
 
-    // Validar que la impresora de etiquetas esté configurada
-    let config;
-    try {
-      config = await getPrinterConfig();
-      if (!config.labels) {
-        toast.error('No se ha configurado una impresora de etiquetas. Ve a Configuración para configurarla.');
-        return;
-      }
-    } catch (error) {
-      console.error('Error al validar impresora:', error);
-      toast.error('Error al validar la configuración de la impresora');
-      return;
-    }
-
     let labelsHTML = "";
     let pageLabels: string[] = [];
-    let barcodeGenerationCode = "";
 
     completedMovement.items.forEach((item: any, itemIndex: number) => {
       const qty = labelQuantities[itemIndex] || 0;
@@ -886,7 +871,6 @@ export default function Movements() {
         const cleanDisplayCode = displayCode.replace(/A/g, '');
 
         const numericCode = displayCode.replace(/[^0-9]/g, "");
-        const barcodeId = `barcode-${itemIndex}-${i}`;
 
         // Obtener últimos 4 dígitos de la nota si existe
         let noteDisplay = '';
@@ -898,34 +882,50 @@ export default function Movements() {
           }
         }
 
+        // Generar código de barras y convertir a imagen PNG base64
+        let barcodeImage = '';
+        try {
+          // Crear canvas temporal
+          const canvas = document.createElement('canvas');
+
+          // Generar el código de barras en el canvas
+          (window as any).JsBarcode(canvas, numericCode, {
+            format: "CODE128",
+            width: 2,
+            height: 50,
+            displayValue: false,
+            margin: 8,
+            background: "#ffffff",
+            lineColor: "#000000"
+          });
+
+          // Convertir canvas a imagen base64 PNG
+          barcodeImage = canvas.toDataURL('image/png');
+
+          console.log('Código de barras generado:', numericCode, 'Tamaño de imagen:', barcodeImage.length);
+          successCount++;
+        } catch (error) {
+          console.error('Error generando código de barras:', error, 'Código:', numericCode);
+          errorCount++;
+          continue;
+        }
+
+        if (!barcodeImage || barcodeImage.length < 100) {
+          console.error('Imagen de código de barras vacía o muy corta');
+          errorCount++;
+          continue;
+        }
+
         const labelHTML = `
           <div class="label">
             <div class="label-product-name">${item.productName}</div>
             <div class="label-barcode-container">
-              <svg id="${barcodeId}"></svg>
+              <img src="${barcodeImage}" alt="${cleanDisplayCode}" style="display: block; max-width: 28mm; height: auto;">
             </div>
             <div class="label-numeric-code">${cleanDisplayCode}</div>
             ${noteDisplay ? `<div class="label-note">${noteDisplay}</div>` : ''}
             <div class="label-reference">${completedMovement.reference.substring(0, 2).toUpperCase()}</div>
           </div>
-        `;
-
-        // Generar código para el código de barras
-        barcodeGenerationCode += `
-          (function() {
-            var elem = document.getElementById("${barcodeId}");
-            if (elem) {
-              JsBarcode(elem, "${numericCode}", {
-                format: "CODE128",
-                width: 2,
-                height: 50,
-                displayValue: false,
-                margin: 8,
-                background: "#ffffff",
-                lineColor: "#000000"
-              });
-            }
-          })();
         `;
 
         pageLabels.push(labelHTML);
@@ -944,14 +944,13 @@ export default function Movements() {
       labelsHTML += `<div class="label-page">${pageLabels.join("")}</div>`;
     }
 
-    // Generar HTML completo
+    // Generar HTML completo (sin scripts ya que los códigos de barras están pre-renderizados)
     const fullHTML = `
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="UTF-8">
           <title>Etiquetas</title>
-          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
           <style>
             @page {
               size: 100mm 25mm;
@@ -1043,20 +1042,21 @@ export default function Movements() {
               overflow: visible !important;
             }
 
-            .label-barcode-container svg {
+            .label-barcode-container img {
               display: block !important;
               max-width: 28mm !important;
               height: auto !important;
             }
 
             .label-numeric-code {
-              font-size: 7pt !important;
-              font-weight: bold !important;
+              font-size: 9.5pt !important;
+              font-weight: 800 !important;
               text-align: center !important;
-              letter-spacing: 0.2px !important;
-              line-height: 1 !important;
+              letter-spacing: 0.3px !important;
+              line-height: 1.1 !important;
               margin: 0.3mm 0 !important;
-              font-family: 'Courier New', monospace !important;
+              font-family: Arial, Helvetica, sans-serif !important;
+              color: #000000 !important;
             }
 
             .label-note {
@@ -1133,18 +1133,6 @@ export default function Movements() {
                 -webkit-box-orient: vertical !important;
               }
 
-              .label-barcode-container svg,
-              .label-barcode-container svg * {
-                -webkit-print-color-adjust: exact !important;
-                print-color-adjust: exact !important;
-                color-adjust: exact !important;
-              }
-
-              .label-barcode-container svg rect[fill="#000000"],
-              .label-barcode-container svg rect[fill="black"] {
-                fill: #000000 !important;
-              }
-
               .label-note {
                 font-size: 7pt !important;
                 font-weight: 700 !important;
@@ -1160,42 +1148,62 @@ export default function Movements() {
         </head>
         <body>
           ${labelsHTML}
-          <script>
-            function initPrint() {
-              if (typeof JsBarcode === 'undefined') {
-                setTimeout(initPrint, 50);
-                return;
-              }
-
-              try {
-                ${barcodeGenerationCode}
-              } catch(e) {
-                console.error('Error:', e);
-              }
-            }
-
-            if (document.readyState === 'complete') {
-              initPrint();
-            } else {
-              window.addEventListener('load', initPrint);
-            }
-          </script>
         </body>
       </html>
     `;
 
-    // Enviar directamente a la impresora configurada
-    try {
-      const success = await printDirect(config.labels, fullHTML, 'label');
-      if (success) {
-        toast.success("Etiquetas enviadas a la impresora");
-      } else {
-        toast.error("Error al enviar etiquetas a la impresora");
-      }
-    } catch (error) {
-      console.error('Error al imprimir etiquetas:', error);
-      toast.error(`Error al imprimir: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+    // Crear iframe oculto para impresión
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'absolute';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    document.body.appendChild(iframe);
+
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc) {
+      toast.error("No se pudo crear la ventana de impresión");
+      document.body.removeChild(iframe);
+      return;
     }
+
+    iframeDoc.open();
+    iframeDoc.write(fullHTML);
+    iframeDoc.close();
+
+    // Cargar JsBarcode y generar códigos de barras
+    const script = iframeDoc.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js';
+    script.onload = () => {
+      setTimeout(() => {
+        const barcodes = iframeDoc.querySelectorAll('.barcode-canvas');
+        barcodes.forEach((canvas: any) => {
+          const code = canvas.dataset.code;
+          if (code && iframe.contentWindow?.JsBarcode) {
+            iframe.contentWindow.JsBarcode(canvas, code, {
+              format: "CODE128",
+              width: 2,
+              height: 50,
+              displayValue: false,
+              margin: 8,
+              background: "#ffffff",
+              lineColor: "#000000"
+            });
+          }
+        });
+
+        setTimeout(() => {
+          iframe.contentWindow?.print();
+          setTimeout(() => {
+            document.body.removeChild(iframe);
+          }, 100);
+        }, 300);
+      }, 200);
+    };
+    iframeDoc.head.appendChild(script);
+
+    setLabelDialogOpen(false);
+    toast.success("Preparando impresión...");
   };
 
   // Función para reimprimir etiquetas de un movimiento existente
@@ -1207,20 +1215,6 @@ export default function Movements() {
     }
 
     if (!selectedMovement) return;
-
-    // Validar que la impresora de etiquetas esté configurada
-    let config;
-    try {
-      config = await getPrinterConfig();
-      if (!config.labels) {
-        toast.error('No se ha configurado una impresora de etiquetas. Ve a Configuración para configurarla.');
-        return;
-      }
-    } catch (error) {
-      console.error('Error al validar impresora:', error);
-      toast.error('Error al validar la configuración de la impresora');
-      return;
-    }
 
     // Buscar el producto directamente en Supabase en lugar del array local
     const { data: product, error } = await supabase
@@ -1260,6 +1254,33 @@ export default function Movements() {
       }
     }
 
+    // Cargar JsBarcode dinámicamente si no está disponible
+    if (typeof window.JsBarcode === 'undefined') {
+      console.log('Cargando JsBarcode para reimpresión...');
+      try {
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js';
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+        console.log('JsBarcode cargado exitosamente');
+      } catch (error) {
+        console.error('Error al cargar JsBarcode:', error);
+        toast.error('Error al cargar la librería de códigos de barras');
+        return;
+      }
+    }
+
+    // Esperar un momento para asegurar que JsBarcode esté completamente disponible
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    if (typeof window.JsBarcode === 'undefined') {
+      toast.error('No se pudo cargar la librería de códigos de barras');
+      return;
+    }
+
     // Obtener las notas desde el producto (solo para productos con IDs únicas)
     let notesMap: { [id: string]: string } = {};
 
@@ -1273,7 +1294,8 @@ export default function Movements() {
 
     let labelsHTML = "";
     let pageLabels: string[] = [];
-    let barcodeGenerationCode = "";
+    let successCount = 0;
+    let errorCount = 0;
     const productName = product.name || selectedMovement.product_name || 'Producto';
     const escapedProductName = productName
       .replace(/&/g, '&amp;')
@@ -1284,11 +1306,10 @@ export default function Movements() {
 
     if (hasUnitIds) {
       // Generar etiquetas con IDs únicas
-      idsToPrint.forEach((unitId, index) => {
+      for (const unitId of idsToPrint) {
         const displayCode = `${product.code}-${unitId}A`;
         const cleanDisplayCode = displayCode.replace(/A/g, '');
         const numericCode = displayCode.replace(/[^0-9]/g, "");
-        const barcodeId = `barcode-reprint-${index}`;
 
         let noteDisplay = '';
         if (notesMap[unitId]) {
@@ -1299,32 +1320,44 @@ export default function Movements() {
           }
         }
 
+        // Generar código de barras y convertir a imagen PNG base64
+        let barcodeImage = '';
+        try {
+          const canvas = document.createElement('canvas');
+          (window as any).JsBarcode(canvas, numericCode, {
+            format: "CODE128",
+            width: 2,
+            height: 50,
+            displayValue: false,
+            margin: 8,
+            background: "#ffffff",
+            lineColor: "#000000"
+          });
+          barcodeImage = canvas.toDataURL('image/png');
+          console.log('Código de barras (reimpresión con IDs) generado:', numericCode, 'Tamaño:', barcodeImage.length);
+          successCount++;
+        } catch (error) {
+          console.error('Error generando código de barras (reimpresión con IDs):', error, 'Código:', numericCode);
+          errorCount++;
+          continue;
+        }
+
+        if (!barcodeImage || barcodeImage.length < 100) {
+          console.error('Imagen de código de barras vacía o muy corta (reimpresión con IDs)');
+          errorCount++;
+          continue;
+        }
+
         const labelHTML = `
           <div class="label">
             <div class="label-product-name">${escapedProductName}</div>
             <div class="label-barcode-container">
-              <svg id="${barcodeId}"></svg>
+              <img src="${barcodeImage}" alt="${cleanDisplayCode}" style="display: block; max-width: 28mm; height: auto;">
             </div>
             <div class="label-numeric-code">${cleanDisplayCode}</div>
             ${noteDisplay ? `<div class="label-note">${noteDisplay}</div>` : ''}
             <div class="label-reference">${selectedMovement.reference.substring(0, 2).toUpperCase()}</div>
           </div>
-        `;
-
-        barcodeGenerationCode += `
-          (function() {
-            var elem = document.getElementById("${barcodeId}");
-            if (elem) {
-              JsBarcode(elem, "${numericCode}", {
-                format: "CODE128",
-                width: 1.8,
-                height: 38,
-                displayValue: false,
-                margin: 0,
-                fontSize: 0
-              });
-            }
-          })();
         `;
 
         pageLabels.push(labelHTML);
@@ -1333,40 +1366,51 @@ export default function Movements() {
           labelsHTML += `<div class="label-page">${pageLabels.join("")}</div>`;
           pageLabels = [];
         }
-      });
+      }
     } else {
       // Generar etiquetas simples sin IDs únicas
       for (let i = 0; i < quantityToPrint; i++) {
         const displayCode = product.code;
         const cleanDisplayCode = displayCode.replace(/A/g, '');
         const numericCode = displayCode.replace(/[^0-9]/g, "");
-        const barcodeId = `barcode-reprint-${i}`;
+
+        // Generar código de barras y convertir a imagen PNG base64
+        let barcodeImage = '';
+        try {
+          const canvas = document.createElement('canvas');
+          (window as any).JsBarcode(canvas, numericCode, {
+            format: "CODE128",
+            width: 2,
+            height: 50,
+            displayValue: false,
+            margin: 8,
+            background: "#ffffff",
+            lineColor: "#000000"
+          });
+          barcodeImage = canvas.toDataURL('image/png');
+          console.log('Código de barras (reimpresión sin IDs) generado:', numericCode, 'Tamaño:', barcodeImage.length);
+          successCount++;
+        } catch (error) {
+          console.error('Error generando código de barras (reimpresión sin IDs):', error);
+          errorCount++;
+          continue;
+        }
+
+        if (!barcodeImage || barcodeImage.length < 100) {
+          console.error('Imagen de código de barras vacía o muy corta (reimpresión sin IDs)');
+          errorCount++;
+          continue;
+        }
 
         const labelHTML = `
           <div class="label">
             <div class="label-product-name">${escapedProductName}</div>
             <div class="label-barcode-container">
-              <svg id="${barcodeId}"></svg>
+              <img src="${barcodeImage}" alt="${cleanDisplayCode}" style="display: block; max-width: 28mm; height: auto;">
             </div>
             <div class="label-numeric-code">${cleanDisplayCode}</div>
             <div class="label-reference">${selectedMovement.reference.substring(0, 2).toUpperCase()}</div>
           </div>
-        `;
-
-        barcodeGenerationCode += `
-          (function() {
-            var elem = document.getElementById("${barcodeId}");
-            if (elem) {
-              JsBarcode(elem, "${numericCode}", {
-                format: "CODE128",
-                width: 1.8,
-                height: 38,
-                displayValue: false,
-                margin: 0,
-                fontSize: 0
-              });
-            }
-          })();
         `;
 
         pageLabels.push(labelHTML);
@@ -1385,14 +1429,13 @@ export default function Movements() {
       labelsHTML += `<div class="label-page">${pageLabels.join("")}</div>`;
     }
 
-    // Generar HTML completo
+    // Generar HTML completo (sin scripts ya que los códigos de barras están pre-renderizados)
     const fullHTML = `
       <!DOCTYPE html>
       <html>
         <head>
           <meta charset="UTF-8">
           <title>Etiquetas</title>
-          <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
           <style>
             @page {
               size: 100mm 25mm;
@@ -1486,7 +1529,7 @@ export default function Movements() {
               overflow: visible !important;
             }
 
-            .label-barcode-container svg {
+            .label-barcode-container img {
               display: block !important;
               max-width: 26mm !important;
               max-height: 11.5mm !important;
@@ -1494,18 +1537,18 @@ export default function Movements() {
             }
 
             .label-numeric-code {
-              font-size: 6.5pt !important;
-              font-weight: bold !important;
+              font-size: 9.5pt !important;
+              font-weight: 800 !important;
               text-align: center !important;
-              letter-spacing: 0.2px !important;
-              line-height: 1 !important;
+              letter-spacing: 0.3px !important;
+              line-height: 1.1 !important;
               margin: 0.2mm 0 !important;
-              font-family: 'Courier New', monospace !important;
+              font-family: Arial, Helvetica, sans-serif !important;
               color: #000000 !important;
             }
 
             .label-note {
-              font-size: 6.5pt !important;
+              font-size: 7pt !important;
               font-weight: 700 !important;
               text-align: center !important;
               letter-spacing: 0.2px !important;
@@ -1531,43 +1574,62 @@ export default function Movements() {
         </head>
         <body>
           ${labelsHTML}
-          <script>
-            function initPrint() {
-              if (typeof JsBarcode === 'undefined') {
-                setTimeout(initPrint, 50);
-                return;
-              }
-
-              try {
-                ${barcodeGenerationCode}
-              } catch(e) {
-                console.error('Error:', e);
-              }
-            }
-
-            if (document.readyState === 'complete') {
-              initPrint();
-            } else {
-              window.addEventListener('load', initPrint);
-            }
-          </script>
         </body>
       </html>
     `;
 
-    // Enviar directamente a la impresora configurada
-    try {
-      const success = await printDirect(config.labels, fullHTML, 'label');
-      if (success) {
-        toast.success("Etiquetas enviadas a la impresora");
-        setReprintDialogOpen(false);
-      } else {
-        toast.error("Error al enviar etiquetas a la impresora");
-      }
-    } catch (error) {
-      console.error('Error al imprimir etiquetas:', error);
-      toast.error(`Error al imprimir: ${error instanceof Error ? error.message : 'Error desconocido'}`);
+    // Crear iframe oculto para impresión
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'absolute';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = 'none';
+    document.body.appendChild(iframe);
+
+    const iframeDoc = iframe.contentDocument || iframe.contentWindow?.document;
+    if (!iframeDoc) {
+      toast.error("No se pudo crear la ventana de impresión");
+      document.body.removeChild(iframe);
+      return;
     }
+
+    iframeDoc.open();
+    iframeDoc.write(fullHTML);
+    iframeDoc.close();
+
+    // Cargar JsBarcode y generar códigos de barras
+    const script = iframeDoc.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js';
+    script.onload = () => {
+      setTimeout(() => {
+        const barcodes = iframeDoc.querySelectorAll('.barcode-canvas');
+        barcodes.forEach((canvas: any) => {
+          const code = canvas.dataset.code;
+          if (code && iframe.contentWindow?.JsBarcode) {
+            iframe.contentWindow.JsBarcode(canvas, code, {
+              format: "CODE128",
+              width: 2,
+              height: 50,
+              displayValue: false,
+              margin: 8,
+              background: "#ffffff",
+              lineColor: "#000000"
+            });
+          }
+        });
+
+        setTimeout(() => {
+          iframe.contentWindow?.print();
+          setTimeout(() => {
+            document.body.removeChild(iframe);
+          }, 100);
+        }, 300);
+      }, 200);
+    };
+    iframeDoc.head.appendChild(script);
+
+    setReprintDialogOpen(false);
+    toast.success("Preparando impresión...");
   };
 
   return (

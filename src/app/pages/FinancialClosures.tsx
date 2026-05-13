@@ -147,6 +147,10 @@ export function FinancialClosures() {
     const company = getCurrentCompany();
     const periodStart = getPeriodStart();
 
+    console.log('=== INICIO CÁLCULO DE CIERRE FINANCIERO ===');
+    console.log('Empresa:', company);
+    console.log('Inicio del periodo:', periodStart || 'Desde el inicio (sin cierre anterior)');
+
     // Filtrar facturas del periodo actual
     const periodInvoices = invoices.filter(inv => {
       if (inv.company !== company) return false;
@@ -163,18 +167,54 @@ export function FinancialClosures() {
       return true;
     });
 
+    console.log(`Total de facturas del periodo: ${periodInvoices.length}`);
+    console.log('Facturas del periodo:', periodInvoices.map(inv => ({
+      numero: inv.number,
+      fecha: inv.date,
+      tipo: inv.is_credit ? 'CRÉDITO' : 'CONTADO',
+      estado: inv.status,
+      total: inv.total
+    })));
+
     // 1. Ingresos por tipo de factura
     const paidInvoices = periodInvoices.filter(inv =>
       inv.status === 'paid' && !inv.is_credit
     );
-    const creditInvoices = periodInvoices.filter(inv => inv.is_credit);
+    const creditInvoices = periodInvoices.filter(inv =>
+      inv.is_credit &&
+      inv.status !== 'pending_confirmation' &&
+      inv.status !== 'pending'
+    );
     const partialReturnInvoices = periodInvoices.filter(inv =>
       inv.status === 'partial_return'
     );
 
+    console.log('\n--- FACTURAS PAGAS (CONTADO) ---');
+    console.log(`Cantidad: ${paidInvoices.length}`);
+    paidInvoices.forEach(inv => {
+      console.log(`  ${inv.number} - ${inv.date} - ${formatCOP(inv.total)}`);
+    });
+
+    console.log('\n--- FACTURAS A CRÉDITO ---');
+    console.log(`Cantidad: ${creditInvoices.length}`);
+    creditInvoices.forEach(inv => {
+      console.log(`  ${inv.number} - ${inv.date} - Estado: ${inv.status} - ${formatCOP(inv.total)}`);
+    });
+
+    console.log('\n--- FACTURAS CON DEVOLUCIÓN PARCIAL ---');
+    console.log(`Cantidad: ${partialReturnInvoices.length}`);
+    partialReturnInvoices.forEach(inv => {
+      console.log(`  ${inv.number} - ${inv.date} - ${formatCOP(inv.total)}`);
+    });
+
     const paidInvoicesRevenue = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
     const creditInvoicesRevenue = creditInvoices.reduce((sum, inv) => sum + inv.total, 0);
     const partialReturnsAdjustment = partialReturnInvoices.reduce((sum, inv) => sum + inv.total, 0);
+
+    console.log('\n--- TOTALES POR CATEGORÍA ---');
+    console.log(`Ingresos facturas pagas: ${formatCOP(paidInvoicesRevenue)}`);
+    console.log(`Ingresos facturas crédito: ${formatCOP(creditInvoicesRevenue)}`);
+    console.log(`Ajuste devoluciones parciales: ${formatCOP(partialReturnsAdjustment)}`);
 
     // 2. Ingresos de servicio técnico
     const periodServiceOrders = serviceOrders.filter(order => {
@@ -231,27 +271,50 @@ export function FinancialClosures() {
     });
     const creditPaymentsTotal = periodCreditPayments.reduce((sum, p) => sum + p.amount, 0);
 
-    // 6. Costo de productos vendidos
+    // 6. Costo de productos vendidos (excluir facturas en confirmación, devueltas y canceladas)
     const invoicesForCost = periodInvoices.filter(inv =>
-      inv.status !== 'returned' && inv.status !== 'cancelled'
+      inv.status !== 'returned' &&
+      inv.status !== 'cancelled' &&
+      inv.status !== 'pending_confirmation' &&
+      inv.status !== 'pending'
     );
+
+    console.log('\n--- CÁLCULO DE COSTOS DE PRODUCTOS ---');
+    console.log(`Facturas para calcular costo: ${invoicesForCost.length}`);
 
     let productCosts = 0;
     invoicesForCost.forEach(invoice => {
+      console.log(`\nFactura ${invoice.number} (${invoice.status}):`);
+      let invoiceCost = 0;
+
       if (invoice.items && Array.isArray(invoice.items)) {
+        console.log(`  Items en factura: ${invoice.items.length}`);
+
         invoice.items.forEach((item: any) => {
           // Excluir items que fueron devueltos en un cambio (exchanged: true sin fromExchange: true)
           if (item.exchanged && !item.fromExchange) {
+            console.log(`    ❌ ${item.productName} - EXCLUIDO (item devuelto en cambio)`);
             return; // No contar este item en los costos
           }
 
           const product = products.find(p => p.id === item.productId);
           if (product && product.current_cost) {
-            productCosts += product.current_cost * item.quantity;
+            const itemCost = product.current_cost * item.quantity;
+            productCosts += itemCost;
+            invoiceCost += itemCost;
+            console.log(`    ✅ ${item.productName} - Cantidad: ${item.quantity} - Costo unitario: ${formatCOP(product.current_cost)} - Subtotal: ${formatCOP(itemCost)}`);
+          } else if (item.productId.startsWith('common-')) {
+            console.log(`    ⚠️  ${item.productName} - Producto común (sin costo)`);
+          } else {
+            console.log(`    ❌ ${item.productName} - Producto no encontrado o sin costo`);
           }
         });
+
+        console.log(`  💰 Costo total de esta factura: ${formatCOP(invoiceCost)}`);
       }
     });
+
+    console.log(`\n💰 COSTO TOTAL DE PRODUCTOS: ${formatCOP(productCosts)}`);
 
     // 7. Gastos del periodo
     const periodExpenses = expenses.filter(expense => {
@@ -270,6 +333,19 @@ export function FinancialClosures() {
     // 8. Ganancias
     const grossProfit = totalRevenue - productCosts;
     const netProfit = grossProfit - totalExpenses;
+
+    console.log('\n=== RESUMEN FINAL DEL CIERRE ===');
+    console.log(`Ingreso Total: ${formatCOP(totalRevenue)}`);
+    console.log(`  - Facturas pagas: ${formatCOP(paidInvoicesRevenue)}`);
+    console.log(`  - Facturas crédito: ${formatCOP(creditInvoicesRevenue)}`);
+    console.log(`  - Ajuste devoluciones parciales: ${formatCOP(partialReturnsAdjustment)}`);
+    console.log(`Crédito Pendiente: ${formatCOP(pendingCredit)}`);
+    console.log(`Abonos del periodo: ${formatCOP(creditPaymentsTotal)}`);
+    console.log(`Costo de Productos: ${formatCOP(productCosts)}`);
+    console.log(`Gastos del Periodo: ${formatCOP(totalExpenses)}`);
+    console.log(`Ganancia Bruta: ${formatCOP(grossProfit)}`);
+    console.log(`Ganancia Neta: ${formatCOP(netProfit)}`);
+    console.log('=== FIN CÁLCULO DE CIERRE ===\n');
 
     return {
       totalRevenue,

@@ -276,6 +276,32 @@ export function FinancialManagement() {
     setIsLoading(false);
   };
 
+  // Calcular la ganancia proporcional de un abono basándose en el margen de la factura
+  const calculatePaymentProfit = (payment: CreditPayment): number => {
+    // Buscar la factura asociada al abono
+    const invoice = invoices.find(inv => inv.id === payment.invoice_id);
+    if (!invoice) return 0;
+
+    // Calcular el costo total de los productos de la factura
+    let totalCost = 0;
+    invoice.items.forEach(item => {
+      const product = products.find(p => p.id === item.productId);
+      if (product && product.current_cost) {
+        totalCost += product.current_cost * item.quantity;
+      }
+    });
+
+    // Calcular el margen de ganancia de la factura
+    const invoiceTotal = invoice.total;
+    const invoiceProfit = invoiceTotal - totalCost;
+    const profitMargin = invoiceTotal > 0 ? invoiceProfit / invoiceTotal : 0;
+
+    // Aplicar el margen de ganancia al monto del abono
+    const paymentProfit = payment.amount * profitMargin;
+
+    return paymentProfit;
+  };
+
   // Calcular estadísticas con comparación de mes anterior
   const getStats = () => {
     const today = getColombiaDate();
@@ -333,22 +359,28 @@ export function FinancialManagement() {
       // NUEVO: Ingresos de servicio técnico
       const ingresosServicioTecnico = monthServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
 
-      // NUEVO: Abonos a crédito del mes
-      const abonosDelMes = allCreditPayments
-        .filter((payment) => {
-          const paymentDate = extractColombiaDate(payment.date);
-          return paymentDate.startsWith(targetMonth);
-        })
-        .reduce((sum, payment) => sum + payment.amount, 0);
+      // NUEVO: Abonos a crédito del mes - calcular ganancia proporcional
+      const paymentsDelMes = allCreditPayments.filter((payment) => {
+        const paymentDate = extractColombiaDate(payment.date);
+        return paymentDate.startsWith(targetMonth);
+      });
+
+      // Calcular la ganancia real de los abonos (no el monto completo)
+      const gananciasDeAbonos = paymentsDelMes.reduce((sum, payment) => {
+        return sum + calculatePaymentProfit(payment);
+      }, 0);
+
+      // Mantener el total de abonos para referencia
+      const abonosDelMes = paymentsDelMes.reduce((sum, payment) => sum + payment.amount, 0);
 
       // No restamos totalDevoluciones porque las facturas 'returned' ya no se cuentan en facturasPagas
-      // MODIFICADO: Incluir ingresos de servicio técnico y abonos a crédito
+      // MODIFICADO: Incluir ingresos de servicio técnico y GANANCIAS de abonos a crédito (no el monto completo)
       // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
-      const ingresoNeto = facturasPagas + ingresosServicioTecnico + abonosDelMes;
+      const ingresoNeto = facturasPagas + ingresosServicioTecnico + gananciasDeAbonos;
 
-      // NUEVO: Total de Facturas En Confirmación (solo facturas pending e in_confirmation)
+      // NUEVO: Total de Facturas En Confirmación (solo facturas pending y pending_confirmation)
       const totalFacturasEnConfirmacion = monthInvoices
-        .filter((inv) => inv.status === 'pending' || inv.status === 'in_confirmation')
+        .filter((inv) => inv.status === 'pending' || inv.status === 'pending_confirmation')
         .reduce((sum, inv) => sum + inv.total, 0);
       const ingresosPorFactura = totalFacturasEnConfirmacion;
 
@@ -400,6 +432,7 @@ export function FinancialManagement() {
         impactoCambios,
         facturasPagas,
         abonosDelMes,
+        gananciasDeAbonos,
         ingresosServicioTecnico,
         ingresosPorFactura,
         costosDeProductos,
@@ -693,17 +726,23 @@ export function FinancialManagement() {
     // NUEVO: Ingresos de servicio técnico
     const ingresosServicioTecnico = dayServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
 
-    // NUEVO: Abonos a crédito del día
-    const abonosDelDia = allCreditPayments
-      .filter((payment) => {
-        const paymentDate = extractColombiaDate(payment.date);
-        return paymentDate === date;
-      })
-      .reduce((sum, payment) => sum + payment.amount, 0);
+    // NUEVO: Abonos a crédito del día - calcular ganancia proporcional
+    const paymentsDelDia = allCreditPayments.filter((payment) => {
+      const paymentDate = extractColombiaDate(payment.date);
+      return paymentDate === date;
+    });
 
-    // MODIFICADO: Incluir ingresos de servicio técnico y abonos
+    // Calcular la ganancia real de los abonos (no el monto completo)
+    const gananciasDeAbonos = paymentsDelDia.reduce((sum, payment) => {
+      return sum + calculatePaymentProfit(payment);
+    }, 0);
+
+    // Mantener el total de abonos para referencia
+    const abonosDelDia = paymentsDelDia.reduce((sum, payment) => sum + payment.amount, 0);
+
+    // MODIFICADO: Incluir ingresos de servicio técnico y GANANCIAS de abonos (no el monto completo)
     // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
-    const ingresosNetos = facturasPagas + ingresosServicioTecnico + abonosDelDia;
+    const ingresosNetos = facturasPagas + ingresosServicioTecnico + gananciasDeAbonos;
 
     // Calcular costos de productos
     let costos = 0;
@@ -926,10 +965,14 @@ export function FinancialManagement() {
         return sum + diff;
       }, 0);
 
-      // Calcular abonos del mes para el gráfico
-      const abonosDelMes = allCreditPayments
-        .filter((payment) => extractColombiaDate(payment.date).startsWith(monthStr))
-        .reduce((sum, payment) => sum + payment.amount, 0);
+      // Calcular abonos del mes para el gráfico - usar ganancia proporcional
+      const paymentsDelMes = allCreditPayments.filter((payment) =>
+        extractColombiaDate(payment.date).startsWith(monthStr)
+      );
+
+      const gananciasDeAbonos = paymentsDelMes.reduce((sum, payment) => {
+        return sum + calculatePaymentProfit(payment);
+      }, 0);
 
       // Calcular servicio técnico del mes para el gráfico
       const monthServiceOrders = serviceOrders.filter(order => {
@@ -939,7 +982,8 @@ export function FinancialManagement() {
       const ingresosServicioTecnico = monthServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
 
       // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
-      const ingresos = facturasPagas + abonosDelMes + ingresosServicioTecnico;
+      // Usamos gananciasDeAbonos en lugar del monto completo de abonos
+      const ingresos = facturasPagas + gananciasDeAbonos + ingresosServicioTecnico;
 
       const gastos = monthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
@@ -956,6 +1000,7 @@ export function FinancialManagement() {
 
       last6Months.push({
         month: date.toLocaleDateString('es-CO', { month: 'short' }),
+        monthKey: monthStr, // Añadir key única con año-mes
         ingresos,
         gastos,
         ganancias: ingresos - gastos - costos
@@ -966,18 +1011,21 @@ export function FinancialManagement() {
     const paymentMethodsData = [
       {
         name: 'Efectivo',
+        key: 'payment-cash',
         value: invoices
           .filter(inv => (inv.status === 'paid' || inv.status === 'partial_return') && inv.payment_cash)
           .reduce((sum, inv) => sum + (inv.payment_cash || 0), 0)
       },
       {
         name: 'Transferencia',
+        key: 'payment-transfer',
         value: invoices
           .filter(inv => (inv.status === 'paid' || inv.status === 'partial_return') && inv.payment_transfer)
           .reduce((sum, inv) => sum + (inv.payment_transfer || 0), 0)
       },
       {
         name: 'Otros',
+        key: 'payment-other',
         value: invoices
           .filter(inv => (inv.status === 'paid' || inv.status === 'partial_return') && inv.payment_other)
           .reduce((sum, inv) => sum + (inv.payment_other || 0), 0)
@@ -991,9 +1039,10 @@ export function FinancialManagement() {
       return acc;
     }, {});
 
-    const expensesChartData = Object.entries(expenseCategories).map(([name, value]) => ({
+    const expensesChartData = Object.entries(expenseCategories).map(([name, value], index) => ({
       name,
-      value: value as number
+      value: value as number,
+      key: `expense-${name}-${index}` // Añadir key única
     }));
 
     return {
@@ -1580,9 +1629,15 @@ export function FinancialManagement() {
                 <ResponsiveContainer width="100%" height={300}>
                   <LineChart data={chartData.tendencias}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="month" />
+                    <XAxis dataKey="monthKey" tickFormatter={(value) => {
+                      const item = chartData.tendencias.find(d => d.monthKey === value);
+                      return item?.month || value;
+                    }} />
                     <YAxis />
-                    <Tooltip formatter={(value: any) => formatCOP(value)} />
+                    <Tooltip formatter={(value: any) => formatCOP(value)} labelFormatter={(label) => {
+                      const item = chartData.tendencias.find(d => d.monthKey === label);
+                      return item?.month || label;
+                    }} />
                     <Legend />
                     <Line type="monotone" dataKey="ingresos" stroke="#10b981" strokeWidth={2} name="Ingresos" />
                     <Line type="monotone" dataKey="gastos" stroke="#ef4444" strokeWidth={2} name="Gastos" />
@@ -1604,8 +1659,8 @@ export function FinancialManagement() {
                       fill="#8884d8"
                       dataKey="value"
                     >
-                      {chartData.paymentMethods.map((entry, index) => (
-                        <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                      {chartData.paymentMethods.map((entry) => (
+                        <Cell key={entry.key} fill={COLORS[chartData.paymentMethods.indexOf(entry) % COLORS.length]} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(value: any) => formatCOP(value)} />
