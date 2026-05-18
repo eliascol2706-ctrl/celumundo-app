@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, ChevronLeft, ChevronRight, Loader2, CheckCircle } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Loader2, CheckCircle, FileText, ArrowUpDown, ArrowUp, ArrowDown } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -52,9 +52,12 @@ export function DailyClosureDialog({
   const [invoiceFilter, setInvoiceFilter] = useState<'all' | 'regular' | 'wholesale'>('all');
   const [showInvoiceDetails, setShowInvoiceDetails] = useState(false);
   const [showExchangeDetails, setShowExchangeDetails] = useState(false);
+  const [showProfitDetails, setShowProfitDetails] = useState(false);
   const [closedByName, setClosedByName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [sortColumn, setSortColumn] = useState<string | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
   const currentUser = getCurrentUser();
 
@@ -66,6 +69,11 @@ export function DailyClosureDialog({
       // Solo contar facturas pagadas o parcialmente devueltas
       if (invoice.status === 'paid' || invoice.status === 'partial_return') {
         invoice.items.forEach((item: any) => {
+          // Excluir items que fueron devueltos en un cambio (exchanged: true sin fromExchange: true)
+          if (item.exchanged && !item.fromExchange) {
+            return; // No contar este item
+          }
+
           // Buscar el producto para obtener su costo actual
           const product = products.find(p => p.id === item.productId);
           if (product) {
@@ -90,6 +98,11 @@ export function DailyClosureDialog({
         totalRevenue += invoice.total || 0;
 
         invoice.items.forEach((item: any) => {
+          // Excluir items que fueron devueltos en un cambio
+          if (item.exchanged && !item.fromExchange) {
+            return;
+          }
+
           const product = products.find(p => p.id === item.productId);
           if (product) {
             totalCost += product.current_cost * item.quantity;
@@ -113,6 +126,11 @@ export function DailyClosureDialog({
         totalRevenue += invoice.total || 0;
 
         invoice.items.forEach((item: any) => {
+          // Excluir items que fueron devueltos en un cambio
+          if (item.exchanged && !item.fromExchange) {
+            return;
+          }
+
           const product = products.find(p => p.id === item.productId);
           if (product) {
             totalCost += product.current_cost * item.quantity;
@@ -122,6 +140,18 @@ export function DailyClosureDialog({
     });
 
     return totalRevenue - totalCost;
+  };
+
+  // Función para manejar el ordenamiento
+  const handleSort = (column: string) => {
+    if (sortColumn === column) {
+      // Si ya está ordenando por esta columna, cambiar dirección
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      // Nueva columna, ordenar ascendente por defecto
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
   };
 
   const totalCost = calculateTotalCost();
@@ -418,7 +448,8 @@ export function DailyClosureDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
+    <>
+      <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto" aria-describedby={isLoading || isSuccess ? "status-description" : undefined}>
         {isLoading ? (
           <>
@@ -525,9 +556,19 @@ export function DailyClosureDialog({
 
                   <Card>
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        💰 Ganancias del Día
-                      </CardTitle>
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-sm font-medium text-muted-foreground">
+                          💰 Ganancias del Día
+                        </CardTitle>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setShowProfitDetails(true)}
+                          className="h-7 w-7 p-0"
+                        >
+                          <FileText className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </CardHeader>
                     <CardContent>
                       <div className={`text-2xl font-bold ${
@@ -540,6 +581,30 @@ export function DailyClosureDialog({
                       <p className="text-xs text-muted-foreground mt-1">
                         Utilidad de ventas pagadas
                       </p>
+                      <div className="mt-3 pt-3 border-t border-border space-y-1">
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-muted-foreground">Costo de productos:</span>
+                          <span className="font-medium">COP {formatCOP(totalCost)}</span>
+                        </div>
+                        <div className="flex justify-between items-center text-xs">
+                          <span className="text-muted-foreground">Margen de ganancia:</span>
+                          <span className={`font-bold ${
+                            (() => {
+                              const profit = calculateProfitCollected();
+                              const revenue = totalCost + profit;
+                              const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+                              return margin >= 30 ? 'text-green-600 dark:text-green-400' : margin >= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400';
+                            })()
+                          }`}>
+                            {(() => {
+                              const profit = calculateProfitCollected();
+                              const revenue = totalCost + profit;
+                              const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+                              return margin.toFixed(1);
+                            })()}%
+                          </span>
+                        </div>
+                      </div>
                     </CardContent>
                   </Card>
 
@@ -1100,5 +1165,317 @@ export function DailyClosureDialog({
         )}
       </DialogContent>
     </Dialog>
+
+    {/* Dialog de Detalles de Ganancias */}
+    <Dialog open={showProfitDetails} onOpenChange={setShowProfitDetails}>
+      <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Detalle de Ganancias por Producto</DialogTitle>
+          <DialogDescription>
+            Productos vendidos en facturas pagadas del día
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Resumen General */}
+          <div className="grid grid-cols-3 gap-4">
+            <Card>
+              <CardContent className="pt-4">
+                <p className="text-xs text-muted-foreground mb-1">Total Vendido</p>
+                <p className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                  COP {formatCOP(totalCost + calculateProfitCollected())}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4">
+                <p className="text-xs text-muted-foreground mb-1">Costo Total</p>
+                <p className="text-xl font-bold text-orange-600 dark:text-orange-400">
+                  COP {formatCOP(totalCost)}
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="pt-4">
+                <p className="text-xs text-muted-foreground mb-1">Ganancia Total</p>
+                <p className="text-xl font-bold text-green-600 dark:text-green-400">
+                  COP {formatCOP(calculateProfitCollected())}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Tabla de Productos */}
+          <div className="border border-border rounded-lg overflow-hidden">
+            <div className="max-h-[60vh] overflow-y-auto">
+              <table className="w-full">
+                <thead className="bg-muted sticky top-0 z-10">
+                  <tr>
+                    <th className="text-left py-3 px-4 text-sm font-medium">
+                      <button
+                        onClick={() => handleSort('product')}
+                        className="flex items-center gap-1 hover:text-primary"
+                      >
+                        Producto
+                        {sortColumn === 'product' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="text-center py-3 px-4 text-sm font-medium">
+                      <button
+                        onClick={() => handleSort('invoice')}
+                        className="flex items-center gap-1 hover:text-primary mx-auto"
+                      >
+                        Factura
+                        {sortColumn === 'invoice' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="text-center py-3 px-4 text-sm font-medium">
+                      <button
+                        onClick={() => handleSort('quantity')}
+                        className="flex items-center gap-1 hover:text-primary mx-auto"
+                      >
+                        Cant.
+                        {sortColumn === 'quantity' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="text-right py-3 px-4 text-sm font-medium">
+                      <button
+                        onClick={() => handleSort('unitPrice')}
+                        className="flex items-center gap-1 hover:text-primary ml-auto"
+                      >
+                        Precio Unit.
+                        {sortColumn === 'unitPrice' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="text-right py-3 px-4 text-sm font-medium">
+                      <button
+                        onClick={() => handleSort('totalSale')}
+                        className="flex items-center gap-1 hover:text-primary ml-auto"
+                      >
+                        Total Venta
+                        {sortColumn === 'totalSale' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="text-right py-3 px-4 text-sm font-medium">
+                      <button
+                        onClick={() => handleSort('unitCost')}
+                        className="flex items-center gap-1 hover:text-primary ml-auto"
+                      >
+                        Costo Unit.
+                        {sortColumn === 'unitCost' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="text-right py-3 px-4 text-sm font-medium">
+                      <button
+                        onClick={() => handleSort('totalCost')}
+                        className="flex items-center gap-1 hover:text-primary ml-auto"
+                      >
+                        Costo Total
+                        {sortColumn === 'totalCost' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="text-right py-3 px-4 text-sm font-medium">
+                      <button
+                        onClick={() => handleSort('profit')}
+                        className="flex items-center gap-1 hover:text-primary ml-auto"
+                      >
+                        Ganancia
+                        {sortColumn === 'profit' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    </th>
+                    <th className="text-right py-3 px-4 text-sm font-medium">
+                      <button
+                        onClick={() => handleSort('margin')}
+                        className="flex items-center gap-1 hover:text-primary ml-auto"
+                      >
+                        Margen %
+                        {sortColumn === 'margin' ? (
+                          sortDirection === 'asc' ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />
+                        ) : (
+                          <ArrowUpDown className="h-3 w-3" />
+                        )}
+                      </button>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    // Preparar datos
+                    const rows = dailyStats.invoices
+                      .filter(inv => inv.status === 'paid' || inv.status === 'partial_return')
+                      .flatMap(invoice =>
+                        invoice.items
+                          .filter((item: any) => {
+                            // Excluir items que fueron devueltos en un cambio
+                            return !(item.exchanged && !item.fromExchange);
+                          })
+                          .map((item: any, itemIndex: number) => {
+                            const product = products.find(p => p.id === item.productId);
+                            const unitCost = product?.current_cost || 0;
+                            const totalCost = unitCost * item.quantity;
+                            const unitPrice = item.price || 0;
+                            const totalSale = item.total || 0;
+                            const profit = totalSale - totalCost;
+                            const margin = totalSale > 0 ? (profit / totalSale) * 100 : 0;
+
+                            return {
+                              key: `${invoice.id}-${itemIndex}`,
+                              invoice,
+                              item,
+                              product,
+                              unitCost,
+                              totalCost,
+                              unitPrice,
+                              totalSale,
+                              profit,
+                              margin,
+                            };
+                          })
+                      );
+
+                    // Ordenar datos
+                    if (sortColumn) {
+                      rows.sort((a, b) => {
+                        let aValue: any;
+                        let bValue: any;
+
+                        switch (sortColumn) {
+                          case 'product':
+                            aValue = a.item.productName?.toLowerCase() || '';
+                            bValue = b.item.productName?.toLowerCase() || '';
+                            break;
+                          case 'invoice':
+                            aValue = parseInt(a.invoice.number) || 0;
+                            bValue = parseInt(b.invoice.number) || 0;
+                            break;
+                          case 'quantity':
+                            aValue = a.item.quantity;
+                            bValue = b.item.quantity;
+                            break;
+                          case 'unitPrice':
+                            aValue = a.unitPrice;
+                            bValue = b.unitPrice;
+                            break;
+                          case 'totalSale':
+                            aValue = a.totalSale;
+                            bValue = b.totalSale;
+                            break;
+                          case 'unitCost':
+                            aValue = a.unitCost;
+                            bValue = b.unitCost;
+                            break;
+                          case 'totalCost':
+                            aValue = a.totalCost;
+                            bValue = b.totalCost;
+                            break;
+                          case 'profit':
+                            aValue = a.profit;
+                            bValue = b.profit;
+                            break;
+                          case 'margin':
+                            aValue = a.margin;
+                            bValue = b.margin;
+                            break;
+                          default:
+                            return 0;
+                        }
+
+                        if (aValue < bValue) return sortDirection === 'asc' ? -1 : 1;
+                        if (aValue > bValue) return sortDirection === 'asc' ? 1 : -1;
+                        return 0;
+                      });
+                    }
+
+                    // Renderizar filas
+                    return rows.map(row => (
+                      <tr key={row.key} className="border-b border-border hover:bg-muted/50">
+                        <td className="py-2 px-4">
+                          <div>
+                            <p className="font-medium text-sm">{row.item.productName}</p>
+                            <p className="text-xs text-muted-foreground">{row.item.productCode || '-'}</p>
+                          </div>
+                        </td>
+                        <td className="py-2 px-4 text-center">
+                          <span className="text-xs font-mono bg-muted px-2 py-1 rounded">
+                            {row.invoice.number}
+                          </span>
+                        </td>
+                        <td className="py-2 px-4 text-center font-medium">{row.item.quantity}</td>
+                        <td className="py-2 px-4 text-right text-sm">
+                          COP {formatCOP(row.unitPrice)}
+                        </td>
+                        <td className="py-2 px-4 text-right font-medium text-blue-600 dark:text-blue-400">
+                          COP {formatCOP(row.totalSale)}
+                        </td>
+                        <td className="py-2 px-4 text-right text-sm">
+                          COP {formatCOP(row.unitCost)}
+                        </td>
+                        <td className="py-2 px-4 text-right font-medium text-orange-600 dark:text-orange-400">
+                          COP {formatCOP(row.totalCost)}
+                        </td>
+                        <td className="py-2 px-4 text-right font-bold text-green-600 dark:text-green-400">
+                          COP {formatCOP(row.profit)}
+                        </td>
+                        <td className="py-2 px-4 text-right">
+                          <span className={`font-bold ${
+                            row.margin >= 30
+                              ? 'text-green-600 dark:text-green-400'
+                              : row.margin >= 15
+                              ? 'text-yellow-600 dark:text-yellow-400'
+                              : 'text-red-600 dark:text-red-400'
+                          }`}>
+                            {row.margin.toFixed(1)}%
+                          </span>
+                        </td>
+                      </tr>
+                    ));
+                  })()}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Botón de Cerrar */}
+          <div className="flex justify-end">
+            <Button onClick={() => setShowProfitDetails(false)}>
+              Cerrar
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

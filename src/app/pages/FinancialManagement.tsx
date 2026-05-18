@@ -17,7 +17,6 @@ import {
   type Exchange,
   type Warranty
 } from '../lib/supabase';
-import { getServiceOrders, type ServiceOrder } from '../lib/service-orders';
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import {
@@ -128,7 +127,6 @@ export function FinancialManagement() {
   const [expenses, setExpenses] = useState<any[]>([]);
   const [customers, setCustomers] = useState<any[]>([]);
   const [warranties, setWarranties] = useState<Warranty[]>([]);
-  const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeModal, setActiveModal] = useState<ModalType>(null);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -253,7 +251,7 @@ export function FinancialManagement() {
 
   const loadData = async () => {
     setIsLoading(true);
-    const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData, warrantiesData, serviceOrdersData, paymentsData] = await Promise.all([
+    const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData, warrantiesData, paymentsData] = await Promise.all([
       getInvoices(),
       getReturns(),
       getExchanges(),
@@ -261,7 +259,6 @@ export function FinancialManagement() {
       getExpenses(),
       getCustomers(),
       getWarranties(),
-      getServiceOrders(),
       getCreditPayments()
     ]);
     setInvoices(invoicesData);
@@ -271,7 +268,6 @@ export function FinancialManagement() {
     setExpenses(expensesData);
     setCustomers(customersData);
     setWarranties(warrantiesData);
-    setServiceOrders(serviceOrdersData);
     setAllCreditPayments(paymentsData);
     setIsLoading(false);
   };
@@ -285,6 +281,11 @@ export function FinancialManagement() {
     // Calcular el costo total de los productos de la factura
     let totalCost = 0;
     invoice.items.forEach(item => {
+      // Excluir items que fueron devueltos en un cambio
+      if (item.exchanged && !item.fromExchange) {
+        return;
+      }
+
       const product = products.find(p => p.id === item.productId);
       if (product && product.current_cost) {
         totalCost += product.current_cost * item.quantity;
@@ -336,12 +337,6 @@ export function FinancialManagement() {
         return expDate.startsWith(targetMonth);
       });
 
-      // NUEVO: Filtrar órdenes de servicio pagadas del mes
-      const monthServiceOrders = serviceOrders.filter((order) => {
-        const orderDate = extractColombiaDate(order.received_date);
-        return orderDate.startsWith(targetMonth) && order.payment_status === 'paid' && order.final_price;
-      });
-
       // IMPORTANTE: Solo contar facturas REGULARES pagadas
       // Las facturas a crédito se contabilizan a través de sus abonos para evitar doble contabilidad
       const facturasPagas = monthInvoices
@@ -355,9 +350,6 @@ export function FinancialManagement() {
         const diff = Number(exchange.price_difference) || 0;
         return sum + diff;
       }, 0);
-
-      // NUEVO: Ingresos de servicio técnico
-      const ingresosServicioTecnico = monthServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
 
       // NUEVO: Abonos a crédito del mes - calcular ganancia proporcional
       const paymentsDelMes = allCreditPayments.filter((payment) => {
@@ -374,9 +366,9 @@ export function FinancialManagement() {
       const abonosDelMes = paymentsDelMes.reduce((sum, payment) => sum + payment.amount, 0);
 
       // No restamos totalDevoluciones porque las facturas 'returned' ya no se cuentan en facturasPagas
-      // MODIFICADO: Incluir ingresos de servicio técnico y GANANCIAS de abonos a crédito (no el monto completo)
+      // MODIFICADO: Incluir MONTO COMPLETO de abonos a crédito
       // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
-      const ingresoNeto = facturasPagas + ingresosServicioTecnico + gananciasDeAbonos;
+      const ingresoNeto = facturasPagas + abonosDelMes;
 
       // NUEVO: Total de Facturas En Confirmación (solo facturas pending y pending_confirmation)
       const totalFacturasEnConfirmacion = monthInvoices
@@ -392,6 +384,11 @@ export function FinancialManagement() {
       let costosDeProductos = 0;
       facturasParaCostos.forEach((invoice) => {
         invoice.items.forEach((item) => {
+          // Excluir items que fueron devueltos en un cambio
+          if (item.exchanged && !item.fromExchange) {
+            return;
+          }
+
           const product = products.find((p) => p.id === item.productId);
           if (product && product.current_cost) {
             costosDeProductos += product.current_cost * item.quantity;
@@ -405,6 +402,11 @@ export function FinancialManagement() {
 
       facturasPagasList.forEach((invoice) => {
         invoice.items.forEach((item) => {
+          // Excluir items que fueron devueltos en un cambio
+          if (item.exchanged && !item.fromExchange) {
+            return;
+          }
+
           const product = products.find((p) => p.id === item.productId);
           if (product && product.current_cost) {
             totalCostos += product.current_cost * item.quantity;
@@ -433,7 +435,6 @@ export function FinancialManagement() {
         facturasPagas,
         abonosDelMes,
         gananciasDeAbonos,
-        ingresosServicioTecnico,
         ingresosPorFactura,
         costosDeProductos,
         gananciasNetas,
@@ -710,21 +711,12 @@ export function FinancialManagement() {
       return exDate === date;
     });
 
-    // NUEVO: Filtrar órdenes de servicio pagadas del día
-    const dayServiceOrders = serviceOrders.filter(order => {
-      const orderDate = extractColombiaDate(order.received_date);
-      return orderDate === date && order.payment_status === 'paid' && order.final_price;
-    });
-
     // Calcular ingresos
     const facturasPagas = dayInvoices.reduce((sum, inv) => sum + inv.total, 0);
     const impactoCambios = dayExchanges.reduce((sum, exchange) => {
       const diff = Number(exchange.price_difference) || 0;
       return sum + diff;
     }, 0);
-
-    // NUEVO: Ingresos de servicio técnico
-    const ingresosServicioTecnico = dayServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
 
     // NUEVO: Abonos a crédito del día - calcular ganancia proporcional
     const paymentsDelDia = allCreditPayments.filter((payment) => {
@@ -740,14 +732,19 @@ export function FinancialManagement() {
     // Mantener el total de abonos para referencia
     const abonosDelDia = paymentsDelDia.reduce((sum, payment) => sum + payment.amount, 0);
 
-    // MODIFICADO: Incluir ingresos de servicio técnico y GANANCIAS de abonos (no el monto completo)
+    // MODIFICADO: Incluir MONTO COMPLETO de abonos
     // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
-    const ingresosNetos = facturasPagas + ingresosServicioTecnico + gananciasDeAbonos;
+    const ingresosNetos = facturasPagas + abonosDelDia;
 
     // Calcular costos de productos
     let costos = 0;
     dayInvoices.forEach(invoice => {
       invoice.items.forEach(item => {
+        // Excluir items que fueron devueltos en un cambio
+        if (item.exchanged && !item.fromExchange) {
+          return;
+        }
+
         const product = products.find(p => p.id === item.productId);
         if (product && product.current_cost) {
           costos += product.current_cost * item.quantity;
@@ -768,7 +765,9 @@ export function FinancialManagement() {
       costos,
       ganancias,
       facturasPagas,
-      impactoCambios
+      impactoCambios,
+      abonosDelDia,
+      gananciasDeAbonos
     };
   };
 
@@ -834,10 +833,6 @@ export function FinancialManagement() {
       y += 6;
       if (stats.currentMonth.abonosDelMes > 0) {
         doc.text(`Abonos a Crédito: ${formatCOP(stats.currentMonth.abonosDelMes)}`, 25, y);
-        y += 6;
-      }
-      if (stats.currentMonth.ingresosServicioTecnico > 0) {
-        doc.text(`Servicio Técnico: ${formatCOP(stats.currentMonth.ingresosServicioTecnico)}`, 25, y);
         y += 6;
       }
       if (stats.currentMonth.impactoCambios !== 0) {
@@ -965,25 +960,16 @@ export function FinancialManagement() {
         return sum + diff;
       }, 0);
 
-      // Calcular abonos del mes para el gráfico - usar ganancia proporcional
+      // Calcular abonos del mes para el gráfico - usar monto completo
       const paymentsDelMes = allCreditPayments.filter((payment) =>
         extractColombiaDate(payment.date).startsWith(monthStr)
       );
 
-      const gananciasDeAbonos = paymentsDelMes.reduce((sum, payment) => {
-        return sum + calculatePaymentProfit(payment);
-      }, 0);
-
-      // Calcular servicio técnico del mes para el gráfico
-      const monthServiceOrders = serviceOrders.filter(order => {
-        const orderDate = extractColombiaDate(order.received_date);
-        return orderDate.startsWith(monthStr) && order.payment_status === 'paid' && order.final_price;
-      });
-      const ingresosServicioTecnico = monthServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
+      const abonosDelMes = paymentsDelMes.reduce((sum, payment) => sum + payment.amount, 0);
 
       // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
-      // Usamos gananciasDeAbonos en lugar del monto completo de abonos
-      const ingresos = facturasPagas + gananciasDeAbonos + ingresosServicioTecnico;
+      // Usamos monto completo de abonos
+      const ingresos = facturasPagas + abonosDelMes;
 
       const gastos = monthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
@@ -991,6 +977,11 @@ export function FinancialManagement() {
       let costos = 0;
       paidInvoices.forEach(invoice => {
         invoice.items.forEach(item => {
+          // Excluir items que fueron devueltos en un cambio
+          if (item.exchanged && !item.fromExchange) {
+            return;
+          }
+
           const product = products.find(p => p.id === item.productId);
           if (product && product.current_cost) {
             costos += product.current_cost * item.quantity;
@@ -1344,12 +1335,6 @@ export function FinancialManagement() {
                     <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
                       <span>Abonos</span>
                       <span className="font-medium">{formatCOP(stats.currentMonth.abonosDelMes)}</span>
-                    </div>
-                  )}
-                  {stats.currentMonth.ingresosServicioTecnico > 0 && (
-                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
-                      <span>Servicio técnico</span>
-                      <span className="font-medium">{formatCOP(stats.currentMonth.ingresosServicioTecnico)}</span>
                     </div>
                   )}
                   {stats.currentMonth.impactoCambios !== 0 && (
@@ -1716,12 +1701,6 @@ export function FinancialManagement() {
                       <div className="flex justify-between py-2 border-b border-zinc-100">
                         <span className="text-sm text-zinc-600 dark:text-zinc-400">Abonos a Crédito</span>
                         <span className="text-sm font-medium">{formatCOP(stats.currentMonth.abonosDelMes)}</span>
-                      </div>
-                    )}
-                    {stats.currentMonth.ingresosServicioTecnico > 0 && (
-                      <div className="flex justify-between py-2 border-b border-zinc-100">
-                        <span className="text-sm text-zinc-600 dark:text-zinc-400">Servicio Técnico</span>
-                        <span className="text-sm font-medium">{formatCOP(stats.currentMonth.ingresosServicioTecnico)}</span>
                       </div>
                     )}
                     {stats.currentMonth.impactoCambios !== 0 && (
@@ -2335,7 +2314,8 @@ export function FinancialManagement() {
               {(() => {
                 const paidInvoices = invoices.filter(inv =>
                   extractColombiaDate(inv.date).startsWith(stats.thisMonth) &&
-                  (inv.status === 'paid' || inv.status === 'partial_return')
+                  (inv.status === 'paid' || inv.status === 'partial_return') &&
+                  !inv.is_credit
                 );
                 const totalPaidInvoices = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
 
@@ -2642,12 +2622,6 @@ export function FinancialManagement() {
                   <div className="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-800">
                     <span className="text-zinc-700">Abonos a Crédito</span>
                     <span className="font-semibold text-emerald-600">+{formatCOP(stats.currentMonth.abonosDelMes)}</span>
-                  </div>
-                )}
-                {stats.currentMonth.ingresosServicioTecnico > 0 && (
-                  <div className="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-800">
-                    <span className="text-zinc-700">Servicio Técnico</span>
-                    <span className="font-semibold text-emerald-600">+{formatCOP(stats.currentMonth.ingresosServicioTecnico)}</span>
                   </div>
                 )}
                 <div className="flex justify-between py-2 border-b border-zinc-200 dark:border-zinc-800">
