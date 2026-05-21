@@ -1,10 +1,10 @@
 import { useNavigate } from 'react-router';
-import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2, ChevronLeft, ChevronRight, Edit } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useEffect, useState } from 'react';
-import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges } from '../lib/supabase';
+import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, getCreditPayments, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges, updateInvoice, updateProduct } from '../lib/supabase';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
@@ -28,7 +28,8 @@ export function InvoicesMenu() {
     totalSalesToday: 0,
     cashToday: 0,
     transferToday: 0,
-    exchangeImpactToday: 0
+    exchangeImpactToday: 0,
+    todayPayments: 0
   });
   const [loading, setLoading] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
@@ -67,6 +68,10 @@ export function InvoicesMenu() {
   // Estado para modal de registro de ventas de productos
   const [showProductSalesReport, setShowProductSalesReport] = useState(false);
 
+  // Estados para modal de edición de factura en confirmación
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+
   useEffect(() => {
     loadStats();
   }, []);
@@ -98,10 +103,11 @@ export function InvoicesMenu() {
   const loadStats = async () => {
     setLoading(true);
     try {
-      const [invoices, products, exchanges] = await Promise.all([
+      const [invoices, products, exchanges, creditPayments] = await Promise.all([
         getInvoices(),
         getAllProducts(),
-        getExchanges()
+        getExchanges(),
+        getCreditPayments()
       ]);
 
       // DEBUG: Verificar facturas con cambios
@@ -175,6 +181,16 @@ export function InvoicesMenu() {
         return sum + (ex.price_difference || 0);
       }, 0);
 
+      // Calcular abonos a crédito del día
+      const paymentsToday = creditPayments.filter(payment => {
+        const paymentDate = extractColombiaDate(payment.date);
+        return paymentDate === todayStr;
+      });
+
+      const todayPayments = paymentsToday.reduce((sum, payment) => {
+        return sum + (payment.amount || 0);
+      }, 0);
+
       console.log('[InvoicesMenu] Stats calculadas:', {
         todayStr,
         regularToday,
@@ -184,6 +200,7 @@ export function InvoicesMenu() {
         cashToday,
         transferToday,
         exchangeImpactToday,
+        todayPayments,
         invoicesToday: invoicesToday.length,
         paidInvoicesToday: paidInvoicesToday.length
       });
@@ -193,10 +210,11 @@ export function InvoicesMenu() {
         creditToday,
         pendingConfirmation: invoices.filter(inv => inv.status === 'pending_confirmation').length,
         totalCreditPending,
-        totalSalesToday,
+        totalSalesToday: totalSalesToday + todayPayments, // Incluir abonos en el total facturado
         cashToday,
         transferToday,
-        exchangeImpactToday
+        exchangeImpactToday,
+        todayPayments
       });
 
       // Cargar TODAS las facturas (no solo las de hoy) para los filtros
@@ -371,7 +389,20 @@ export function InvoicesMenu() {
   };
 
   const handleApproveInvoice = (invoice: Invoice) => {
-    setSelectedInvoice(invoice);
+    // 🔧 SANITIZAR: Convertir objetos en unitIds a strings
+    const sanitizedInvoice = {
+      ...invoice,
+      items: invoice.items.map(item => ({
+        ...item,
+        unitIds: item.unitIds
+          ? item.unitIds.map((id: any) =>
+              typeof id === 'string' ? id : (id.id || String(id))
+            )
+          : undefined
+      }))
+    };
+
+    setSelectedInvoice(sanitizedInvoice);
     setPaymentMethod('');
     setShowPaymentMethodModal(true);
   };
@@ -618,8 +649,109 @@ export function InvoicesMenu() {
     }
   };
 
+  const handleEditInvoice = (invoice: Invoice) => {
+    setEditingInvoice(invoice);
+    setShowEditModal(true);
+  };
+
+  const handleRemoveProductFromInvoice = async (productIndex: number) => {
+    if (!editingInvoice) return;
+
+    const productToRemove = editingInvoice.items[productIndex];
+    const product = products.find(p => p.id === productToRemove.productId);
+
+    if (!product) {
+      toast.error('Producto no encontrado en el inventario');
+      return;
+    }
+
+    try {
+      // 1. Restaurar stock
+      if (!productToRemove.productId.startsWith('common-')) {
+        const newStock = product.stock + productToRemove.quantity;
+        await updateProduct(product.id, { stock: newStock });
+      }
+
+      // 2. Re-habilitar IDs únicas si las hay
+      if (productToRemove.unitIds && productToRemove.unitIds.length > 0 && product.registered_ids) {
+        const updatedRegisteredIds = product.registered_ids.map((idObj: any) => {
+          if (productToRemove.unitIds.includes(idObj.id)) {
+            return { ...idObj, disabled: false };
+          }
+          return idObj;
+        });
+        await updateProduct(product.id, { registered_ids: updatedRegisteredIds });
+      }
+
+      // 3. Actualizar la factura (remover el producto)
+      const updatedItems = editingInvoice.items.filter((_, index) => index !== productIndex);
+
+      if (updatedItems.length === 0) {
+        // Si no quedan productos, eliminar la factura completa
+        await deleteInvoice(editingInvoice.id);
+        toast.success('Factura eliminada (no quedaban productos)');
+        setShowEditModal(false);
+        setEditingInvoice(null);
+
+        // Actualizar facturas pendientes
+        const invoices = await getInvoices();
+        const pending = invoices.filter(inv => inv.status === 'pending_confirmation');
+        setPendingInvoices(pending);
+
+        loadStats();
+        return;
+      }
+
+      // Recalcular totales
+      const subtotal = updatedItems.reduce((sum, item) => sum + item.total, 0);
+      const tax = subtotal * 0; // Sin impuesto por ahora
+      const total = subtotal + tax;
+
+      await updateInvoice(editingInvoice.id, {
+        items: updatedItems,
+        subtotal,
+        tax,
+        total
+      });
+
+      // Actualizar estado local
+      setEditingInvoice({
+        ...editingInvoice,
+        items: updatedItems,
+        subtotal,
+        tax,
+        total
+      });
+
+      // Actualizar facturas pendientes
+      const invoices = await getInvoices();
+      const pending = invoices.filter(inv => inv.status === 'pending_confirmation');
+      setPendingInvoices(pending);
+
+      toast.success('Producto eliminado y stock restaurado');
+      loadStats();
+    } catch (error) {
+      console.error('Error al eliminar producto:', error);
+      toast.error('Error al eliminar el producto');
+    }
+  };
+
   const handlePreviewInvoice = (invoice: Invoice) => {
-    setSelectedInvoice(invoice);
+    // 🔧 SANITIZAR: Convertir objetos en unitIds a strings
+    // (corrige facturas antiguas que guardaron objetos en lugar de strings)
+    const sanitizedInvoice = {
+      ...invoice,
+      items: invoice.items.map(item => ({
+        ...item,
+        unitIds: item.unitIds
+          ? item.unitIds.map((id: any) =>
+              typeof id === 'string' ? id : (id.id || String(id))
+            )
+          : undefined
+      }))
+    };
+
+    setSelectedInvoice(sanitizedInvoice);
     setShowPreviewModal(true);
   };
 
@@ -746,7 +878,7 @@ export function InvoicesMenu() {
         </div>
 
         {/* Stats - Segunda fila (Ganancias y Métodos de Pago) */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <Card className="border-emerald-200 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
@@ -756,14 +888,14 @@ export function InvoicesMenu() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{formatCOP(stats.totalSalesToday)}</div>
-              <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-1">Solo facturas pagadas (incluye impacto de cambios)</p>
+              <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-1">Facturas pagadas + abonos</p>
               {stats.exchangeImpactToday !== 0 && (
                 <p className={`text-xs mt-1 font-medium ${
                   stats.exchangeImpactToday > 0
                     ? 'text-emerald-600 dark:text-emerald-400'
                     : 'text-orange-600 dark:text-orange-400'
                 }`}>
-                  Impacto de cambios del día: {stats.exchangeImpactToday > 0 ? '+' : ''}{formatCOP(stats.exchangeImpactToday)}
+                  Impacto de cambios: {stats.exchangeImpactToday > 0 ? '+' : ''}{formatCOP(stats.exchangeImpactToday)}
                 </p>
               )}
             </CardContent>
@@ -792,6 +924,19 @@ export function InvoicesMenu() {
             <CardContent>
               <div className="text-2xl font-bold text-violet-700 dark:text-violet-400">{formatCOP(stats.transferToday)}</div>
               <p className="text-xs text-violet-600 dark:text-violet-500 mt-1">Incluye Nequi, Daviplata</p>
+            </CardContent>
+          </Card>
+
+          <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/20 shadow-sm">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-400 flex items-center gap-2">
+                <CreditCard className="w-4 h-4" />
+                Abonos de Hoy
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-blue-700 dark:text-blue-400">{formatCOP(stats.todayPayments)}</div>
+              <p className="text-xs text-blue-600 dark:text-blue-500 mt-1">Pagos a crédito realizados</p>
             </CardContent>
           </Card>
         </div>
@@ -1080,7 +1225,21 @@ export function InvoicesMenu() {
                                       const payments = await getCreditPaymentsByInvoice(invoice.id);
                                       setCreditPayments(payments);
                                     }
-                                    setSelectedInvoice(invoice);
+
+                                    // 🔧 SANITIZAR: Convertir objetos en unitIds a strings
+                                    const sanitizedInvoice = {
+                                      ...invoice,
+                                      items: invoice.items.map(item => ({
+                                        ...item,
+                                        unitIds: item.unitIds
+                                          ? item.unitIds.map((id: any) =>
+                                              typeof id === 'string' ? id : (id.id || String(id))
+                                            )
+                                          : undefined
+                                      }))
+                                    };
+
+                                    setSelectedInvoice(sanitizedInvoice);
                                     setShowPrintSelectionModal(true);
                                   }}
                                   className="text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 h-7 w-7 sm:h-8 sm:w-8 p-0"
@@ -1225,6 +1384,15 @@ export function InvoicesMenu() {
                         >
                           <Eye className="w-4 h-4 mr-1" />
                           Ver
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleEditInvoice(invoice)}
+                          className="border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950 text-amber-700 dark:text-amber-400"
+                        >
+                          <Edit className="w-4 h-4 mr-1" />
+                          Editar
                         </Button>
                         <Button
                           variant="outline"
@@ -1441,6 +1609,20 @@ export function InvoicesMenu() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                          {(() => {
+                            // 🔍 DEBUG: Log de los items antes de renderizar
+                            console.log('🔍 [InvoicesMenu] Renderizando items de factura:', selectedInvoice.number);
+                            selectedInvoice.items
+                              .filter((item: any) => !item.fromExchange)
+                              .forEach((item: any, idx: number) => {
+                                console.log(`  Item ${idx} (${item.productName}):`, {
+                                  unitIds: item.unitIds,
+                                  unitIdsLength: item.unitIds?.length,
+                                  unitIdsContent: item.unitIds ? JSON.stringify(item.unitIds) : 'undefined'
+                                });
+                              });
+                            return null;
+                          })()}
                           {selectedInvoice.items
                             .filter((item: any) => !item.fromExchange) // Excluir items agregados por cambios (ya se muestran en el panel verde)
                             .map((item: any, idx: number) => (
@@ -1798,6 +1980,98 @@ export function InvoicesMenu() {
               Cerrar
             </Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Edición de Factura en Confirmación */}
+      <Dialog open={showEditModal} onOpenChange={setShowEditModal}>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-zinc-900 dark:text-zinc-100">
+              <Edit className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              Editar Factura en Confirmación
+            </DialogTitle>
+            <DialogDescription className="text-zinc-600 dark:text-zinc-400">
+              Elimine productos de la factura. El stock y las ID's serán restaurados automáticamente.
+            </DialogDescription>
+          </DialogHeader>
+
+          {editingInvoice && (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-900 rounded-lg">
+                <div>
+                  <div className="text-lg font-mono font-bold text-zinc-900 dark:text-zinc-100">
+                    #{editingInvoice.number}
+                  </div>
+                  <div className="text-sm text-zinc-600 dark:text-zinc-400">
+                    {editingInvoice.customer_name || 'Sin cliente'}
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase mb-1">Total</div>
+                  <div className="text-xl font-bold text-emerald-600 dark:text-emerald-400">
+                    {formatCOP(editingInvoice.total)}
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                  Productos ({editingInvoice.items.length})
+                </div>
+                {editingInvoice.items.map((item: any, index: number) => (
+                  <Card key={index} className="border-zinc-200 dark:border-zinc-800">
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="font-medium text-zinc-900 dark:text-zinc-100 mb-1">
+                            {item.productName}
+                          </div>
+                          <div className="text-sm text-zinc-600 dark:text-zinc-400">
+                            Cantidad: {item.quantity} × {formatCOP(item.price)} = {formatCOP(item.total)}
+                          </div>
+                          {item.unitIds && item.unitIds.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {item.unitIds.map((id: string, idx: number) => (
+                                <Badge
+                                  key={idx}
+                                  variant="outline"
+                                  className="bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800 text-xs"
+                                >
+                                  ID: {id}
+                                </Badge>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            if (confirm(`¿Eliminar "${item.productName}" de la factura?\n\nEsto restaurará el stock y habilitará las ID's.`)) {
+                              handleRemoveProductFromInvoice(index);
+                            }
+                          }}
+                          className="border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-950 text-red-700 dark:text-red-400"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+
+              <div className="flex justify-end gap-2 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowEditModal(false)}
+                >
+                  Cerrar
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

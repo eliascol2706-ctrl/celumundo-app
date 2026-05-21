@@ -136,55 +136,47 @@ export function Closures() {
   // Nueva función para obtener el día que se debe cerrar
   const getDayToClose = () => {
     const today = getColombiaDate();
-    
+
     // Verificar si ya existe un cierre para hoy
     const hasTodayClosure = dailyClosures.some(closure => {
       const closureDate = extractColombiaDate(closure.date);
       return closureDate === today;
     });
-    
+
     // Si ya hay cierre de hoy, no se puede cerrar
     if (hasTodayClosure) {
       return null;
     }
-    
-    // Verificar si hay facturas de hoy
+
+    // Si hay facturas de hoy, cerrar el día de hoy
     const todayInvoices = invoices.filter(inv => {
       if (!inv.date) return false;
-      const invDate = extractColombiaDate(inv.date);
-      return invDate === today;
+      return extractColombiaDate(inv.date) === today;
     });
-    
+
     if (todayInvoices.length > 0) {
-      // Si hay facturas de hoy, cerrar el día de hoy
       return today;
     }
-    
-    // Si no hay facturas de hoy, buscar el día anterior sin cierre - CALCULAR SIN UTC
-    const todayDate = new Date(today + 'T12:00:00'); // Usar mediodía para evitar problemas
-    todayDate.setDate(todayDate.getDate() - 1);
-    // Extraer fecha sin usar toISOString
-    const year = todayDate.getFullYear();
-    const month = String(todayDate.getMonth() + 1).padStart(2, '0');
-    const day = String(todayDate.getDate()).padStart(2, '0');
-    const yesterday = `${year}-${month}-${day}`;
-    
-    const hasYesterdayClosure = dailyClosures.some(closure => {
-      const closureDate = extractColombiaDate(closure.date);
-      return closureDate === yesterday;
-    });
-    
-    const yesterdayInvoices = invoices.filter(inv => {
-      if (!inv.date) return false;
-      const invDate = extractColombiaDate(inv.date);
-      return invDate === yesterday;
-    });
-    
-    // Si hay facturas de ayer y no hay cierre, cerrar ayer
-    if (yesterdayInvoices.length > 0 && !hasYesterdayClosure) {
-      return yesterday;
+
+    // Buscar la fecha más antigua con facturas sin cierre (no limitado solo a ayer)
+    const closureDates = new Set(
+      dailyClosures.map(c => extractColombiaDate(c.date)).filter(Boolean)
+    );
+
+    // Obtener todas las fechas únicas de facturas anteriores a hoy, ordenadas ascendente
+    const pastInvoiceDates = [...new Set(
+      invoices
+        .filter(inv => inv.date && extractColombiaDate(inv.date) < today)
+        .map(inv => extractColombiaDate(inv.date))
+    )].sort();
+
+    // Retornar la fecha más antigua sin cierre
+    for (const date of pastInvoiceDates) {
+      if (!closureDates.has(date)) {
+        return date;
+      }
     }
-    
+
     // No hay nada que cerrar
     return null;
   };
@@ -483,31 +475,39 @@ export function Closures() {
     });
     const netRevenue = currentMonthRevenue + currentMonthServiceRevenue;
 
-    // NUEVO: Ingresos por Factura (TODAS las facturas excepto devueltas completamente y canceladas)
-    // NOTA: Ya NO sumamos currentMonthExchangeImpact porque está incluido en invoice.total
-    const allMonthInvoices = invoices.filter(inv => {
+    // Facturas en confirmación (pending_confirmation) — referencia, no se usa en ganancias
+    const ingresosPorFactura = invoices.filter(inv => {
       if (!inv.date) return false;
       const invDate = extractColombiaDate(inv.date);
-      return invDate.substring(0, 7) === currentMonthStr && inv.status !== 'returned' && inv.status !== 'cancelled';
-    });
-    const totalFacturas = allMonthInvoices.reduce((sum, inv) => sum + inv.total, 0);
-    const ingresosPorFactura = totalFacturas;
+      return invDate.substring(0, 7) === currentMonthStr && inv.status === 'pending_confirmation';
+    }).reduce((sum, inv) => sum + inv.total, 0);
 
-    // Calcular costo de productos vendidos en el mes (TODAS las facturas incluidas en ingresosPorFactura)
-    // Debe ser consistente con el filtro de ingresosPorFactura
+    // Todas las facturas a crédito del mes (sin importar estado, excepto devueltas y canceladas)
+    const allCreditTotal = invoices.filter(inv => {
+      if (!inv.date) return false;
+      const invDate = extractColombiaDate(inv.date);
+      return invDate.substring(0, 7) === currentMonthStr
+        && inv.is_credit
+        && inv.status !== 'returned'
+        && inv.status !== 'cancelled';
+    }).reduce((sum, inv) => sum + inv.total, 0);
+
+    // Ingresos Netos: regulares pagadas + todas las facturas a crédito (sin devueltas/canceladas)
+    const ingresoNetos = netRevenue + allCreditTotal;
+
+    // Costos: facturas regulares pagadas + créditos (excluye devueltas, canceladas, pending_confirmation)
     const invoicesForCost = invoices.filter(inv => {
       if (!inv.date) return false;
       const invDate = extractColombiaDate(inv.date);
       if (invDate.substring(0, 7) !== currentMonthStr) return false;
-
-      // Excluir facturas devueltas completamente y canceladas (igual que ingresosPorFactura)
-      return inv.status !== 'returned' && inv.status !== 'cancelled';
+      return inv.status !== 'returned' && inv.status !== 'cancelled' && inv.status !== 'pending_confirmation';
     });
 
     let totalProductCost = 0;
     invoicesForCost.forEach(invoice => {
       if (invoice.items && Array.isArray(invoice.items)) {
         invoice.items.forEach((item: any) => {
+          if (item.exchanged && !item.fromExchange) return;
           const product = products.find(p => p.id === item.productId);
           if (product && product.current_cost) {
             totalProductCost += product.current_cost * item.quantity;
@@ -516,8 +516,8 @@ export function Closures() {
       }
     });
 
-    // Calcular ganancias reales (ingresos por factura - costo de productos - gastos)
-    const realProfit = ingresosPorFactura - totalProductCost - totalExpenses;
+    // Ganancias reales: ingresos netos - costos - gastos
+    const realProfit = ingresoNetos - totalProductCost - totalExpenses;
 
     // Crear objetos Date para obtener nombres de meses en español
     const previousMonthDate = new Date(previousMonthStr + '-01T12:00:00');
@@ -586,6 +586,8 @@ export function Closures() {
 
     console.log('[CIERRE MENSUAL] Datos finales:', {
       netRevenue,
+      allCreditTotal,
+      ingresoNetos,
       currentMonthExchangeImpact,
       currentMonthServiceRevenue,
       currentMonthRevenue,
@@ -607,11 +609,13 @@ export function Closures() {
       previousMonthNetRevenue,
       totalProductCost,
       realProfit,
-      serviceRevenue: currentMonthServiceRevenue, // Ingresos de servicio técnico
-      totalCreditPayments, // NUEVO: Total de abonos de créditos del mes
-      profitFromCredit, // NUEVO: Ganancias de facturas a crédito del mes
-      ingresosPorFactura, // NUEVO: Ingresos por factura (todas las facturas + impacto cambios)
-      exchangeImpact: currentMonthExchangeImpact, // NUEVO: Impacto de cambios por separado
+      serviceRevenue: currentMonthServiceRevenue,
+      totalCreditPayments,
+      profitFromCredit,
+      ingresosPorFactura,
+      ingresoNetos,
+      allCreditTotal,
+      exchangeImpact: currentMonthExchangeImpact,
     };
   };
 

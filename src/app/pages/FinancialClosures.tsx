@@ -176,17 +176,39 @@ export function FinancialClosures() {
       total: inv.total
     })));
 
-    // 1. Ingresos por tipo de factura
+    // 1. Abonos a créditos del periodo (calcular primero)
+    const periodCreditPayments = creditPayments.filter(payment => {
+      if (!payment.date) return false;
+
+      if (periodStart) {
+        const paymentDate = new Date(payment.date);
+        const cutoffDate = new Date(periodStart);
+        return paymentDate > cutoffDate;
+      }
+
+      return true;
+    });
+    const creditPaymentsTotal = periodCreditPayments.reduce((sum, p) => sum + p.amount, 0);
+
+    console.log('\n--- ABONOS A CRÉDITO DEL PERIODO ---');
+    console.log(`Cantidad de abonos: ${periodCreditPayments.length}`);
+    console.log(`Total de abonos: ${formatCOP(creditPaymentsTotal)}`);
+    periodCreditPayments.forEach(payment => {
+      console.log(`  ${payment.date} - ${formatCOP(payment.amount)}`);
+    });
+
+    // 2. Ingresos por tipo de factura
     const paidInvoices = periodInvoices.filter(inv =>
       inv.status === 'paid' && !inv.is_credit
     );
-    const creditInvoices = periodInvoices.filter(inv =>
-      inv.is_credit &&
-      inv.status !== 'pending_confirmation' &&
-      inv.status !== 'pending'
+    const paidCreditInvoices = periodInvoices.filter(inv =>
+      inv.status === 'paid' && inv.is_credit
     );
     const partialReturnInvoices = periodInvoices.filter(inv =>
-      inv.status === 'partial_return'
+      inv.status === 'partial_return' && !inv.is_credit
+    );
+    const partialReturnCreditInvoices = periodInvoices.filter(inv =>
+      inv.status === 'partial_return' && inv.is_credit
     );
 
     console.log('\n--- FACTURAS PAGAS (CONTADO) ---');
@@ -195,28 +217,39 @@ export function FinancialClosures() {
       console.log(`  ${inv.number} - ${inv.date} - ${formatCOP(inv.total)}`);
     });
 
-    console.log('\n--- FACTURAS A CRÉDITO ---');
-    console.log(`Cantidad: ${creditInvoices.length}`);
-    creditInvoices.forEach(inv => {
-      console.log(`  ${inv.number} - ${inv.date} - Estado: ${inv.status} - ${formatCOP(inv.total)}`);
+    console.log('\n--- FACTURAS A CRÉDITO PAGADAS ---');
+    console.log(`Cantidad: ${paidCreditInvoices.length}`);
+    paidCreditInvoices.forEach(inv => {
+      console.log(`  ${inv.number} - ${inv.date} - ${formatCOP(inv.total)}`);
     });
 
-    console.log('\n--- FACTURAS CON DEVOLUCIÓN PARCIAL ---');
+    console.log('\n--- FACTURAS CON DEVOLUCIÓN PARCIAL (CONTADO) ---');
     console.log(`Cantidad: ${partialReturnInvoices.length}`);
     partialReturnInvoices.forEach(inv => {
       console.log(`  ${inv.number} - ${inv.date} - ${formatCOP(inv.total)}`);
     });
 
+    console.log('\n--- FACTURAS A CRÉDITO CON DEVOLUCIÓN PARCIAL ---');
+    console.log(`Cantidad: ${partialReturnCreditInvoices.length}`);
+    partialReturnCreditInvoices.forEach(inv => {
+      console.log(`  ${inv.number} - ${inv.date} - ${formatCOP(inv.total)}`);
+    });
+
+    // Facturas pagas incluyen devoluciones parciales de contado
     const paidInvoicesRevenue = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
-    const creditInvoicesRevenue = creditInvoices.reduce((sum, inv) => sum + inv.total, 0);
     const partialReturnsAdjustment = partialReturnInvoices.reduce((sum, inv) => sum + inv.total, 0);
+    const paidInvoicesTotal = paidInvoicesRevenue + partialReturnsAdjustment;
+
+    // Los ingresos de crédito son SOLO los abonos recibidos
+    const creditInvoicesRevenue = creditPaymentsTotal;
 
     console.log('\n--- TOTALES POR CATEGORÍA ---');
-    console.log(`Ingresos facturas pagas: ${formatCOP(paidInvoicesRevenue)}`);
-    console.log(`Ingresos facturas crédito: ${formatCOP(creditInvoicesRevenue)}`);
-    console.log(`Ajuste devoluciones parciales: ${formatCOP(partialReturnsAdjustment)}`);
+    console.log(`Ingresos facturas pagas (solo contado): ${formatCOP(paidInvoicesRevenue)}`);
+    console.log(`Ingresos devoluciones parciales (contado): ${formatCOP(partialReturnsAdjustment)}`);
+    console.log(`Total facturas pagas (incluye dev. parciales): ${formatCOP(paidInvoicesTotal)}`);
+    console.log(`Ingresos facturas crédito (solo abonos): ${formatCOP(creditInvoicesRevenue)}`);
 
-    // 2. Ingresos de servicio técnico
+    // 3. Ingresos de servicio técnico
     const periodServiceOrders = serviceOrders.filter(order => {
       if (!order.received_date) return false;
 
@@ -244,32 +277,19 @@ export function FinancialClosures() {
     });
     const exchangesImpact = calculateExchangeImpact(periodExchanges);
 
-    // 3. Total de ingresos
+    // 4. Total de ingresos
     // Los totales de las facturas (invoice.total) YA incluyen el impacto de cambios
     // Por eso NO sumamos exchangesImpact aquí
-    const totalRevenue = paidInvoicesRevenue + creditInvoicesRevenue + partialReturnsAdjustment + serviceRevenue;
+    // paidInvoicesTotal ya incluye paidInvoicesRevenue + partialReturnsAdjustment
+    const totalRevenue = paidInvoicesTotal + creditInvoicesRevenue + serviceRevenue;
 
-    // 4. Crédito pendiente (TODOS los créditos pendientes, no solo del periodo)
+    // 5. Crédito pendiente (TODOS los créditos pendientes, no solo del periodo)
     const allCreditInvoices = invoices.filter(inv =>
       inv.company === company && inv.is_credit
     );
     const pendingCredit = allCreditInvoices
       .filter(inv => inv.status === 'pending')
       .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
-
-    // 5. Abonos a créditos del periodo
-    const periodCreditPayments = creditPayments.filter(payment => {
-      if (!payment.date) return false;
-
-      if (periodStart) {
-        const paymentDate = new Date(payment.date);
-        const cutoffDate = new Date(periodStart);
-        return paymentDate > cutoffDate;
-      }
-
-      return true;
-    });
-    const creditPaymentsTotal = periodCreditPayments.reduce((sum, p) => sum + p.amount, 0);
 
     // 6. Costo de productos vendidos (excluir facturas en confirmación, devueltas y canceladas)
     const invoicesForCost = periodInvoices.filter(inv =>
@@ -336,9 +356,8 @@ export function FinancialClosures() {
 
     console.log('\n=== RESUMEN FINAL DEL CIERRE ===');
     console.log(`Ingreso Total: ${formatCOP(totalRevenue)}`);
-    console.log(`  - Facturas pagas: ${formatCOP(paidInvoicesRevenue)}`);
-    console.log(`  - Facturas crédito: ${formatCOP(creditInvoicesRevenue)}`);
-    console.log(`  - Ajuste devoluciones parciales: ${formatCOP(partialReturnsAdjustment)}`);
+    console.log(`  - Facturas pagas (incluye dev. parciales): ${formatCOP(paidInvoicesTotal)}`);
+    console.log(`  - Facturas crédito (solo abonos): ${formatCOP(creditInvoicesRevenue)}`);
     console.log(`Crédito Pendiente: ${formatCOP(pendingCredit)}`);
     console.log(`Abonos del periodo: ${formatCOP(creditPaymentsTotal)}`);
     console.log(`Costo de Productos: ${formatCOP(productCosts)}`);
@@ -349,7 +368,7 @@ export function FinancialClosures() {
 
     return {
       totalRevenue,
-      paidInvoicesRevenue,
+      paidInvoicesRevenue: paidInvoicesTotal, // Incluye facturas pagas + devoluciones parciales
       creditInvoicesRevenue,
       partialReturnsAdjustment,
       serviceRevenue,
@@ -362,7 +381,7 @@ export function FinancialClosures() {
       netProfit,
       totalInvoices: periodInvoices.length,
       paidInvoices: paidInvoices.length,
-      creditInvoices: creditInvoices.length,
+      creditInvoices: periodCreditPayments.length, // Número de abonos a crédito recibidos
       partialReturnInvoices: partialReturnInvoices.length
     };
   };

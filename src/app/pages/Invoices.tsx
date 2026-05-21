@@ -295,13 +295,18 @@ export function Invoices() {
             total: defaultPrice,
             useUnitIds: product.use_unit_ids,
             unitIds: [],
-            availableIds: product.use_unit_ids ? (product.registered_ids || []) : undefined,
+            availableIds: product.use_unit_ids
+              ? (product.registered_ids || [])
+                  .filter((idObj: any) => !idObj.disabled) // 🔧 FIX: Filtrar IDs vendidas/deshabilitadas
+                  .map((idObj: any) => typeof idObj === 'string' ? idObj : idObj.id)
+              : undefined,
           };
           
           // Si usa IDs, abrir selector
           if (product.use_unit_ids) {
-            if ((product.registered_ids || []).length === 0) {
-              toast.error(`${product.name} no tiene IDs registradas disponibles`);
+            const availableIdsCount = (product.registered_ids || []).filter((idObj: any) => !idObj.disabled).length;
+            if (availableIdsCount === 0) {
+              toast.error(`${product.name} no tiene IDs disponibles (todas están vendidas)`);
               return;
             }
             
@@ -801,7 +806,7 @@ export function Invoices() {
 
     // Verificar IDs si el producto las usa
     if (product.use_unit_ids) {
-      const availableIds = product.registered_ids || [];
+      const availableIds = (product.registered_ids || []).filter((idObj: any) => !idObj.disabled);
       if (availableIds.length < quantity) {
         toast.error(`Solo hay ${availableIds.length} unidades con ID disponibles`);
         return;
@@ -819,7 +824,11 @@ export function Invoices() {
       total,
       useUnitIds: product.use_unit_ids,
       unitIds: [],
-      availableIds: product.use_unit_ids ? (product.registered_ids || []) : undefined,
+      availableIds: product.use_unit_ids
+        ? (product.registered_ids || [])
+            .filter((idObj: any) => !idObj.disabled) // 🔧 FIX: Filtrar IDs vendidas/deshabilitadas
+            .map((idObj: any) => typeof idObj === 'string' ? idObj : idObj.id)
+        : undefined,
     };
 
     // Si usa IDs, abrir selector
@@ -1299,9 +1308,33 @@ export function Invoices() {
   };
 
   const handleViewInvoice = async (invoice: Invoice) => {
-    setSelectedInvoice(invoice);
+    // 🔍 DEBUG: Log para ver qué contiene unitIds
+    console.log('🔍 DEBUG - handleViewInvoice:', invoice.number);
+    invoice.items.forEach((item, idx) => {
+      console.log(`  Item ${idx} (${item.productName}):`, {
+        unitIds: item.unitIds,
+        unitIdsType: typeof item.unitIds,
+        unitIdsArray: Array.isArray(item.unitIds),
+        unitIdsContent: item.unitIds ? JSON.stringify(item.unitIds) : 'undefined'
+      });
+    });
+
+    // 🔧 SANITIZAR: Asegurar que unitIds siempre sean strings, no objetos
+    const sanitizedInvoice = {
+      ...invoice,
+      items: invoice.items.map(item => ({
+        ...item,
+        unitIds: item.unitIds
+          ? item.unitIds.map((id: any) =>
+              typeof id === 'string' ? id : (id.id || String(id))
+            )
+          : undefined
+      }))
+    };
+
+    setSelectedInvoice(sanitizedInvoice);
     setIsViewDialogOpen(true);
-    
+
     // Cargar los abonos de esta factura si es a crédito
     if (invoice.is_credit) {
       const payments = await getCreditPaymentsByInvoice(invoice.id);

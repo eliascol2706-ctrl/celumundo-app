@@ -850,7 +850,7 @@ export function Layout() {
           onClick={() => {
             setSettingsDialogOpen(true);
           }}
-          className="fixed bottom-20 right-4 lg:bottom-24 lg:right-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl"
+          className="fixed bottom-36 right-4 lg:bottom-40 lg:right-6 z-50 p-3 lg:p-4 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white rounded-full shadow-xl transition-all duration-300 hover:scale-110 hover:shadow-2xl"
           aria-label="Configuración"
           title="Configuración del Sistema"
         >
@@ -858,8 +858,8 @@ export function Layout() {
         </button>
       )}
 
-      {/* Botón flotante de Consultar Producto (solo para sellers) - En la posición donde estaba Settings */}
-      {currentUser?.role === 'seller' && (
+      {/* Botón flotante de Consultar Producto (para admin y sellers) */}
+      {(currentUser?.role === 'seller' || currentUser?.role === 'admin') && (
         <button
           onClick={() => {
             setProductSearchDialogOpen(true);
@@ -874,8 +874,8 @@ export function Layout() {
         </button>
       )}
 
-      {/* Diálogo de Consultar Producto (solo para sellers) */}
-      {currentUser?.role === 'seller' && (
+      {/* Diálogo de Consultar Producto (para admin y sellers) */}
+      {(currentUser?.role === 'seller' || currentUser?.role === 'admin') && (
         <Dialog open={productSearchDialogOpen} onOpenChange={setProductSearchDialogOpen}>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>

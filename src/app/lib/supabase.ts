@@ -1102,47 +1102,46 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
       console.log('[canCreateInvoice] ℹ️ Existen', anyClosures.length, 'cierres previos en BD');
     }
 
-    // PASO 3: Obtener TODAS las facturas del día anterior para validar con extractColombiaDate
-    const { data: allInvoices } = await supabase
-      .from('invoices')
-      .select('id, date, number')
-      .eq('company', company);
+    // PASO 3: Obtener TODAS las facturas y todos los cierres para validar fechas pendientes
+    const [{ data: allInvoices }, { data: allDailyClosures }] = await Promise.all([
+      supabase.from('invoices').select('id, date, number').eq('company', company),
+      supabase.from('daily_closures').select('id, date').eq('company', company)
+    ]);
 
     console.log('[canCreateInvoice] Total facturas en BD:', allInvoices?.length || 0);
+    console.log('[canCreateInvoice] Total cierres diarios en BD:', allDailyClosures?.length || 0);
 
-    // Filtrar facturas del día anterior usando extractColombiaDate
-    const yesterdayInvoices = (allInvoices || []).filter(inv => {
-      const invDate = extractColombiaDate(inv.date);
-      const isYesterday = invDate === yesterdayStr;
-      if (isYesterday) {
-        console.log('[canCreateInvoice] Factura de AYER encontrada:', {
-          number: inv.number,
-          date: inv.date,
-          extractedDate: invDate,
-          yesterday: yesterdayStr
-        });
-      }
-      return isYesterday;
-    });
-
-    console.log('[canCreateInvoice] Facturas de ayer:', yesterdayInvoices.length);
-    
-    // Debug: Mostrar todas las fechas únicas
+    // Debug: Mostrar todas las fechas únicas de facturas
     const uniqueDates = [...new Set((allInvoices || []).map(inv => extractColombiaDate(inv.date)))];
-    console.log('[canCreateInvoice] Fechas únicas en BD:', uniqueDates.sort().reverse().slice(0, 5));
+    console.log('[canCreateInvoice] Fechas únicas en BD:', uniqueDates.sort().reverse().slice(0, 10));
 
-    // PASO 4: Si NO hubo facturas AYER
-    if (yesterdayInvoices.length === 0) {
-      console.log('[canCreateInvoice] ℹ️ No hay facturas de ayer');
-      
-      const currentMonth = today.substring(0, 7); // YYYY-MM
-      const yesterdayMonth = yesterdayStr.substring(0, 7); // YYYY-MM
+    // Construir set de fechas con cierre diario
+    const closureDateSet = new Set(
+      (allDailyClosures || []).map(c => extractColombiaDate(c.date)).filter(Boolean)
+    );
 
-      // Si es día 1 de un nuevo mes (ayer era último día de otro mes)
+    // Obtener fechas pasadas únicas (antes de hoy) de facturas, ordenadas de más antigua a más reciente
+    const pastInvoiceDates = [...new Set(
+      (allInvoices || [])
+        .filter(inv => inv.date && extractColombiaDate(inv.date) < today)
+        .map(inv => extractColombiaDate(inv.date))
+    )].sort();
+
+    console.log('[canCreateInvoice] Fechas pasadas con facturas:', pastInvoiceDates);
+
+    // PASO 4: Buscar la fecha más antigua sin cierre
+    const oldestUnclosedDate = pastInvoiceDates.find(date => !closureDateSet.has(date));
+
+    if (!oldestUnclosedDate) {
+      console.log('[canCreateInvoice] ℹ️ No hay fechas pasadas sin cierre');
+
+      // Verificar si es un nuevo mes y requiere cierre mensual
+      const currentMonth = today.substring(0, 7);
+      const yesterdayMonth = yesterdayStr.substring(0, 7);
+
       if (currentMonth !== yesterdayMonth) {
         console.log('[canCreateInvoice] Es un nuevo mes, verificar cierre mensual del mes anterior');
 
-        // Verificar si HUBO facturas en el mes anterior
         const previousMonthInvoices = (allInvoices || []).filter(inv => {
           const invDate = extractColombiaDate(inv.date);
           return invDate.startsWith(yesterdayMonth);
@@ -1150,9 +1149,7 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
 
         console.log('[canCreateInvoice] Facturas del mes anterior:', previousMonthInvoices.length);
 
-        // Solo pedir cierre mensual si HUBO facturas en el mes anterior
         if (previousMonthInvoices.length > 0) {
-          // Verificar si existe un cierre mensual para el mes anterior
           const { data: monthlyClosures } = await supabase
             .from('monthly_closures')
             .select('id')
@@ -1174,72 +1171,19 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
         }
       }
 
-      // Si no hay cierres previos en el sistema, es primera vez, permitir
-      if (!anyClosures || anyClosures.length === 0) {
-        console.log('[canCreateInvoice] ✅ Primera vez en el sistema, permitir facturar');
-        return { canCreate: true };
-      }
-
-      console.log('[canCreateInvoice] ✅ No hay facturas de ayer pero hay cierres previos, permitir facturar');
+      console.log('[canCreateInvoice] ✅ Sin fechas pendientes, permitir facturar');
       return { canCreate: true };
     }
 
-    // PASO 5: Si hubo facturas AYER, verificar que se haya hecho el cierre del día anterior
-    const { data: yesterdayClosures } = await supabase
-      .from('daily_closures')
-      .select('id')
-      .eq('company', company)
-      .eq('date', yesterdayStr)
-      .limit(1);
+    // PASO 5: Hay una fecha sin cierre — bloquear y mostrar qué día pendiente
+    const unclosedDateObj = new Date(oldestUnclosedDate + 'T12:00:00');
+    const unclosedFormatted = unclosedDateObj.toLocaleDateString('es-ES', { timeZone: 'America/Bogota', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
 
-    if (!yesterdayClosures || yesterdayClosures.length === 0) {
-      const yesterdayDate = new Date(yesterdayStr + 'T12:00:00');
-      const yesterdayFormatted = yesterdayDate.toLocaleDateString('es-ES', { timeZone: 'America/Bogota' });
-
-      console.log('[canCreateInvoice] ❌ Falta cierre del día anterior');
-      return {
-        canCreate: false,
-        message: `⚠️ Debes realizar el CIERRE DEL DÍA de ayer (${yesterdayFormatted}) antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre diario.`
-      };
-    }
-
-    // PASO 6: Verificar si es un nuevo mes y requiere cierre mensual
-    const currentMonth = today.substring(0, 7);
-    const yesterdayMonth = yesterdayStr.substring(0, 7);
-
-    if (currentMonth !== yesterdayMonth) {
-      console.log('[canCreateInvoice] Es un nuevo mes después de cerrar ayer, verificar cierre mensual');
-
-      // Verificar si HUBO facturas en el mes anterior
-      const previousMonthInvoices = (allInvoices || []).filter(inv => {
-        const invDate = extractColombiaDate(inv.date);
-        return invDate.startsWith(yesterdayMonth);
-      });
-
-      console.log('[canCreateInvoice] Facturas del mes anterior:', previousMonthInvoices.length);
-
-      // Solo pedir cierre mensual si HUBO facturas en el mes anterior
-      if (previousMonthInvoices.length > 0) {
-        const { data: monthlyClosures } = await supabase
-          .from('monthly_closures')
-          .select('id')
-          .eq('company', company)
-          .eq('month', yesterdayMonth)
-          .limit(1);
-
-        if (!monthlyClosures || monthlyClosures.length === 0) {
-          const previousMonthDate = new Date(yesterdayStr + 'T12:00:00');
-          const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'America/Bogota' });
-
-          console.log('[canCreateInvoice] ❌ Falta cierre mensual del mes anterior');
-          return {
-            canCreate: false,
-            requiresMonthlyClose: true,
-            message: `⚠️ Es un nuevo mes. Debes realizar el CIERRE MENSUAL de ${monthName} antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre mensual.`
-          };
-        }
-      }
-    }
+    console.log('[canCreateInvoice] ❌ Fecha sin cierre encontrada:', oldestUnclosedDate);
+    return {
+      canCreate: false,
+      message: `⚠️ Debes realizar el CIERRE DEL DÍA del ${unclosedFormatted} antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre diario.`
+    };
 
     console.log('[canCreateInvoice] ✅ Todas las validaciones pasaron, permitir facturar');
     return { canCreate: true };

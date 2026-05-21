@@ -150,6 +150,9 @@ export function FinancialManagement() {
   // Estado para modal de desglose de ingresos
   const [isIncomeBreakdownOpen, setIsIncomeBreakdownOpen] = useState(false);
 
+  // Estado para modal de desglose de costos de productos
+  const [isCostBreakdownOpen, setIsCostBreakdownOpen] = useState(false);
+
   // Filtros para modales
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('');
@@ -337,10 +340,14 @@ export function FinancialManagement() {
         return expDate.startsWith(targetMonth);
       });
 
-      // IMPORTANTE: Solo contar facturas REGULARES pagadas
-      // Las facturas a crédito se contabilizan a través de sus abonos para evitar doble contabilidad
+      // Facturas regulares pagadas (no crédito)
       const facturasPagas = monthInvoices
         .filter((inv) => (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit)
+        .reduce((sum, inv) => sum + inv.total, 0);
+
+      // Facturas a crédito ya pagadas completamente o con devolución parcial
+      const creditosPagados = monthInvoices
+        .filter((inv) => (inv.status === 'paid' || inv.status === 'partial_return') && inv.is_credit)
         .reduce((sum, inv) => sum + inv.total, 0);
 
       const totalDevoluciones = monthReturns.reduce((sum, ret) => sum + ret.total, 0);
@@ -351,32 +358,28 @@ export function FinancialManagement() {
         return sum + diff;
       }, 0);
 
-      // NUEVO: Abonos a crédito del mes - calcular ganancia proporcional
+      // Mantener abonos para referencia en otros cálculos
       const paymentsDelMes = allCreditPayments.filter((payment) => {
         const paymentDate = extractColombiaDate(payment.date);
         return paymentDate.startsWith(targetMonth);
       });
 
-      // Calcular la ganancia real de los abonos (no el monto completo)
       const gananciasDeAbonos = paymentsDelMes.reduce((sum, payment) => {
         return sum + calculatePaymentProfit(payment);
       }, 0);
 
-      // Mantener el total de abonos para referencia
       const abonosDelMes = paymentsDelMes.reduce((sum, payment) => sum + payment.amount, 0);
 
-      // No restamos totalDevoluciones porque las facturas 'returned' ya no se cuentan en facturasPagas
-      // MODIFICADO: Incluir MONTO COMPLETO de abonos a crédito
-      // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
-      const ingresoNeto = facturasPagas + abonosDelMes;
+      // Ingresos del mes: regulares pagadas + créditos pagados
+      const ingresoNeto = facturasPagas + creditosPagados;
 
-      // NUEVO: Total de Facturas En Confirmación (solo facturas pending y pending_confirmation)
+      // Ingresos por factura (referencia, no se usa en ganancias)
       const totalFacturasEnConfirmacion = monthInvoices
         .filter((inv) => inv.status === 'pending' || inv.status === 'pending_confirmation')
         .reduce((sum, inv) => sum + inv.total, 0);
       const ingresosPorFactura = totalFacturasEnConfirmacion;
 
-      // NUEVO: Costos de Productos (solo facturas pagas y devueltas parcialmente)
+      // Costos de Productos: mismas facturas que ingresoNeto (regulares + créditos pagados)
       const facturasParaCostos = monthInvoices.filter((inv) => {
         return inv.status === 'paid' || inv.status === 'partial_return';
       });
@@ -433,6 +436,7 @@ export function FinancialManagement() {
         totalDevoluciones,
         impactoCambios,
         facturasPagas,
+        creditosPagados,
         abonosDelMes,
         gananciasDeAbonos,
         ingresosPorFactura,
@@ -1331,10 +1335,10 @@ export function FinancialManagement() {
                     <span>Facturas pagas</span>
                     <span className="font-medium">{formatCOP(stats.currentMonth.facturasPagas)}</span>
                   </div>
-                  {stats.currentMonth.abonosDelMes > 0 && (
+                  {stats.currentMonth.creditosPagados > 0 && (
                     <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
-                      <span>Abonos</span>
-                      <span className="font-medium">{formatCOP(stats.currentMonth.abonosDelMes)}</span>
+                      <span>Créditos pagados</span>
+                      <span className="font-medium">{formatCOP(stats.currentMonth.creditosPagados)}</span>
                     </div>
                   )}
                   {stats.currentMonth.impactoCambios !== 0 && (
@@ -1430,7 +1434,7 @@ export function FinancialManagement() {
                 {/* Desglose */}
                 <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
                   <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Costos de productos en facturas pagas y devueltas parcialmente
+                    Costos de productos en las mismas facturas contadas en ingresos del mes (excluye crédito)
                   </div>
                 </div>
 
@@ -1454,6 +1458,16 @@ export function FinancialManagement() {
                     );
                   })()}
                 </div>
+
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsCostBreakdownOpen(true)}
+                  className="w-full mt-3 text-xs border-orange-300 dark:border-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950 text-orange-700 dark:text-orange-400"
+                >
+                  <ChevronRight className="w-3 h-3 mr-1" />
+                  Ver Desglose Detallado
+                </Button>
               </CardContent>
             </Card>
 
@@ -1576,8 +1590,8 @@ export function FinancialManagement() {
                     <span className="font-medium">{formatCOP(stats.currentMonth.gananciasNetas)}</span>
                   </div>
                   <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
-                    <span>Ingresos por factura</span>
-                    <span className="font-medium">{formatCOP(stats.currentMonth.ingresosPorFactura)}</span>
+                    <span>Ingresos del mes</span>
+                    <span className="font-medium">{formatCOP(stats.currentMonth.ingresoNeto)}</span>
                   </div>
                 </div>
 
@@ -2649,6 +2663,216 @@ export function FinancialManagement() {
 
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsIncomeBreakdownOpen(false)}>
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Desglose de Costos de Productos */}
+      <Dialog open={isCostBreakdownOpen} onOpenChange={setIsCostBreakdownOpen}>
+        <DialogContent className="max-w-6xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Package className="w-5 h-5 text-orange-600" />
+              Desglose de Costos de Productos
+            </DialogTitle>
+            <DialogDescription>
+              Detalles de los productos incluidos en el cálculo de costos del mes {(() => {
+                const targetMonth = isTimeTravel && selectedMonth ? selectedMonth : getColombiaDate().slice(0, 7);
+                const [year, month] = targetMonth.split('-');
+                const monthNames = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+                return `${monthNames[parseInt(month) - 1]} ${year}`;
+              })()}
+            </DialogDescription>
+          </DialogHeader>
+
+          {(() => {
+            const targetMonth = isTimeTravel && selectedMonth ? selectedMonth : getColombiaDate().slice(0, 7);
+            const monthInvoices = invoices.filter(inv => extractColombiaDate(inv.date).startsWith(targetMonth));
+
+            // Para costos e ingresos: usar todas las facturas pagadas (regulares + créditos pagados)
+            // Esto coincide con ingresoNeto = facturasPagas + creditosPagados
+            const facturasParaCostos = monthInvoices.filter((inv) => inv.status === 'paid' || inv.status === 'partial_return');
+
+            // Agrupar productos
+            const productMap = new Map<string, {
+              productId: string;
+              productName: string;
+              quantity: number;
+              unitCost: number;
+              totalCost: number;
+              totalRevenue: number;
+              averageRevenue: number;
+              profitMargin: number;
+            }>();
+
+            // Procesar TODAS las facturas pagadas para capturar tanto costos como ingresos
+            facturasParaCostos.forEach((invoice) => {
+              invoice.items.forEach((item) => {
+                // Excluir items que fueron devueltos en un cambio
+                if (item.exchanged && !item.fromExchange) {
+                  return;
+                }
+
+                const product = products.find((p) => p.id === item.productId);
+                const unitCost = product?.current_cost || 0;
+
+                const existing = productMap.get(item.productId);
+                if (existing) {
+                  existing.quantity += item.quantity;
+                  existing.totalCost += unitCost * item.quantity;
+                  existing.totalRevenue += item.total;
+                  existing.averageRevenue = existing.totalRevenue / existing.quantity;
+                  existing.profitMargin = existing.averageRevenue > 0
+                    ? ((existing.averageRevenue - existing.unitCost) / existing.averageRevenue) * 100
+                    : 0;
+                } else {
+                  const totalCost = unitCost * item.quantity;
+                  const totalRevenue = item.total;
+                  const averageRevenue = totalRevenue / item.quantity;
+                  const profitMargin = averageRevenue > 0
+                    ? ((averageRevenue - unitCost) / averageRevenue) * 100
+                    : 0;
+
+                  productMap.set(item.productId, {
+                    productId: item.productId,
+                    productName: item.productName,
+                    quantity: item.quantity,
+                    unitCost,
+                    totalCost,
+                    totalRevenue,
+                    averageRevenue,
+                    profitMargin
+                  });
+                }
+              });
+            });
+
+            // Calcular ingresos por separado: regulares vs crédito
+            const facturasRegulares = monthInvoices.filter((inv) => (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit);
+            const facturasCredito = monthInvoices.filter((inv) => (inv.status === 'paid' || inv.status === 'partial_return') && inv.is_credit);
+
+            let ingresosRegulares = 0;
+            let ingresosCredito = 0;
+
+            facturasRegulares.forEach((invoice) => {
+              invoice.items.forEach((item) => {
+                if (item.exchanged && !item.fromExchange) return;
+                ingresosRegulares += item.total;
+              });
+            });
+
+            facturasCredito.forEach((invoice) => {
+              invoice.items.forEach((item) => {
+                if (item.exchanged && !item.fromExchange) return;
+                ingresosCredito += item.total;
+              });
+            });
+
+            const productsList = Array.from(productMap.values()).sort((a, b) => b.totalCost - a.totalCost);
+            const totalCost = productsList.reduce((sum, p) => sum + p.totalCost, 0);
+            const totalRevenue = productsList.reduce((sum, p) => sum + p.totalRevenue, 0);
+            const overallMargin = totalRevenue > 0 ? ((totalRevenue - totalCost) / totalRevenue) * 100 : 0;
+
+            return (
+              <>
+                <div className="grid grid-cols-3 gap-4 mb-4">
+                  <Card className="border-orange-200 dark:border-orange-800 bg-orange-50/30 dark:bg-orange-950/20">
+                    <CardContent className="p-4">
+                      <div className="text-xs text-orange-600 dark:text-orange-400 uppercase mb-1">Costo Total</div>
+                      <div className="text-xl font-bold text-orange-700 dark:text-orange-400">{formatCOP(totalCost)}</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-emerald-200 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20">
+                    <CardContent className="p-4">
+                      <div className="text-xs text-emerald-600 dark:text-emerald-400 uppercase mb-1">Ingresos Totales</div>
+                      <div className="text-xl font-bold text-emerald-700 dark:text-emerald-400">{formatCOP(totalRevenue)}</div>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/20">
+                    <CardContent className="p-4">
+                      <div className="text-xs text-blue-600 dark:text-blue-400 uppercase mb-1">Margen Promedio</div>
+                      <div className="text-xl font-bold text-blue-700 dark:text-blue-400">{overallMargin.toFixed(1)}%</div>
+                    </CardContent>
+                  </Card>
+                </div>
+
+                {/* Desglose de Ingresos */}
+                <Card className="border-zinc-200 dark:border-zinc-800 mb-4">
+                  <CardContent className="p-4">
+                    <div className="text-sm font-semibold text-zinc-700 dark:text-zinc-300 mb-3">
+                      Desglose de Ingresos
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-zinc-600 dark:text-zinc-400">Facturas regulares pagadas</span>
+                        <span className="font-semibold text-zinc-900 dark:text-zinc-100">{formatCOP(ingresosRegulares)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-zinc-600 dark:text-zinc-400">Facturas crédito pagadas</span>
+                        <span className="font-semibold text-zinc-900 dark:text-zinc-100">{formatCOP(ingresosCredito)}</span>
+                      </div>
+                      <div className="pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="font-bold text-zinc-700 dark:text-zinc-300">Total Ingresos</span>
+                          <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatCOP(totalRevenue)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <div className="border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-zinc-50 dark:bg-zinc-900">
+                        <tr>
+                          <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Producto</th>
+                          <th className="text-right text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Cantidad</th>
+                          <th className="text-right text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Costo Unit.</th>
+                          <th className="text-right text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Costo Total</th>
+                          <th className="text-right text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Ingreso Prom.</th>
+                          <th className="text-right text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-4 py-3">Margen %</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
+                        {productsList.map((product) => (
+                          <tr key={product.productId} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50">
+                            <td className="px-4 py-3 text-sm text-zinc-900 dark:text-zinc-100">{product.productName}</td>
+                            <td className="px-4 py-3 text-sm text-right text-zinc-900 dark:text-zinc-100">{product.quantity}</td>
+                            <td className="px-4 py-3 text-sm text-right text-zinc-900 dark:text-zinc-100">{formatCOP(product.unitCost)}</td>
+                            <td className="px-4 py-3 text-sm text-right font-medium text-orange-600 dark:text-orange-400">{formatCOP(product.totalCost)}</td>
+                            <td className="px-4 py-3 text-sm text-right text-emerald-600 dark:text-emerald-400">{formatCOP(product.averageRevenue)}</td>
+                            <td className="px-4 py-3 text-sm text-right">
+                              <span className={`font-medium ${product.profitMargin >= 20 ? 'text-emerald-600 dark:text-emerald-400' : product.profitMargin >= 10 ? 'text-amber-600 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>
+                                {product.profitMargin.toFixed(1)}%
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                      <tfoot className="bg-zinc-50 dark:bg-zinc-900 border-t-2 border-zinc-300 dark:border-zinc-700">
+                        <tr>
+                          <td className="px-4 py-3 text-sm font-bold text-zinc-900 dark:text-zinc-100">TOTAL</td>
+                          <td className="px-4 py-3 text-sm text-right font-bold text-zinc-900 dark:text-zinc-100">
+                            {productsList.reduce((sum, p) => sum + p.quantity, 0)}
+                          </td>
+                          <td className="px-4 py-3"></td>
+                          <td className="px-4 py-3 text-sm text-right font-bold text-orange-600 dark:text-orange-400">{formatCOP(totalCost)}</td>
+                          <td className="px-4 py-3 text-sm text-right font-bold text-emerald-600 dark:text-emerald-400">{formatCOP(totalRevenue)}</td>
+                          <td className="px-4 py-3 text-sm text-right font-bold text-blue-600 dark:text-blue-400">{overallMargin.toFixed(1)}%</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsCostBreakdownOpen(false)}>
               Cerrar
             </Button>
           </DialogFooter>

@@ -108,7 +108,7 @@ export function ProductSalesReportDialog({
             quantitySold: item.quantity,
             totalRevenue: item.total,
             averagePrice: item.price,
-            unitIds: item.unitIds || [],
+            unitIds: item.unitIds ? [...item.unitIds] : [], // 🔧 FIX: Crear copia del array para evitar mutación
             invoiceNumbers: [invoice.number],
             category: productData?.category || 'Sin categoría'
           });
