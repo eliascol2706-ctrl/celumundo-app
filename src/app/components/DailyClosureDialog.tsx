@@ -34,6 +34,7 @@ interface DailyClosureDialogProps {
   topProducts: any[];
   products: any[]; // Lista de productos para calcular costos
   expenses?: any[]; // Gastos del día
+  creditNotes?: any[]; // NUEVO: Notas de crédito del día
   onSuccess: () => void;
 }
 
@@ -46,6 +47,7 @@ export function DailyClosureDialog({
   topProducts,
   products,
   expenses,
+  creditNotes,
   onSuccess
 }: DailyClosureDialogProps) {
   const [phase, setPhase] = useState<Phase>(1);
@@ -284,9 +286,14 @@ export function DailyClosureDialog({
     });
 
     // SUMAR ABONOS A CRÉDITO DEL DÍA (separados - se suman SOLO a totalAbonos, NO a totalCash/totalTransfer)
+    // EXCLUIR abonos que son notas de crédito (payment_method: 'nota_credito')
     let totalAbonos = 0;
     if (dailyStats.creditPayments && dailyStats.creditPayments.length > 0) {
       dailyStats.creditPayments.forEach(payment => {
+        // Excluir notas de crédito
+        if (payment.payment_method === 'nota_credito') {
+          return;
+        }
         const amount = payment.amount || 0;
         totalAbonos += amount;
       });
@@ -314,6 +321,33 @@ export function DailyClosureDialog({
     // Sumar ingresos de servicio técnico
     const serviceRevenue = dailyStats.serviceRevenue || 0;
 
+    // RESTAR NOTAS DE CRÉDITO DEL DÍA según método de reembolso
+    let creditNotesTotal = 0;
+    let creditNotesCash = 0;
+    let creditNotesTransfer = 0;
+
+    if (creditNotes && creditNotes.length > 0) {
+      creditNotes.forEach(cn => {
+        const cnTotal = cn.total || 0;
+        creditNotesTotal += cnTotal;
+
+        // Restar según el método de reembolso
+        if (cn.refund_method === 'efectivo') {
+          totalCash -= cnTotal;
+          creditNotesCash += cnTotal;
+        } else if (cn.refund_method === 'transferencia') {
+          totalTransfer -= cnTotal;
+          creditNotesTransfer += cnTotal;
+        }
+        // 'saldo_a_favor' y 'descuento' no afectan efectivo/transferencia directamente,
+        // pero sí reducen el total general
+      });
+    }
+
+    // Calcular notas de crédito que NO son efectivo ni transferencia
+    // (saldo_a_favor y descuento) que aún no se han restado
+    const creditNotesOther = creditNotesTotal - creditNotesCash - creditNotesTransfer;
+
     return {
       totalCash,
       totalTransfer,
@@ -326,7 +360,10 @@ export function DailyClosureDialog({
         otros: totalOtherMethods
       },
       serviceRevenue,
-      total: totalCash + totalTransfer + totalOthers + totalAbonos + serviceRevenue
+      creditNotesTotal,
+      creditNotesCash,
+      creditNotesTransfer,
+      total: totalCash + totalTransfer + totalOthers + totalAbonos + serviceRevenue - creditNotesOther
     };
   };
 
@@ -420,6 +457,7 @@ export function DailyClosureDialog({
           pending_credit: dailyStats.pendingCreditBalance || 0,
           credit_payments: creditPaymentsTotal,
           exchange_impact: exchangeImpact,
+          credit_notes_total: paymentTotals.creditNotesTotal || 0, // NUEVO: Notas de crédito del día
           closed_by: closedByName.trim(),
           closed_at: new Date().toISOString(),
         });
@@ -517,187 +555,229 @@ export function DailyClosureDialog({
                 )}
 
                 {/* Top Stats */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <Card>
+                <div className="space-y-4">
+                  {/* Fila 1: Ingresos Totales - Card Principal Destacada */}
+                  <Card className="border-emerald-200 dark:border-emerald-800 bg-gradient-to-br from-emerald-50 to-green-50 dark:from-emerald-950/30 dark:to-green-950/30">
                     <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Ingresos Totales
+                      <CardTitle className="text-base font-semibold text-emerald-900 dark:text-emerald-100 flex items-center gap-2">
+                        💰 Ingresos Totales del Día
                       </CardTitle>
                     </CardHeader>
                     <CardContent>
-                      <div className="text-2xl font-bold text-green-600 dark:text-green-400">
+                      <div className="text-4xl font-bold text-emerald-600 dark:text-emerald-400 mb-2">
                         COP {formatCOP(paymentTotals.total)}
                       </div>
-                      <p className="text-xs text-muted-foreground mt-1">
+                      <p className="text-sm text-emerald-700 dark:text-emerald-300">
                         Incluye facturas pagadas y devoluciones parciales
                       </p>
-                      {(dailyStats.serviceRevenue || 0) > 0 && (
-                        <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                          + Servicio Técnico
+                      <div className="mt-3 pt-3 border-t border-emerald-200 dark:border-emerald-700 space-y-1">
+                        {(dailyStats.serviceRevenue || 0) > 0 && (
+                          <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">
+                            + Servicio Técnico: COP {formatCOP(dailyStats.serviceRevenue || 0)}
+                          </p>
+                        )}
+                        {dailyStats.exchanges && dailyStats.exchanges.length > 0 && (() => {
+                          const exchangeImpact = dailyStats.exchanges.reduce((sum, ex) => sum + (ex.price_difference || 0), 0);
+                          if (exchangeImpact !== 0) {
+                            return (
+                              <p className={`text-xs font-medium ${
+                                exchangeImpact > 0
+                                  ? 'text-emerald-600 dark:text-emerald-400'
+                                  : 'text-orange-600 dark:text-orange-400'
+                              }`}>
+                                Excedente Cambios: {exchangeImpact > 0 ? '+' : ''}COP {formatCOP(exchangeImpact)}
+                              </p>
+                            );
+                          }
+                          return null;
+                        })()}
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Fila 2: Ganancias */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card className="border-green-200 dark:border-green-800">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-center justify-between">
+                          <CardTitle className="text-sm font-semibold text-green-900 dark:text-green-100 flex items-center gap-2">
+                            💎 Ganancias del Día
+                          </CardTitle>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setShowProfitDetails(true)}
+                            className="h-7 w-7 p-0 hover:bg-green-100 dark:hover:bg-green-900/30"
+                          >
+                            <FileText className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent>
+                        <div className={`text-3xl font-bold mb-2 ${
+                          calculateProfitCollected() >= 0
+                            ? 'text-green-600 dark:text-green-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          COP {formatCOP(calculateProfitCollected())}
+                        </div>
+                        <p className="text-xs text-green-700 dark:text-green-300 mb-3">
+                          Utilidad de ventas pagadas
                         </p>
-                      )}
-                      {dailyStats.exchanges && dailyStats.exchanges.length > 0 && (() => {
-                        const exchangeImpact = dailyStats.exchanges.reduce((sum, ex) => sum + (ex.price_difference || 0), 0);
-                        if (exchangeImpact !== 0) {
-                          return (
-                            <p className={`text-xs mt-1 font-medium ${
-                              exchangeImpact > 0
-                                ? 'text-emerald-600 dark:text-emerald-400'
-                                : 'text-orange-600 dark:text-orange-400'
+                        <div className="space-y-2 pt-3 border-t border-green-200 dark:border-green-800">
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-muted-foreground">Costo de productos:</span>
+                            <span className="font-semibold">COP {formatCOP(totalCost)}</span>
+                          </div>
+                          <div className="flex justify-between items-center text-xs">
+                            <span className="text-muted-foreground">Margen:</span>
+                            <span className={`font-bold ${
+                              (() => {
+                                const profit = calculateProfitCollected();
+                                const revenue = totalCost + profit;
+                                const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+                                return margin >= 30 ? 'text-green-600 dark:text-green-400' : margin >= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400';
+                              })()
                             }`}>
-                              Excedente Cambios: COP {formatCOP(exchangeImpact)}
-                            </p>
-                          );
-                        }
-                        return null;
-                      })()}
-                    </CardContent>
-                  </Card>
+                              {(() => {
+                                const profit = calculateProfitCollected();
+                                const revenue = totalCost + profit;
+                                const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+                                return margin.toFixed(1);
+                              })()}%
+                            </span>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
 
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-sm font-medium text-muted-foreground">
-                          💰 Ganancias del Día
+                    <Card className="border-blue-200 dark:border-blue-800">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-semibold text-blue-900 dark:text-blue-100 flex items-center gap-2">
+                          📊 Ganancias por Crédito
                         </CardTitle>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setShowProfitDetails(true)}
-                          className="h-7 w-7 p-0"
-                        >
-                          <FileText className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      <div className={`text-2xl font-bold ${
-                        calculateProfitCollected() >= 0
-                          ? 'text-green-600 dark:text-green-400'
-                          : 'text-red-600 dark:text-red-400'
-                      }`}>
-                        COP {formatCOP(calculateProfitCollected())}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Utilidad de ventas pagadas
-                      </p>
-                      <div className="mt-3 pt-3 border-t border-border space-y-1">
-                        <div className="flex justify-between items-center text-xs">
-                          <span className="text-muted-foreground">Costo de productos:</span>
-                          <span className="font-medium">COP {formatCOP(totalCost)}</span>
+                      </CardHeader>
+                      <CardContent>
+                        <div className={`text-3xl font-bold mb-2 ${
+                          calculateProfitGenerated() >= 0
+                            ? 'text-blue-600 dark:text-blue-400'
+                            : 'text-red-600 dark:text-red-400'
+                        }`}>
+                          COP {formatCOP(calculateProfitGenerated())}
                         </div>
-                        <div className="flex justify-between items-center text-xs">
-                          <span className="text-muted-foreground">Margen de ganancia:</span>
-                          <span className={`font-bold ${
-                            (() => {
-                              const profit = calculateProfitCollected();
-                              const revenue = totalCost + profit;
-                              const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-                              return margin >= 30 ? 'text-green-600 dark:text-green-400' : margin >= 15 ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400';
-                            })()
-                          }`}>
-                            {(() => {
-                              const profit = calculateProfitCollected();
-                              const revenue = totalCost + profit;
-                              const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-                              return margin.toFixed(1);
-                            })()}%
-                          </span>
+                        <p className="text-xs text-blue-700 dark:text-blue-300">
+                          Facturas a crédito del día
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </div>
+
+                  {/* Fila 3: Métodos de Pago */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Card className="border-emerald-200 dark:border-emerald-700">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-medium text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
+                          💵 Efectivo
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
+                          {formatCOP(paymentTotals.totalCash)}
                         </div>
-                      </div>
-                    </CardContent>
-                  </Card>
+                        <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">
+                          Caja física
+                        </p>
+                      </CardContent>
+                    </Card>
 
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        📊 Ganancias por Crédito
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className={`text-2xl font-bold ${
-                        calculateProfitGenerated() >= 0
-                          ? 'text-blue-600 dark:text-blue-400'
-                          : 'text-red-600 dark:text-red-400'
-                      }`}>
-                        COP {formatCOP(calculateProfitGenerated())}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Facturas a crédito del día
-                      </p>
-                    </CardContent>
-                  </Card>
+                    <Card className="border-violet-200 dark:border-violet-700">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-medium text-violet-800 dark:text-violet-200 flex items-center gap-2">
+                          🏦 Transferencias
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold text-violet-600 dark:text-violet-400 mb-2">
+                          {formatCOP(paymentTotals.totalTransfer)}
+                        </div>
+                        <div className="text-xs text-violet-700 dark:text-violet-300 space-y-0.5">
+                          {paymentTotals.transferBreakdown.transferencia > 0 && (
+                            <div className="flex justify-between">
+                              <span>Transferencia:</span>
+                              <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.transferencia)}</span>
+                            </div>
+                          )}
+                          {paymentTotals.transferBreakdown.nequi > 0 && (
+                            <div className="flex justify-between">
+                              <span>💜 Nequi:</span>
+                              <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.nequi)}</span>
+                            </div>
+                          )}
+                          {paymentTotals.transferBreakdown.daviplata > 0 && (
+                            <div className="flex justify-between">
+                              <span>🔴 Daviplata:</span>
+                              <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.daviplata)}</span>
+                            </div>
+                          )}
+                          {paymentTotals.transferBreakdown.otros > 0 && (
+                            <div className="flex justify-between">
+                              <span>📱 Otros:</span>
+                              <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.otros)}</span>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
 
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Efectivo
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                        {formatCOP(paymentTotals.totalCash)}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        💵 Caja física
-                      </p>
-                    </CardContent>
-                  </Card>
+                    <Card className="border-blue-200 dark:border-blue-700">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-medium text-blue-800 dark:text-blue-200 flex items-center gap-2">
+                          💳 Abonos de Créditos
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+                          {formatCOP(paymentTotals.totalAbonos || 0)}
+                        </div>
+                        <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
+                          Pagos a crédito del día
+                        </p>
+                      </CardContent>
+                    </Card>
+                  </div>
 
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Transferencias
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-                        {formatCOP(paymentTotals.totalTransfer)}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-2 space-y-0.5">
-                        {paymentTotals.transferBreakdown.transferencia > 0 && (
-                          <div className="flex justify-between">
-                            <span>🏦 Transferencia:</span>
-                            <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.transferencia)}</span>
-                          </div>
-                        )}
-                        {paymentTotals.transferBreakdown.nequi > 0 && (
-                          <div className="flex justify-between">
-                            <span>💜 Nequi:</span>
-                            <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.nequi)}</span>
-                          </div>
-                        )}
-                        {paymentTotals.transferBreakdown.daviplata > 0 && (
-                          <div className="flex justify-between">
-                            <span>🔴 Daviplata:</span>
-                            <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.daviplata)}</span>
-                          </div>
-                        )}
-                        {paymentTotals.transferBreakdown.otros > 0 && (
-                          <div className="flex justify-between">
-                            <span>📱 Otros:</span>
-                            <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.otros)}</span>
-                          </div>
-                        )}
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardHeader className="pb-3">
-                      <CardTitle className="text-sm font-medium text-muted-foreground">
-                        Abonos de Créditos
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-                        {formatCOP(paymentTotals.totalAbonos || 0)}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        💳 Pagos a crédito del día
-                      </p>
-                    </CardContent>
-                  </Card>
+                  {/* Fila 4: Notas de Crédito (condicional) */}
+                  {(paymentTotals.creditNotesTotal || 0) > 0 && (
+                    <Card className="border-red-300 dark:border-red-700 bg-red-50/50 dark:bg-red-950/20">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-semibold text-red-800 dark:text-red-200 flex items-center gap-2">
+                          📝 Notas de Crédito (Egresos)
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="text-3xl font-bold text-red-600 dark:text-red-400 mb-2">
+                          -{formatCOP(paymentTotals.creditNotesTotal || 0)}
+                        </div>
+                        <p className="text-xs text-red-700 dark:text-red-300 mb-3">
+                          {creditNotes?.length || 0} nota(s) emitida(s) hoy
+                        </p>
+                        <div className="pt-3 border-t border-red-200 dark:border-red-800 space-y-1">
+                          {paymentTotals.creditNotesCash > 0 && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-red-700 dark:text-red-300">💵 Efectivo:</span>
+                              <span className="font-semibold">-{formatCOP(paymentTotals.creditNotesCash)}</span>
+                            </div>
+                          )}
+                          {paymentTotals.creditNotesTransfer > 0 && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-red-700 dark:text-red-300">🏦 Transferencia:</span>
+                              <span className="font-semibold">-{formatCOP(paymentTotals.creditNotesTransfer)}</span>
+                            </div>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
                 </div>
 
                 {/* Hourly Sales Chart */}

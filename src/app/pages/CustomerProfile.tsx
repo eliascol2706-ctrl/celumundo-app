@@ -30,6 +30,7 @@ import {
   getCreditPaymentsByInvoice,
   updateCustomer,
   addCreditHistory,
+  getCreditNotesByCustomer,
   type Customer,
   type Invoice,
   type CreditHistory as CreditHistoryType,
@@ -58,6 +59,7 @@ export function CustomerProfile() {
   const [isPaymentDialogOpen, setIsPaymentDialogOpen] = useState(false);
   const [isUpdating, setIsUpdating] = useState(false);
   const [showTrackingLinkDialog, setShowTrackingLinkDialog] = useState(false);
+  const [saldoAFavor, setSaldoAFavor] = useState(0);
 
   useEffect(() => {
     if (document) {
@@ -82,10 +84,12 @@ export function CustomerProfile() {
         return;
       }
 
-      const [customerInvoices, historyData] = await Promise.all([
+      const [customerInvoices, historyData, creditNotes] = await Promise.all([
         getInvoicesByCustomer(decodedDocument, customerData.name),
-        getCreditHistory(decodedDocument)
+        getCreditHistory(decodedDocument),
+        getCreditNotesByCustomer(decodedDocument)
       ]);
+      setSaldoAFavor(creditNotes.reduce((s, cn) => s + cn.balance_remaining, 0));
 
       // Calcular el estado correcto del cliente basándose en sus facturas
       let calculatedStatus: 'active' | 'overdue' | 'blocked' = 'active';
@@ -356,50 +360,70 @@ export function CustomerProfile() {
 
       {/* Métricas de Crédito */}
       <div className="p-6 border-b border-zinc-100 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Cupo de Crédito</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{formatCOP(customer.credit_limit)}</div>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Límite aprobado</p>
-            </CardContent>
-          </Card>
+        <div className="space-y-4">
+          {/* Fila superior: 3 cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Cupo de Crédito</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{formatCOP(customer.credit_limit)}</div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Límite aprobado</p>
+              </CardContent>
+            </Card>
 
-          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Crédito Usado</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-amber-600">{formatCOP(usedCredit)}</div>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                {customer.credit_limit > 0 ? `${((usedCredit / customer.credit_limit) * 100).toFixed(1)}% utilizado` : 'Sin cupo'}
-              </p>
-            </CardContent>
-          </Card>
+            <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Crédito Usado</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-amber-600">{formatCOP(usedCredit)}</div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  {customer.credit_limit > 0 ? `${((usedCredit / customer.credit_limit) * 100).toFixed(1)}% utilizado` : 'Sin cupo'}
+                </p>
+              </CardContent>
+            </Card>
 
-          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Crédito Disponible</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-emerald-600">{formatCOP(availableCredit)}</div>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Para nuevas compras</p>
-            </CardContent>
-          </Card>
+            <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Crédito Disponible</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-emerald-600">{formatCOP(availableCredit)}</div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Para nuevas compras</p>
+              </CardContent>
+            </Card>
+          </div>
 
-          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Plazo de Pago</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{customer.payment_term} días</div>
-              {maxOverdueDays > 0 && (
-                <p className="text-xs text-red-600 mt-1 font-medium">{maxOverdueDays} días de mora</p>
-              )}
-            </CardContent>
-          </Card>
+          {/* Fila inferior: 2 cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Plazo de Pago</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{customer.payment_term} días</div>
+                {maxOverdueDays > 0 && (
+                  <p className="text-xs text-red-600 mt-1 font-medium">{maxOverdueDays} días de mora</p>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className={`shadow-sm ${saldoAFavor > 0 ? 'border-purple-200 dark:border-purple-800 bg-purple-50 dark:bg-purple-950/20' : 'border-zinc-200 dark:border-zinc-800'}`}>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Saldo a Favor</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className={`text-2xl font-bold ${saldoAFavor > 0 ? 'text-purple-600 dark:text-purple-400' : 'text-zinc-400 dark:text-zinc-600'}`}>
+                  {formatCOP(saldoAFavor)}
+                </div>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  {saldoAFavor > 0 ? 'Disponible en notas crédito' : 'Sin saldo a favor'}
+                </p>
+              </CardContent>
+            </Card>
+          </div>
         </div>
       </div>
 

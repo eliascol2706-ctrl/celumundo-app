@@ -41,13 +41,18 @@ import {
   updateCustomer,
   canCreateInvoice,
   getColombiaDateTime,
+  getColombiaDate,
   type Customer,
   getCurrentUser,
   getInvoices,
   saveInvoiceDraft,
   getInvoiceSaves,
   deleteInvoiceSave,
-  type InvoiceSave
+  type InvoiceSave,
+  getCreditNotesByCustomer,
+  applyCreditNoteBalance,
+  addCreditPayment,
+  type CreditNote
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -139,6 +144,11 @@ export function CreditInvoice() {
     totalDebt: 0
   });
 
+  // Estados para saldo a favor (notas crédito disponibles del cliente)
+  const [availableCreditNotes, setAvailableCreditNotes] = useState<CreditNote[]>([]);
+  const [selectedCreditNoteId, setSelectedCreditNoteId] = useState<string>('');
+  const [applyBalance, setApplyBalance] = useState(false);
+
   // Estados para guardar/cargar facturas
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [showLoadDialog, setShowLoadDialog] = useState(false);
@@ -156,6 +166,16 @@ export function CreditInvoice() {
     if (selectedCustomer) {
       calculatePaymentTerm();
       analyzeCreditStatus();
+      // Buscar notas crédito con saldo disponible para este cliente
+      getCreditNotesByCustomer(selectedCustomer.document).then(notes => {
+        setAvailableCreditNotes(notes);
+        setSelectedCreditNoteId(notes.length > 0 ? notes[0].id : '');
+        setApplyBalance(false);
+      });
+    } else {
+      setAvailableCreditNotes([]);
+      setSelectedCreditNoteId('');
+      setApplyBalance(false);
     }
   }, [selectedCustomer, items]);
 
@@ -511,13 +531,25 @@ export function CreditInvoice() {
 
       // Procesar cada grupo de productos
       for (const [productId, groupItems] of productGroups) {
-        const product = products.find((p) => p.id === productId);
-        if (!product) continue;
+        // ✅ OBTENER STOCK ACTUALIZADO desde BD (no del estado local)
+        const { supabase, getCurrentCompany } = await import('../lib/supabase');
+        const company = getCurrentCompany();
+        const { data: currentProduct, error } = await supabase
+          .from('products')
+          .select('stock, registered_ids')
+          .eq('id', productId)
+          .eq('company', company)
+          .single();
+
+        if (error || !currentProduct) {
+          console.error('Error al obtener stock actualizado:', error);
+          continue;
+        }
 
         // Sumar cantidades totales para este producto
         const totalQuantity = groupItems.reduce((sum, item) => sum + item.quantity, 0);
-        const newStock = product.stock - totalQuantity;
-        let newRegisteredIds = product.registered_ids;
+        const newStock = currentProduct.stock - totalQuantity;
+        let newRegisteredIds = currentProduct.registered_ids;
 
         // Para facturas a crédito siempre INHABILITAR las IDs
         for (const item of groupItems) {
@@ -532,6 +564,24 @@ export function CreditInvoice() {
           stock: newStock,
           registered_ids: newRegisteredIds
         });
+      }
+
+      // Aplicar saldo a favor si el usuario lo eligió
+      if (applyBalance && selectedCreditNoteId) {
+        const cn = availableCreditNotes.find(n => n.id === selectedCreditNoteId);
+        if (cn) {
+          const amountToApply = Math.min(cn.balance_remaining, invoice.total);
+          await addCreditPayment({
+            invoice_id: invoice.id,
+            customer_document: selectedCustomer.document,
+            date: getColombiaDate(),
+            amount: amountToApply,
+            payment_method: 'nota_credito',
+            notes: `Saldo a favor de Nota Crédito ${cn.number}`,
+            registered_by: getCurrentUser()?.username || 'Sistema',
+          });
+          await applyCreditNoteBalance(cn.id, amountToApply);
+        }
       }
 
       toast.success('Factura a crédito creada exitosamente');
@@ -1318,6 +1368,61 @@ export function CreditInvoice() {
                             </p>
                           </div>
                         </div>
+                      </div>
+                    )}
+
+                    {/* Saldo a favor — notas crédito disponibles */}
+                    {availableCreditNotes.length > 0 && (
+                      <div className="p-3 bg-purple-50 dark:bg-purple-950/30 border border-purple-200 dark:border-purple-800 rounded-lg space-y-2">
+                        <div className="flex items-start gap-2">
+                          <CheckCircle className="w-4 h-4 text-purple-600 dark:text-purple-400 flex-shrink-0 mt-0.5" />
+                          <div className="flex-1">
+                            <p className="text-sm font-medium text-purple-900 dark:text-purple-300">
+                              Saldo a favor disponible
+                            </p>
+                            <p className="text-xs text-purple-700 dark:text-purple-400 mt-0.5">
+                              {availableCreditNotes.length === 1
+                                ? `Nota Crédito ${availableCreditNotes[0].number} · ${formatCOP(availableCreditNotes[0].balance_remaining)}`
+                                : `${availableCreditNotes.length} notas crédito · ${formatCOP(availableCreditNotes.reduce((s, n) => s + n.balance_remaining, 0))} total`
+                              }
+                            </p>
+                          </div>
+                        </div>
+
+                        {availableCreditNotes.length > 1 && (
+                          <Select value={selectedCreditNoteId} onValueChange={setSelectedCreditNoteId}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="Seleccionar nota crédito..." />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {availableCreditNotes.map(cn => (
+                                <SelectItem key={cn.id} value={cn.id} className="text-xs">
+                                  {cn.number} · {formatCOP(cn.balance_remaining)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={applyBalance}
+                            onChange={e => setApplyBalance(e.target.checked)}
+                            className="w-4 h-4 accent-purple-600"
+                          />
+                          <span className="text-xs text-purple-800 dark:text-purple-300">
+                            Aplicar{' '}
+                            {selectedCreditNoteId
+                              ? formatCOP(Math.min(
+                                  availableCreditNotes.find(n => n.id === selectedCreditNoteId)?.balance_remaining ?? 0,
+                                  calculateTotal()
+                                ))
+                              : ''
+                            }{' '}
+                            como abono a esta factura
+                          </span>
+                        </label>
                       </div>
                     )}
                   </div>

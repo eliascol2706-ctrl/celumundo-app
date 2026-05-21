@@ -177,6 +177,7 @@ export interface DailyClosure {
   pending_credit?: number; // Crédito pendiente
   credit_payments?: number; // Abonos a créditos del día
   exchange_impact?: number; // Impacto de cambios (diferencias de precio)
+  credit_notes_total?: number; // NUEVO: Total de notas de crédito emitidas (egresos)
   closed_by: string;
   closed_at: string;
   created_at?: string;
@@ -193,6 +194,7 @@ export interface MonthlyClosure {
   real_profit?: number; // Ganancias reales (ventas - costo productos - gastos) - DEPRECATED
   profit_generated?: number; // Ganancia de todas las ventas del mes (regulares + crédito)
   profit_collected?: number; // Ganancia de facturas pagadas al 100% en este mes
+  credit_notes_total?: number; // NUEVO: Total de notas de crédito emitidas en el mes (egresos)
   closed_by: string;
   closed_at: string;
   created_at?: string;
@@ -2193,6 +2195,8 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
   if (invoice) {
     // Calcular si es devolución completa
     const allReturns = await getReturnsByInvoice(returnData.invoice_id);
+
+    // Crear un mapa de cantidades devueltas por productId (solo para productos devolvibles)
     const totalReturnedItems: { [key: string]: number } = {};
 
     // Sumar cantidades devueltas (incluyendo la actual)
@@ -2203,24 +2207,43 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
     });
 
     // Actualizar items de la factura: eliminar productos devueltos o reducir cantidad
+    // IMPORTANTE: Solo afectar productos que NO sean exchanged (sin fromExchange)
+    // Procesamos en orden y vamos restando de las cantidades devueltas disponibles
+    const remainingReturned: { [key: string]: number } = { ...totalReturnedItems };
+
     const updatedItems = invoice.items
       .map((invItem: InvoiceItem) => {
-        const returnedQty = totalReturnedItems[invItem.productId] || 0;
-        const remainingQty = invItem.quantity - returnedQty;
+        // Si el producto fue cambiado (exchanged sin fromExchange), mantenerlo sin cambios
+        // porque NO puede devolverse
+        if (invItem.exchanged && !invItem.fromExchange) {
+          return invItem;
+        }
+
+        // Verificar cuánto de este producto específico se devolvió
+        const returnedQty = remainingReturned[invItem.productId] || 0;
+
+        if (returnedQty <= 0) {
+          // No se devolvió nada de este item, mantenerlo igual
+          return invItem;
+        }
+
+        // Calcular cuánto reducir de este item específico
+        const qtyToReduce = Math.min(invItem.quantity, returnedQty);
+        const remainingQty = invItem.quantity - qtyToReduce;
+
+        // Actualizar el contador de cantidades devueltas restantes
+        remainingReturned[invItem.productId] = returnedQty - qtyToReduce;
 
         if (remainingQty <= 0) {
           // Producto completamente devuelto, no incluirlo
           return null;
-        } else if (remainingQty < invItem.quantity) {
-          // Producto parcialmente devuelto, reducir cantidad
+        } else {
+          // Producto parcialmente devuelto o no afectado, ajustar cantidad
           return {
             ...invItem,
             quantity: remainingQty,
             total: remainingQty * invItem.price
           };
-        } else {
-          // Producto no devuelto, mantener igual
-          return invItem;
         }
       })
       .filter((item: InvoiceItem | null) => item !== null); // Eliminar productos completamente devueltos
@@ -3209,6 +3232,248 @@ export const updateCustomerStatus = async (customerDocument: string): Promise<vo
   
   if (customer.status !== newStatus) {
     await updateCustomer(customer.id, { status: newStatus });
+  }
+};
+
+// ============================================
+// NOTAS CRÉDITO
+// ============================================
+
+export interface CreditNoteItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  price: number;
+  total: number;
+  unitIds?: string[];
+}
+
+export interface CreditNote {
+  id: string;
+  company: 'celumundo' | 'repuestos';
+  number: string;
+  date: string;
+  invoice_id: string;
+  invoice_number: string;
+  customer_name?: string;
+  customer_document?: string;
+  items: CreditNoteItem[];
+  subtotal: number;
+  tax: number;
+  total: number;
+  balance_remaining: number;
+  reason?: string;
+  refund_method?: string;
+  processed_by?: string;
+  notes?: string;
+  status: 'issued' | 'cancelled';
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const getCreditNotes = async (): Promise<CreditNote[]> => {
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('credit_notes')
+    .select('*')
+    .eq('company', company)
+    .order('date', { ascending: false })
+    .limit(1000);
+  if (error) {
+    console.error('Error fetching credit_notes:', error);
+    return [];
+  }
+  return data || [];
+};
+
+export const getCreditNotesByInvoice = async (invoiceId: string): Promise<CreditNote[]> => {
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('credit_notes')
+    .select('*')
+    .eq('company', company)
+    .eq('invoice_id', invoiceId)
+    .order('date', { ascending: false });
+  if (error) {
+    console.error('Error fetching credit notes by invoice:', error);
+    return [];
+  }
+  return data || [];
+};
+
+export const getCreditNotesByCustomer = async (customerDocument: string): Promise<CreditNote[]> => {
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('credit_notes')
+    .select('*')
+    .eq('company', company)
+    .eq('customer_document', customerDocument)
+    .eq('status', 'issued')
+    .gt('balance_remaining', 0)
+    .order('date', { ascending: false });
+  if (error) {
+    console.error('Error fetching credit notes by customer:', error);
+    return [];
+  }
+  return data || [];
+};
+
+export const getCreditNotesByDate = async (dateStr: string): Promise<CreditNote[]> => {
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('credit_notes')
+    .select('*')
+    .eq('company', company)
+    .eq('status', 'issued')
+    .order('date', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching credit notes:', error);
+    return [];
+  }
+
+  // Filtrar por fecha en Colombia (YYYY-MM-DD)
+  return (data || []).filter(cn => {
+    if (!cn.date) return false;
+    const cnDate = extractColombiaDate(cn.date);
+    return cnDate === dateStr;
+  });
+};
+
+export const getCreditNotesByMonth = async (monthStr: string): Promise<CreditNote[]> => {
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('credit_notes')
+    .select('*')
+    .eq('company', company)
+    .eq('status', 'issued')
+    .order('date', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching credit notes:', error);
+    return [];
+  }
+
+  // Filtrar por mes (YYYY-MM)
+  return (data || []).filter(cn => {
+    if (!cn.date) return false;
+    const cnDate = extractColombiaDate(cn.date);
+    return cnDate.substring(0, 7) === monthStr;
+  });
+};
+
+export const applyCreditNoteBalance = async (
+  creditNoteId: string,
+  amountToApply: number
+): Promise<boolean> => {
+  const company = getCurrentCompany();
+  const { data: cn } = await supabase
+    .from('credit_notes')
+    .select('balance_remaining')
+    .eq('id', creditNoteId)
+    .eq('company', company)
+    .single();
+  if (!cn) return false;
+
+  const newBalance = Math.max(0, (cn.balance_remaining || 0) - amountToApply);
+  const { error } = await supabase
+    .from('credit_notes')
+    .update({ balance_remaining: newBalance })
+    .eq('id', creditNoteId)
+    .eq('company', company);
+  return !error;
+};
+
+export const addCreditNote = async (
+  creditNoteData: Omit<CreditNote, 'id' | 'number' | 'company' | 'created_at' | 'updated_at'>,
+  products: Product[]
+): Promise<CreditNote | null> => {
+  const company = getCurrentCompany();
+  const currentUser = getCurrentUser();
+
+  try {
+    const colombiaDateTime = getColombiaDateTime().toISOString();
+
+    // 1. Generar número via RPC
+    const { data: numberData, error: numberError } = await supabase.rpc('generate_credit_note_number', {
+      p_company: company,
+      p_date: colombiaDateTime,
+    });
+    if (numberError) throw numberError;
+    const number = numberData as string;
+
+    // 2. Restaurar stock e IDs por cada ítem acreditado
+    const { restoreReturnedIds } = await import('./unit-ids-utils');
+
+    for (const item of creditNoteData.items) {
+      if (item.productId.startsWith('common-')) continue;
+
+      const { data: product, error: productError } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', item.productId)
+        .eq('company', company)
+        .single();
+
+      if (productError || !product) continue;
+
+      const newStock = product.stock + item.quantity;
+      let newRegisteredIds = product.registered_ids;
+
+      if (item.unitIds && item.unitIds.length > 0) {
+        newRegisteredIds = restoreReturnedIds(product.registered_ids, item.unitIds);
+      }
+
+      await supabase
+        .from('products')
+        .update({ stock: newStock, registered_ids: newRegisteredIds })
+        .eq('id', item.productId)
+        .eq('company', company);
+
+      // Movimiento de entrada por nota crédito
+      await supabase.from('movements').insert({
+        company,
+        type: 'entry',
+        product_id: item.productId,
+        product_name: item.productName,
+        quantity: item.quantity,
+        reason: 'Nota Crédito',
+        reference: `NC ${number}`,
+        user_name: currentUser?.username || 'Sistema',
+        unit_ids: item.unitIds || [],
+      });
+    }
+
+    // 3. Insertar la nota crédito
+    const { data, error } = await supabase
+      .from('credit_notes')
+      .insert({
+        company,
+        number,
+        date: colombiaDateTime,
+        invoice_id: creditNoteData.invoice_id,
+        invoice_number: creditNoteData.invoice_number,
+        customer_name: creditNoteData.customer_name,
+        customer_document: creditNoteData.customer_document,
+        items: creditNoteData.items,
+        subtotal: creditNoteData.subtotal,
+        tax: creditNoteData.tax,
+        total: creditNoteData.total,
+        reason: creditNoteData.reason,
+        refund_method: creditNoteData.refund_method,
+        processed_by: currentUser?.username || 'Sistema',
+        notes: creditNoteData.notes,
+        status: 'issued',
+        balance_remaining: creditNoteData.total,
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+    return data as CreditNote;
+  } catch (error) {
+    console.error('Error al emitir nota crédito:', error);
+    return null;
   }
 };
 

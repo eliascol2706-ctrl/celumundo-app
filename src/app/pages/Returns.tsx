@@ -75,9 +75,13 @@ export function Returns() {
     if (invoice) {
       setSelectedInvoice(invoice);
       // Inicializar cantidades seleccionadas con el máximo disponible
+      // EXCLUIR productos que fueron cambiados (exchanged=true sin fromExchange=true)
       const initialItems: { [key: string]: number } = {};
       invoice.items.forEach(item => {
-        initialItems[item.productId] = item.quantity;
+        // Solo incluir si NO fue cambiado, o si es un producto que vino de un cambio
+        if (!item.exchanged || item.fromExchange) {
+          initialItems[item.productId] = item.quantity;
+        }
       });
       setSelectedItems(initialItems);
     }
@@ -92,26 +96,39 @@ export function Returns() {
 
   const calculateReturnTotal = () => {
     if (!selectedInvoice) return 0;
-    
+
     if (returnType === 'full') {
-      return selectedInvoice.total;
-    } else {
-      // Para devolución parcial, calcular subtotal + IVA proporcionalmente
-      const returnSubtotal = selectedInvoice.items.reduce((sum, item) => {
-        const quantity = selectedItems[item.productId] || 0;
-        if (quantity > 0) {
-          return sum + (item.price * quantity);
-        }
-        return sum;
-      }, 0);
-      
+      // Para devolución completa, calcular solo con productos NO cambiados
+      const validItems = selectedInvoice.items.filter(item => !item.exchanged || item.fromExchange);
+      const returnSubtotal = validItems.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+
       // Calcular el IVA proporcionalmente
       let returnTax = 0;
       if (selectedInvoice.subtotal > 0) {
         const taxRate = selectedInvoice.tax / selectedInvoice.subtotal;
         returnTax = returnSubtotal * taxRate;
       }
-      
+
+      return returnSubtotal + returnTax;
+    } else {
+      // Para devolución parcial, calcular subtotal + IVA proporcionalmente
+      const returnSubtotal = selectedInvoice.items
+        .filter(item => !item.exchanged || item.fromExchange)
+        .reduce((sum, item) => {
+          const quantity = selectedItems[item.productId] || 0;
+          if (quantity > 0) {
+            return sum + (item.price * quantity);
+          }
+          return sum;
+        }, 0);
+
+      // Calcular el IVA proporcionalmente
+      let returnTax = 0;
+      if (selectedInvoice.subtotal > 0) {
+        const taxRate = selectedInvoice.tax / selectedInvoice.subtotal;
+        returnTax = returnSubtotal * taxRate;
+      }
+
       return returnSubtotal + returnTax;
     }
   };
@@ -142,19 +159,21 @@ export function Returns() {
       const returnNumber = `DEV-${new Date().getFullYear()}-${returnCount.toString().padStart(4, '0')}`;
 
       // Preparar items de la devolución
+      // EXCLUIR productos que fueron cambiados (exchanged=true sin fromExchange=true)
       const returnItems = returnType === 'full'
-        ? selectedInvoice.items
+        ? selectedInvoice.items.filter(item => !item.exchanged || item.fromExchange)
         : selectedInvoice.items
+            .filter(item => !item.exchanged || item.fromExchange)
             .map(item => {
               const returnQuantity = selectedItems[item.productId] || 0;
               if (returnQuantity === 0) return null;
-              
+
               // Si el producto usa IDs, tomar solo las primeras N IDs según cantidad devuelta
               let returnUnitIds: string[] = [];
               if (item.unitIds && item.unitIds.length > 0) {
                 returnUnitIds = item.unitIds.slice(0, returnQuantity);
               }
-              
+
               return {
                 ...item,
                 quantity: returnQuantity,
@@ -656,7 +675,9 @@ export function Returns() {
                   <div className="space-y-2">
                     <Label>Productos a Devolver</Label>
                     <div className="border border-border rounded-lg p-4 space-y-3">
-                      {selectedInvoice.items.map((item) => (
+                      {selectedInvoice.items
+                        .filter(item => !item.exchanged || item.fromExchange)
+                        .map((item) => (
                         <div key={item.productId} className="flex items-center justify-between gap-4 p-3 bg-muted rounded-lg">
                           <div className="flex-1">
                             <p className="font-medium text-sm">{item.productName}</p>

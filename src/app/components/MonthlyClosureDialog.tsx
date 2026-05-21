@@ -40,6 +40,7 @@ interface MonthlyClosureDialogProps {
   invoices?: any[]; // NUEVO: Facturas para justificativo de diferencia
   exchanges?: any[]; // NUEVO: Cambios para justificativo de diferencia
   returns?: any[]; // NUEVO: Devoluciones para justificativo de diferencia
+  creditNotes?: any[]; // NUEVO: Notas de crédito del mes
   onSuccess: () => void;
 }
 
@@ -51,6 +52,7 @@ export function MonthlyClosureDialog({
   invoices = [],
   exchanges = [],
   returns = [],
+  creditNotes = [],
   onSuccess
 }: MonthlyClosureDialogProps) {
   const [phase, setPhase] = useState<Phase>(1);
@@ -59,7 +61,7 @@ export function MonthlyClosureDialog({
   const [isSuccess, setIsSuccess] = useState(false);
   const [showJustification, setShowJustification] = useState(false);
   const [isJustificativoModalOpen, setIsJustificativoModalOpen] = useState(false);
-  const [expandedDetail, setExpandedDetail] = useState<'partial_returns' | 'negative_exchanges' | 'positive_exchanges' | null>(null);
+  const [expandedDetail, setExpandedDetail] = useState<'partial_returns' | 'negative_exchanges' | 'positive_exchanges' | 'credit_notes' | null>(null);
 
   const currentUser = getCurrentUser();
 
@@ -117,6 +119,15 @@ export function MonthlyClosureDialog({
           return sum + (closure.profit_collected || 0);
         }, 0);
 
+        // Calcular total de notas de crédito del mes
+        const creditNotesTotal = creditNotes
+          .filter(cn => {
+            if (!cn.date || cn.status !== 'issued') return false;
+            const cnDate = extractColombiaDate(cn.date);
+            return cnDate.substring(0, 7) === monthToClose;
+          })
+          .reduce((sum, cn) => sum + (cn.total || 0), 0);
+
         await addMonthlyClosure({
           month: currentMonth,
           year: currentYear,
@@ -128,6 +139,7 @@ export function MonthlyClosureDialog({
           profit_collected: profitCollected, // Ganancia de facturas pagadas al 100%
           total_credit_payments: monthlyStats.totalCreditPayments || 0, // Abonos de créditos del mes
           profit_from_credit: monthlyStats.profitFromCredit || 0, // Ganancias de facturas a crédito del mes
+          credit_notes_total: creditNotesTotal, // NUEVO: Total de notas de crédito emitidas
           closed_by: closedByName.trim(),
           closed_at: closedAtISO,
         });
@@ -210,6 +222,15 @@ export function MonthlyClosureDialog({
       return sum + (Number(ex.price_difference) || 0);
     }, 0);
 
+    // 4. Notas de Crédito del mes
+    const monthCreditNotes = creditNotes.filter(cn => {
+      if (!cn.date) return false;
+      const cnDate = extractColombiaDate(cn.date);
+      return cnDate.substring(0, 7) === monthToClose && cn.status === 'issued';
+    });
+
+    const totalCreditNotes = monthCreditNotes.reduce((sum, cn) => sum + (cn.total || 0), 0);
+
     return {
       partialReturns: {
         total: totalPartialReturns,
@@ -225,6 +246,11 @@ export function MonthlyClosureDialog({
         total: totalPositiveExchanges,
         count: positiveExchanges.length,
         details: positiveExchanges
+      },
+      creditNotes: {
+        total: totalCreditNotes,
+        count: monthCreditNotes.length,
+        details: monthCreditNotes
       }
     };
   };
@@ -458,17 +484,6 @@ export function MonthlyClosureDialog({
                           <p className="text-sm text-emerald-700 dark:text-emerald-300 mt-2">
                             Ingresos netos - Costos - Gastos
                           </p>
-                          <div className="mt-2 space-y-1 text-xs">
-                            <p className="text-emerald-600 dark:text-emerald-400">
-                              Ingresos netos: COP {formatCOP(monthlyStats.ingresoNetos || 0)}
-                            </p>
-                            <p className="text-orange-600 dark:text-orange-400">
-                              - Costos productos: COP {formatCOP(monthlyStats.totalProductCost)}
-                            </p>
-                            <p className="text-red-600 dark:text-red-400">
-                              - Gastos: COP {formatCOP(monthlyStats.totalExpenses)}
-                            </p>
-                          </div>
                         </div>
 
                         {/* Botón Justificativo de Diferencia */}
@@ -514,47 +529,105 @@ export function MonthlyClosureDialog({
                 </Card>
 
                 {/* Final Stats */}
-                <div className="space-y-6">
-                  {/* Primera fila: Métricas principales */}
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-                    <Card className="border-green-200 dark:border-green-800">
-                      <CardHeader className="pb-4">
-                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                          <span className="text-lg">💰</span>
+                <div className="space-y-5">
+                  {/* Primera fila: Ganancias Reales destacada */}
+                  <Card className="bg-gradient-to-br from-indigo-50 via-purple-50 to-blue-50 dark:from-indigo-950/30 dark:via-purple-950/30 dark:to-blue-950/30 border-2 border-indigo-300 dark:border-indigo-700 shadow-md">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-lg font-bold text-indigo-900 dark:text-indigo-100 flex items-center gap-2">
+                        <span className="text-2xl">💎</span>
+                        Ganancias Reales del Mes
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-6">
+                        <div className="flex-1">
+                          <div className={`text-5xl font-bold mb-3 ${
+                            monthlyStats.realProfit >= 0
+                              ? 'text-indigo-600 dark:text-indigo-400'
+                              : 'text-red-600 dark:text-red-400'
+                          }`}>
+                            COP {formatCOP(monthlyStats.realProfit)}
+                          </div>
+                          <p className="text-sm text-indigo-700 dark:text-indigo-300 mb-4">
+                            Ingresos netos - Costos de productos - Gastos
+                          </p>
+
+                          <div className="bg-white/60 dark:bg-zinc-900/60 rounded-lg p-4 border border-indigo-200 dark:border-indigo-800">
+                            <p className="text-xs font-semibold text-indigo-900 dark:text-indigo-100 mb-3">
+                              📊 Desglose del Cálculo
+                            </p>
+                            <div className="space-y-2">
+                              <div className="flex justify-between items-center pb-2 border-b border-indigo-200 dark:border-indigo-700">
+                                <span className="text-sm text-emerald-700 dark:text-emerald-300 font-medium">
+                                  Ingresos netos:
+                                </span>
+                                <span className="text-sm font-bold text-emerald-600 dark:text-emerald-400">
+                                  COP {formatCOP(monthlyStats.ingresoNetos || 0)}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center pb-2 border-b border-indigo-200 dark:border-indigo-700">
+                                <span className="text-sm text-orange-700 dark:text-orange-300 font-medium">
+                                  - Costos productos:
+                                </span>
+                                <span className="text-sm font-bold text-orange-600 dark:text-orange-400">
+                                  COP {formatCOP(monthlyStats.totalProductCost)}
+                                </span>
+                              </div>
+                              <div className="flex justify-between items-center">
+                                <span className="text-sm text-red-700 dark:text-red-300 font-medium">
+                                  - Gastos:
+                                </span>
+                                <span className="text-sm font-bold text-red-600 dark:text-red-400">
+                                  COP {formatCOP(monthlyStats.totalExpenses)}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Segunda fila: Métricas principales */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <Card className="border-green-300 dark:border-green-700 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/30 dark:to-emerald-950/30">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-semibold text-green-800 dark:text-green-200 flex items-center gap-2">
+                          <span className="text-xl">💰</span>
                           Ingresos Totales del Mes
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-4xl font-bold text-green-600 dark:text-green-400 mb-2">
+                        <div className="text-3xl font-bold text-green-600 dark:text-green-400 mb-2">
                           {formatCOP(monthlyStats.totalRevenue)}
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          Suma de todos los cierres diarios
+                        <p className="text-xs text-green-700 dark:text-green-300">
+                          Suma de {monthlyStats.closures.length} cierres diarios
                         </p>
                       </CardContent>
                     </Card>
 
-                    <Card className="border-blue-200 dark:border-blue-800">
-                      <CardHeader className="pb-4">
-                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                          <span className="text-lg">📋</span>
+                    <Card className="border-blue-300 dark:border-blue-700 bg-gradient-to-br from-blue-50 to-cyan-50 dark:from-blue-950/30 dark:to-cyan-950/30">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-semibold text-blue-800 dark:text-blue-200 flex items-center gap-2">
+                          <span className="text-xl">📋</span>
                           Facturas Totales
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-4xl font-bold text-blue-600 dark:text-blue-400 mb-2">
+                        <div className="text-3xl font-bold text-blue-600 dark:text-blue-400 mb-2">
                           {monthlyStats.totalInvoices}
                         </div>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-xs text-blue-700 dark:text-blue-300">
                           {monthlyStats.closures.length} cierres diarios
                         </p>
                       </CardContent>
                     </Card>
 
-                    <Card className="border-orange-200 dark:border-orange-800">
-                      <CardHeader className="pb-4">
-                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                          <span className="text-lg">⏳</span>
+                    <Card className="border-orange-300 dark:border-orange-700 bg-gradient-to-br from-orange-50 to-amber-50 dark:from-orange-950/30 dark:to-amber-950/30">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-semibold text-orange-800 dark:text-orange-200 flex items-center gap-2">
+                          <span className="text-xl">⏳</span>
                           Crédito Pendiente
                         </CardTitle>
                       </CardHeader>
@@ -562,85 +635,85 @@ export function MonthlyClosureDialog({
                         <div className="text-3xl font-bold text-orange-600 dark:text-orange-400 mb-2">
                           {formatCOP(monthlyStats.totalPendingCredit)}
                         </div>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-xs text-orange-700 dark:text-orange-300">
                           Saldo pendiente total
                         </p>
                       </CardContent>
                     </Card>
                   </div>
 
-                  {/* Segunda fila: Ganancias y pagos */}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-                    <Card className="border-indigo-200 dark:border-indigo-800">
-                      <CardHeader className="pb-4">
-                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                          <span className="text-lg">💎</span>
-                          Ganancias Reales
+                  {/* Tercera fila: Créditos y pagos */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <Card className="border-purple-300 dark:border-purple-700 bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-950/30 dark:to-pink-950/30">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-semibold text-purple-800 dark:text-purple-200 flex items-center gap-2">
+                          <span className="text-xl">💵</span>
+                          Abonos de Créditos Recibidos
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className={`text-3xl font-bold mb-3 ${
-                          monthlyStats.realProfit >= 0
-                            ? 'text-indigo-600 dark:text-indigo-400'
-                            : 'text-red-600 dark:text-red-400'
-                        }`}>
-                          {formatCOP(monthlyStats.realProfit)}
-                        </div>
-                        <div className="space-y-2 pt-3 border-t border-indigo-200 dark:border-indigo-800">
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">Costo productos:</span>
-                            <span className="font-medium text-zinc-700 dark:text-zinc-300">
-                              {formatCOP(monthlyStats.totalProductCost)}
-                            </span>
-                          </div>
-                          <div className="flex justify-between text-xs">
-                            <span className="text-muted-foreground">Gastos:</span>
-                            <span className="font-medium text-red-600 dark:text-red-400">
-                              {formatCOP(monthlyStats.totalExpenses)}
-                            </span>
-                          </div>
-                        </div>
-                      </CardContent>
-                    </Card>
-
-                    <Card className="border-purple-200 dark:border-purple-800">
-                      <CardHeader className="pb-4">
-                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                          <span className="text-lg">💵</span>
-                          Abonos de Créditos
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="text-3xl font-bold text-purple-600 dark:text-purple-400 mb-2">
+                        <div className="text-4xl font-bold text-purple-600 dark:text-purple-400 mb-2">
                           {formatCOP(monthlyStats.totalCreditPayments || 0)}
                         </div>
-                        <p className="text-sm text-muted-foreground">
-                          Pagos recibidos del mes
+                        <p className="text-xs text-purple-700 dark:text-purple-300">
+                          Pagos recibidos en el mes
                         </p>
                       </CardContent>
                     </Card>
 
-                    <Card className="border-cyan-200 dark:border-cyan-800">
-                      <CardHeader className="pb-4">
-                        <CardTitle className="text-sm font-semibold text-muted-foreground flex items-center gap-2">
-                          <span className="text-lg">📊</span>
+                    <Card className="border-cyan-300 dark:border-cyan-700 bg-gradient-to-br from-cyan-50 to-teal-50 dark:from-cyan-950/30 dark:to-teal-950/30">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-sm font-semibold text-cyan-800 dark:text-cyan-200 flex items-center gap-2">
+                          <span className="text-xl">📊</span>
                           Ganancias de Créditos
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className={`text-3xl font-bold mb-2 ${
+                        <div className={`text-4xl font-bold mb-2 ${
                           (monthlyStats.profitFromCredit || 0) >= 0
                             ? 'text-cyan-600 dark:text-cyan-400'
                             : 'text-red-600 dark:text-red-400'
                         }`}>
                           {formatCOP(monthlyStats.profitFromCredit || 0)}
                         </div>
-                        <p className="text-sm text-muted-foreground">
+                        <p className="text-xs text-cyan-700 dark:text-cyan-300">
                           Utilidad de facturas a crédito
                         </p>
                       </CardContent>
                     </Card>
                   </div>
+
+                  {/* Cuarta fila: Notas de Crédito (condicional) */}
+                  {justificativoData.creditNotes.count > 0 && (
+                    <Card className="border-red-400 dark:border-red-600 bg-gradient-to-br from-red-50 to-rose-50 dark:from-red-950/30 dark:to-rose-950/30 shadow-sm">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="text-base font-bold text-red-800 dark:text-red-200 flex items-center gap-2">
+                          <span className="text-xl">📝</span>
+                          Notas de Crédito Emitidas
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <div className="text-4xl font-bold text-red-600 dark:text-red-400 mb-2">
+                              -{formatCOP(justificativoData.creditNotes.total)}
+                            </div>
+                            <p className="text-sm text-red-700 dark:text-red-300">
+                              {justificativoData.creditNotes.count} nota(s) emitidas en el mes
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setIsJustificativoModalOpen(true)}
+                            className="border-red-400 dark:border-red-600 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-700 dark:text-red-300"
+                          >
+                            Ver Detalles
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
                 </div>
 
                 {/* Explicación de Diferencia entre Ingresos Totales e Ingresos Netos */}
@@ -1061,6 +1134,78 @@ export function MonthlyClosureDialog({
                 )}
               </CardContent>
             </Card>
+
+            {/* 4. Notas de Crédito del mes */}
+            {justificativoData.creditNotes.count > 0 && (
+              <Card className="border-purple-200 dark:border-purple-800">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base font-semibold text-purple-900 dark:text-purple-100">
+                      Notas de Crédito Emitidas
+                    </CardTitle>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setExpandedDetail(expandedDetail === 'credit_notes' ? null : 'credit_notes')}
+                    >
+                      {expandedDetail === 'credit_notes' ? (
+                        <ChevronUp className="h-4 w-4" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="flex items-center justify-between mb-3">
+                    <div>
+                      <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                        {justificativoData.creditNotes.count} notas de crédito emitidas
+                      </p>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-500">
+                        (Egresos del mes)
+                      </p>
+                    </div>
+                    <div className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+                      -COP {formatCOP(justificativoData.creditNotes.total)}
+                    </div>
+                  </div>
+
+                  {expandedDetail === 'credit_notes' && justificativoData.creditNotes.details.length > 0 && (
+                    <div className="mt-4 border-t border-purple-200 dark:border-purple-800 pt-4">
+                      <div className="space-y-3">
+                        {justificativoData.creditNotes.details.map((cn, idx) => (
+                          <div key={idx} className="bg-purple-50 dark:bg-purple-950/30 p-3 rounded-lg border border-purple-200 dark:border-purple-800">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <p className="font-semibold text-sm">NC {cn.number}</p>
+                                <p className="text-xs text-zinc-600 dark:text-zinc-400">{cn.customer_name || 'Cliente general'}</p>
+                                <p className="text-xs text-zinc-500 dark:text-zinc-500">
+                                  {new Date(cn.date).toLocaleDateString('es-ES')}
+                                </p>
+                                <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-1">
+                                  Factura: #{cn.invoice_number}
+                                </p>
+                                <p className="text-xs text-zinc-500 dark:text-zinc-500">
+                                  Método: {cn.refund_method === 'efectivo' ? '💵 Efectivo' :
+                                          cn.refund_method === 'transferencia' ? '🏦 Transferencia' :
+                                          cn.refund_method === 'saldo_a_favor' ? '💰 Saldo a Favor' : '📝 Descuento'}
+                                </p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-bold text-purple-600 dark:text-purple-400">
+                                  COP {formatCOP(cn.total || 0)}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
           </div>
 
           <div className="flex justify-end pt-4">

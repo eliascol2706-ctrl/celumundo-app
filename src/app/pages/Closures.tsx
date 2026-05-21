@@ -14,6 +14,7 @@ import {
   getExpenses,
   getCreditPayments,
   getExchanges,
+  getCreditNotes,
 } from '../lib/supabase';
 import { getServiceOrders, type ServiceOrder } from '../lib/service-orders';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -56,6 +57,7 @@ export function Closures() {
   const [creditPayments, setCreditPayments] = useState<any[]>([]);
   const [exchanges, setExchanges] = useState<any[]>([]);
   const [serviceOrders, setServiceOrders] = useState<ServiceOrder[]>([]);
+  const [creditNotes, setCreditNotes] = useState<any[]>([]);
 
   useEffect(() => {
     loadData();
@@ -74,7 +76,7 @@ export function Closures() {
   }, []);
 
   const loadData = async () => {
-    const [invoicesData, dailyClosuresData, monthlyClosuresData, returnsData, customersData, productsData, expensesData, creditPaymentsData, exchangesData, serviceOrdersData] = await Promise.all([
+    const [invoicesData, dailyClosuresData, monthlyClosuresData, returnsData, customersData, productsData, expensesData, creditPaymentsData, exchangesData, serviceOrdersData, creditNotesData] = await Promise.all([
       getInvoices(),
       getDailyClosures(),
       getMonthlyClosures(),
@@ -85,6 +87,7 @@ export function Closures() {
       getCreditPayments(),
       getExchanges(),
       getServiceOrders(),
+      getCreditNotes(),
     ]);
     setInvoices(invoicesData);
     setDailyClosures(dailyClosuresData);
@@ -96,6 +99,7 @@ export function Closures() {
     setCreditPayments(creditPaymentsData);
     setExchanges(exchangesData);
     setServiceOrders(serviceOrdersData);
+    setCreditNotes(creditNotesData);
     
     // DEBUG: Ver qué cierres tenemos guardados
     console.log('[DEBUG Closures] Cierres diarios guardados:', dailyClosuresData.map(c => ({ id: c.id, date: c.date, closed_by: c.closed_by })));
@@ -272,8 +276,10 @@ export function Closures() {
     const serviceRevenue = todayServiceOrders.reduce((sum, order) => sum + (order.final_price || 0), 0);
     
     // FILTRAR ABONOS A CRÉDITO DEL DÍA - usar extractColombiaDate para evitar problemas de zona horaria
+    // EXCLUIR notas de crédito (payment_method: 'nota_credito')
     const todayCreditPayments = creditPayments.filter(payment => {
       if (!payment.date) return false;
+      if (payment.payment_method === 'nota_credito') return false; // Excluir notas de crédito
       const paymentDate = extractColombiaDate(payment.date);
       return paymentDate === today;
     });
@@ -492,8 +498,16 @@ export function Closures() {
         && inv.status !== 'cancelled';
     }).reduce((sum, inv) => sum + inv.total, 0);
 
-    // Ingresos Netos: regulares pagadas + todas las facturas a crédito (sin devueltas/canceladas)
-    const ingresoNetos = netRevenue + allCreditTotal;
+    // Calcular total de notas de crédito del mes (egresos)
+    const currentMonthCreditNotes = creditNotes.filter(cn => {
+      if (!cn.date || cn.status !== 'issued') return false;
+      const cnDate = extractColombiaDate(cn.date);
+      return cnDate.substring(0, 7) === currentMonthStr;
+    });
+    const totalCreditNotes = currentMonthCreditNotes.reduce((sum, cn) => sum + (cn.total || 0), 0);
+
+    // Ingresos Netos: regulares pagadas + todas las facturas a crédito - notas de crédito
+    const ingresoNetos = netRevenue + allCreditTotal - totalCreditNotes;
 
     // Costos: facturas regulares pagadas + créditos (excluye devueltas, canceladas, pending_confirmation)
     const invoicesForCost = invoices.filter(inv => {
@@ -557,8 +571,10 @@ export function Closures() {
     }));
 
     // NUEVO: Calcular abonos de créditos del mes
+    // EXCLUIR notas de crédito (payment_method: 'nota_credito')
     const currentMonthCreditPayments = creditPayments.filter(payment => {
       if (!payment.date) return false;
+      if (payment.payment_method === 'nota_credito') return false; // Excluir notas de crédito
       const paymentDate = extractColombiaDate(payment.date);
       return paymentDate.substring(0, 7) === currentMonthStr;
     });
@@ -1473,6 +1489,15 @@ export function Closures() {
             return expenseDate === dayToClose;
           });
         })()}
+        creditNotes={(() => {
+          const dayToClose = getDayToClose();
+          if (!dayToClose) return [];
+          return creditNotes.filter(cn => {
+            if (!cn.date) return false;
+            const cnDate = extractColombiaDate(cn.date);
+            return cnDate === dayToClose;
+          });
+        })()}
         onSuccess={loadData}
       />
 
@@ -1484,6 +1509,7 @@ export function Closures() {
         invoices={invoices}
         exchanges={exchanges}
         returns={returns}
+        creditNotes={creditNotes}
         onSuccess={() => {
           setSelectedMonth(null); // Reset selection after successful closure
           loadData();

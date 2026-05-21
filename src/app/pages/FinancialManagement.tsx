@@ -12,10 +12,12 @@ import {
   getExpenses,
   getCustomers,
   getWarranties,
+  getCreditNotes,
   type CreditPayment,
   type Return,
   type Exchange,
-  type Warranty
+  type Warranty,
+  type CreditNote
 } from '../lib/supabase';
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
@@ -135,6 +137,7 @@ export function FinancialManagement() {
   const [isThermalPrintDialogOpen, setIsThermalPrintDialogOpen] = useState(false);
   const [creditPayments, setCreditPayments] = useState<CreditPayment[]>([]);
   const [allCreditPayments, setAllCreditPayments] = useState<CreditPayment[]>([]); // Todos los abonos
+  const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
 
   // Estado para tabs y collapsibles
   const [activeTab, setActiveTab] = useState('tendencias');
@@ -254,7 +257,7 @@ export function FinancialManagement() {
 
   const loadData = async () => {
     setIsLoading(true);
-    const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData, warrantiesData, paymentsData] = await Promise.all([
+    const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData, warrantiesData, paymentsData, creditNotesData] = await Promise.all([
       getInvoices(),
       getReturns(),
       getExchanges(),
@@ -262,7 +265,8 @@ export function FinancialManagement() {
       getExpenses(),
       getCustomers(),
       getWarranties(),
-      getCreditPayments()
+      getCreditPayments(),
+      getCreditNotes()
     ]);
     setInvoices(invoicesData);
     setReturns(returnsData);
@@ -272,6 +276,7 @@ export function FinancialManagement() {
     setCustomers(customersData);
     setWarranties(warrantiesData);
     setAllCreditPayments(paymentsData);
+    setCreditNotes(creditNotesData);
     setIsLoading(false);
   };
 
@@ -340,6 +345,12 @@ export function FinancialManagement() {
         return expDate.startsWith(targetMonth);
       });
 
+      // Notas crédito emitidas en este mes (viven en el período de emisión, no de la factura)
+      const monthCreditNotes = creditNotes.filter((cn) => {
+        const cnDate = extractColombiaDate(cn.date);
+        return cnDate.startsWith(targetMonth) && cn.status === 'issued';
+      });
+
       // Facturas regulares pagadas (no crédito)
       const facturasPagas = monthInvoices
         .filter((inv) => (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit)
@@ -370,8 +381,11 @@ export function FinancialManagement() {
 
       const abonosDelMes = paymentsDelMes.reduce((sum, payment) => sum + payment.amount, 0);
 
-      // Ingresos del mes: regulares pagadas + créditos pagados
-      const ingresoNeto = facturasPagas + creditosPagados;
+      // Ajuste por notas crédito del mes
+      const totalNotasCredito = monthCreditNotes.reduce((s, cn) => s + cn.total, 0);
+
+      // Ingresos del mes: regulares pagadas + créditos pagados − notas crédito
+      const ingresoNeto = facturasPagas + creditosPagados - totalNotasCredito;
 
       // Ingresos por factura (referencia, no se usa en ganancias)
       const totalFacturasEnConfirmacion = monthInvoices
@@ -417,6 +431,19 @@ export function FinancialManagement() {
         });
       });
 
+      // Restar costos de los productos acreditados en notas crédito del mes
+      let costosNotasCredito = 0;
+      monthCreditNotes.forEach((cn) => {
+        cn.items.forEach((item) => {
+          if (item.productId.startsWith('common-')) return;
+          const product = products.find((p) => p.id === item.productId);
+          if (product && product.current_cost) {
+            costosNotasCredito += product.current_cost * item.quantity;
+          }
+        });
+      });
+      costosDeProductos = Math.max(0, costosDeProductos - costosNotasCredito);
+
       const totalGastos = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
       // NUEVO: Ganancias Netas usando Ingresos del Mes (solo facturas pagas y parciales)
@@ -442,8 +469,10 @@ export function FinancialManagement() {
         ingresosPorFactura,
         costosDeProductos,
         gananciasNetas,
+        totalNotasCredito,
         invoicesCount: monthInvoices.length,
-        expenses: monthExpenses
+        expenses: monthExpenses,
+        creditNotes: monthCreditNotes
       };
     };
 
@@ -1722,6 +1751,14 @@ export function FinancialManagement() {
                         <span className="text-sm text-zinc-600 dark:text-zinc-400">Impacto de Cambios</span>
                         <span className={`text-sm font-medium ${stats.currentMonth.impactoCambios > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                           {stats.currentMonth.impactoCambios > 0 ? '+' : ''}{formatCOP(stats.currentMonth.impactoCambios)}
+                        </span>
+                      </div>
+                    )}
+                    {stats.currentMonth.totalNotasCredito > 0 && (
+                      <div className="flex justify-between py-2 border-b border-zinc-100">
+                        <span className="text-sm text-zinc-600 dark:text-zinc-400">Notas Crédito emitidas</span>
+                        <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                          -{formatCOP(stats.currentMonth.totalNotasCredito)}
                         </span>
                       </div>
                     )}

@@ -1,10 +1,10 @@
 import { useNavigate } from 'react-router';
-import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2, ChevronLeft, ChevronRight, Edit, Minus } from 'lucide-react';
+import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2, ChevronLeft, ChevronRight, Edit, Minus, FileX } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useEffect, useState } from 'react';
-import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, getCreditPayments, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges, updateInvoice, updateProduct } from '../lib/supabase';
+import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, getCreditPayments, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges, updateInvoice, updateProduct, addCreditNote, getCreditNotes, getCreditNotesByInvoice, type CreditNote, type CreditNoteItem, addCreditPayment, addMovement } from '../lib/supabase';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
@@ -29,7 +29,8 @@ export function InvoicesMenu() {
     cashToday: 0,
     transferToday: 0,
     exchangeImpactToday: 0,
-    todayPayments: 0
+    todayPayments: 0,
+    creditNotesToday: 0
   });
   const [loading, setLoading] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
@@ -73,6 +74,18 @@ export function InvoicesMenu() {
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
 
+  // Estados para modal de Nota Crédito
+  const [showCreditNoteModal, setShowCreditNoteModal] = useState(false);
+  const [creditNoteInvoice, setCreditNoteInvoice] = useState<Invoice | null>(null);
+  const [creditNoteQuantities, setCreditNoteQuantities] = useState<Record<number, number>>({});
+  const [creditNoteUnitIds, setCreditNoteUnitIds] = useState<Record<number, string[]>>({});
+  const [creditNoteReason, setCreditNoteReason] = useState('');
+  const [creditNoteRefundMethod, setCreditNoteRefundMethod] = useState('');
+  const [creditNoteNotes, setCreditNoteNotes] = useState('');
+  const [issuingCreditNote, setIssuingCreditNote] = useState(false);
+  const [pendingCustomerInvoices, setPendingCustomerInvoices] = useState<Invoice[]>([]);
+  const [targetInvoiceId, setTargetInvoiceId] = useState<string>('');
+
   // Estados para modal de selección de ID a restar
   const [showIdSubtractModal, setShowIdSubtractModal] = useState(false);
   const [subtractingItemIndex, setSubtractingItemIndex] = useState<number | null>(null);
@@ -109,11 +122,12 @@ export function InvoicesMenu() {
   const loadStats = async () => {
     setLoading(true);
     try {
-      const [invoices, products, exchanges, creditPayments] = await Promise.all([
+      const [invoices, products, exchanges, creditPayments, creditNotes] = await Promise.all([
         getInvoices(),
         getAllProducts(),
         getExchanges(),
-        getCreditPayments()
+        getCreditPayments(),
+        getCreditNotes()
       ]);
 
       // DEBUG: Verificar facturas con cambios
@@ -187,15 +201,25 @@ export function InvoicesMenu() {
         return sum + (ex.price_difference || 0);
       }, 0);
 
-      // Calcular abonos a crédito del día
+      // Calcular abonos a crédito del día (excluyendo notas de crédito)
       const paymentsToday = creditPayments.filter(payment => {
         const paymentDate = extractColombiaDate(payment.date);
-        return paymentDate === todayStr;
+        const isNotCreditNote = payment.payment_method !== 'nota_credito';
+        return paymentDate === todayStr && isNotCreditNote;
       });
 
       const todayPayments = paymentsToday.reduce((sum, payment) => {
         return sum + (payment.amount || 0);
       }, 0);
+
+      // Calcular notas de crédito del día (egresos)
+      const creditNotesToday = creditNotes
+        .filter(cn => {
+          if (!cn.date || cn.status !== 'issued') return false;
+          const cnDate = extractColombiaDate(cn.date);
+          return cnDate === todayStr;
+        })
+        .reduce((sum, cn) => sum + (cn.total || 0), 0);
 
       console.log('[InvoicesMenu] Stats calculadas:', {
         todayStr,
@@ -207,6 +231,7 @@ export function InvoicesMenu() {
         transferToday,
         exchangeImpactToday,
         todayPayments,
+        creditNotesToday,
         invoicesToday: invoicesToday.length,
         paidInvoicesToday: paidInvoicesToday.length
       });
@@ -216,11 +241,12 @@ export function InvoicesMenu() {
         creditToday,
         pendingConfirmation: invoices.filter(inv => inv.status === 'pending_confirmation').length,
         totalCreditPending,
-        totalSalesToday: totalSalesToday + todayPayments, // Incluir abonos en el total facturado
+        totalSalesToday: totalSalesToday + todayPayments - creditNotesToday, // Incluir abonos y restar notas de crédito
         cashToday,
         transferToday,
         exchangeImpactToday,
-        todayPayments
+        todayPayments,
+        creditNotesToday
       });
 
       // Cargar TODAS las facturas (no solo las de hoy) para los filtros
@@ -598,10 +624,10 @@ export function InvoicesMenu() {
         // Registrar movimiento de salida (no se registró cuando se creó la factura en confirmación)
         await addMovement({
           type: 'exit',
-          product_id: product.id,
-          product_name: product.name,
+          product_id: item.productId,
+          product_name: item.productName,
           quantity: item.quantity,
-          reason: 'Venta',
+          reason: selectedInvoice.type === 'regular' ? 'Venta regular - Factura confirmada' : 'Venta al mayor - Factura confirmada',
           reference: `Factura ${selectedInvoice.number}`,
           user_name: user.username,
           unit_ids: item.unitIds || []
@@ -674,10 +700,24 @@ export function InvoicesMenu() {
     }
 
     try {
+      const user = getCurrentUser();
+
       // 1. Restaurar stock
       if (!productToRemove.productId.startsWith('common-')) {
         const newStock = product.stock + productToRemove.quantity;
         await updateProduct(product.id, { stock: newStock });
+
+        // REGISTRAR MOVIMIENTO DE ENTRADA
+        await addMovement({
+          type: 'entry',
+          product_id: productToRemove.productId,
+          product_name: productToRemove.productName,
+          quantity: productToRemove.quantity,
+          reason: 'Ajuste - Factura en Confirmación',
+          reference: `Eliminado de Factura ${editingInvoice.number}`,
+          user_name: user?.username || 'Usuario',
+          unit_ids: productToRemove.unitIds || []
+        });
       }
 
       // 2. Re-habilitar IDs únicas si las hay
@@ -748,18 +788,22 @@ export function InvoicesMenu() {
   const handleInitSubtractProduct = (productIndex: number) => {
     if (!editingInvoice) return;
     const item = editingInvoice.items[productIndex];
+
+    // Si solo queda 1 unidad, eliminar directamente (evita duplicación de stock)
     if (item.quantity <= 1) {
-      // Restar el único restante equivale a eliminar
       if (confirm(`¿Eliminar "${item.productName}" de la factura? (Es la última unidad)\n\nEsto restaurará el stock y habilitará las ID's.`)) {
         handleRemoveProductFromInvoice(productIndex);
       }
       return;
     }
+
+    // Si tiene más de 1 unidad y usa IDs, mostrar modal para seleccionar cuál restar
     if (item.unitIds && item.unitIds.length > 0) {
       setSubtractingItemIndex(productIndex);
       setSelectedIdToSubtract(null);
       setShowIdSubtractModal(true);
     } else {
+      // Si no usa IDs, restar 1 unidad directamente
       handleSubtractProductQuantity(productIndex, null);
     }
   };
@@ -776,9 +820,23 @@ export function InvoicesMenu() {
     }
 
     try {
+      const user = getCurrentUser();
+
       // 1. Restaurar 1 unidad de stock
       if (!item.productId.startsWith('common-')) {
         await updateProduct(product.id, { stock: product.stock + 1 });
+
+        // REGISTRAR MOVIMIENTO DE ENTRADA
+        await addMovement({
+          type: 'entry',
+          product_id: item.productId,
+          product_name: item.productName,
+          quantity: 1,
+          reason: 'Ajuste - Factura en Confirmación',
+          reference: `Cantidad reducida en Factura ${editingInvoice.number}`,
+          user_name: user?.username || 'Usuario',
+          unit_ids: idToRemove ? [idToRemove] : []
+        });
       }
 
       // 2. Re-habilitar la ID seleccionada si aplica
@@ -819,6 +877,124 @@ export function InvoicesMenu() {
     } catch (error) {
       console.error('Error al restar producto:', error);
       toast.error('Error al restar la unidad');
+    }
+  };
+
+  const handleOpenCreditNoteModal = (invoice: Invoice) => {
+    setCreditNoteInvoice(invoice);
+    const initialQty: Record<number, number> = {};
+    const initialIds: Record<number, string[]> = {};
+    invoice.items.forEach((_, i) => {
+      initialQty[i] = 0;
+      initialIds[i] = [];
+    });
+    setCreditNoteQuantities(initialQty);
+    setCreditNoteUnitIds(initialIds);
+    setCreditNoteReason('');
+    setCreditNoteRefundMethod('');
+    setCreditNoteNotes('');
+    setTargetInvoiceId('');
+
+    // Facturas a crédito pendientes del mismo cliente (excluye la factura actual)
+    const pending = todayInvoices.filter(inv =>
+      inv.is_credit &&
+      inv.status === 'pending' &&
+      inv.id !== invoice.id &&
+      (
+        (invoice.customer_document && inv.customer_document === invoice.customer_document) ||
+        (invoice.customer_name && inv.customer_name === invoice.customer_name)
+      )
+    );
+    setPendingCustomerInvoices(pending);
+    setShowCreditNoteModal(true);
+  };
+
+  const handleIssueCreditNote = async () => {
+    if (!creditNoteInvoice) return;
+    if (!creditNoteReason.trim()) {
+      toast.error('El motivo es obligatorio');
+      return;
+    }
+
+    // Construir items acreditados (solo los que tienen qty > 0)
+    const creditedItems: CreditNoteItem[] = creditNoteInvoice.items
+      .map((item, i) => ({
+        productId: item.productId,
+        productName: item.productName,
+        quantity: creditNoteQuantities[i] || 0,
+        price: item.price,
+        total: item.price * (creditNoteQuantities[i] || 0),
+        unitIds: creditNoteUnitIds[i]?.length ? creditNoteUnitIds[i] : undefined,
+      }))
+      .filter(item => item.quantity > 0);
+
+    if (creditedItems.length === 0) {
+      toast.error('Selecciona al menos un producto para acreditar');
+      return;
+    }
+
+    setIssuingCreditNote(true);
+    try {
+      const subtotal = creditedItems.reduce((s, i) => s + i.total, 0);
+      const result = await addCreditNote(
+        {
+          date: '',
+          invoice_id: creditNoteInvoice.id,
+          invoice_number: creditNoteInvoice.number,
+          customer_name: creditNoteInvoice.customer_name,
+          customer_document: creditNoteInvoice.customer_document,
+          items: creditedItems,
+          subtotal,
+          tax: 0,
+          total: subtotal,
+          reason: creditNoteReason.trim(),
+          refund_method: creditNoteRefundMethod || undefined,
+          notes: creditNoteNotes.trim() || undefined,
+          status: 'issued',
+        },
+        products
+      );
+
+      if (result) {
+        // Aplicar saldo a favor directamente a la factura (sin crear abono)
+        if (creditNoteRefundMethod === 'saldo_a_favor' && targetInvoiceId) {
+          const targetInvoice = pendingCustomerInvoices.find(inv => inv.id === targetInvoiceId);
+          if (targetInvoice) {
+            // Calcular nuevo balance
+            const amountToApply = Math.min(subtotal, targetInvoice.credit_balance ?? targetInvoice.total);
+            const newBalance = (targetInvoice.credit_balance ?? targetInvoice.total) - amountToApply;
+
+            // Actualizar balance de la factura directamente
+            await supabase
+              .from('invoices')
+              .update({
+                credit_balance: newBalance,
+                status: newBalance <= 0 ? 'paid' : 'pending'
+              })
+              .eq('id', targetInvoiceId);
+
+            // Reducir balance de la nota de crédito
+            await supabase
+              .from('credit_notes')
+              .update({
+                balance_remaining: result.balance_remaining - amountToApply
+              })
+              .eq('id', result.id);
+
+            toast.success(`Nota Crédito ${result.number} emitida y aplicada a factura #${targetInvoice.number}`);
+          }
+        } else {
+          toast.success(`Nota Crédito ${result.number} emitida correctamente`);
+        }
+        setShowCreditNoteModal(false);
+        loadStats();
+      } else {
+        toast.error('Error al emitir la nota crédito');
+      }
+    } catch {
+      toast.error('Error al emitir la nota crédito');
+    } finally {
+      setIssuingCreditNote(false);
     }
   };
 
@@ -964,67 +1140,86 @@ export function InvoicesMenu() {
         </div>
 
         {/* Stats - Segunda fila (Ganancias y Métodos de Pago) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-          <Card className="border-emerald-200 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
-                <DollarSign className="w-4 h-4" />
-                Total Facturado Hoy
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{formatCOP(stats.totalSalesToday)}</div>
-              <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-1">Facturas pagadas + abonos</p>
-              {stats.exchangeImpactToday !== 0 && (
-                <p className={`text-xs mt-1 font-medium ${
-                  stats.exchangeImpactToday > 0
-                    ? 'text-emerald-600 dark:text-emerald-400'
-                    : 'text-orange-600 dark:text-orange-400'
-                }`}>
-                  Impacto de cambios: {stats.exchangeImpactToday > 0 ? '+' : ''}{formatCOP(stats.exchangeImpactToday)}
-                </p>
-              )}
-            </CardContent>
-          </Card>
+        <div className="space-y-4 mb-6">
+          {/* Primera fila: 3 cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <Card className="border-emerald-200 dark:border-emerald-800 bg-emerald-50/30 dark:bg-emerald-950/20 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-emerald-700 dark:text-emerald-400 flex items-center gap-2">
+                  <DollarSign className="w-4 h-4" />
+                  Total Facturado Hoy
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{formatCOP(stats.totalSalesToday)}</div>
+                <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-1">Facturas + abonos - notas crédito</p>
+                {stats.exchangeImpactToday !== 0 && (
+                  <p className={`text-xs mt-1 font-medium ${
+                    stats.exchangeImpactToday > 0
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-orange-600 dark:text-orange-400'
+                  }`}>
+                    Impacto de cambios: {stats.exchangeImpactToday > 0 ? '+' : ''}{formatCOP(stats.exchangeImpactToday)}
+                  </p>
+                )}
+              </CardContent>
+            </Card>
 
-          <Card className="border-green-200 dark:border-green-800 bg-green-50/30 dark:bg-green-950/20 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-green-700 dark:text-green-400 flex items-center gap-2">
-                <Banknote className="w-4 h-4" />
-                Efectivo Hoy
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-700 dark:text-green-400">{formatCOP(stats.cashToday)}</div>
-              <p className="text-xs text-green-600 dark:text-green-500 mt-1">Pagos en efectivo</p>
-            </CardContent>
-          </Card>
+            <Card className="border-green-200 dark:border-green-800 bg-green-50/30 dark:bg-green-950/20 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-green-700 dark:text-green-400 flex items-center gap-2">
+                  <Banknote className="w-4 h-4" />
+                  Efectivo Hoy
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-700 dark:text-green-400">{formatCOP(stats.cashToday)}</div>
+                <p className="text-xs text-green-600 dark:text-green-500 mt-1">Pagos en efectivo</p>
+              </CardContent>
+            </Card>
 
-          <Card className="border-violet-200 dark:border-violet-800 bg-violet-50/30 dark:bg-violet-950/20 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-violet-700 dark:text-violet-400 flex items-center gap-2">
-                <ArrowRightLeft className="w-4 h-4" />
-                Transferencias Hoy
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-violet-700 dark:text-violet-400">{formatCOP(stats.transferToday)}</div>
-              <p className="text-xs text-violet-600 dark:text-violet-500 mt-1">Incluye Nequi, Daviplata</p>
-            </CardContent>
-          </Card>
+            <Card className="border-violet-200 dark:border-violet-800 bg-violet-50/30 dark:bg-violet-950/20 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-violet-700 dark:text-violet-400 flex items-center gap-2">
+                  <ArrowRightLeft className="w-4 h-4" />
+                  Transferencias Hoy
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-violet-700 dark:text-violet-400">{formatCOP(stats.transferToday)}</div>
+                <p className="text-xs text-violet-600 dark:text-violet-500 mt-1">Incluye Nequi, Daviplata</p>
+              </CardContent>
+            </Card>
+          </div>
 
-          <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/20 shadow-sm">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-400 flex items-center gap-2">
-                <CreditCard className="w-4 h-4" />
-                Abonos de Hoy
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-blue-700 dark:text-blue-400">{formatCOP(stats.todayPayments)}</div>
-              <p className="text-xs text-blue-600 dark:text-blue-500 mt-1">Pagos a crédito realizados</p>
-            </CardContent>
-          </Card>
+          {/* Segunda fila: 2 cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/20 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-400 flex items-center gap-2">
+                  <CreditCard className="w-4 h-4" />
+                  Abonos de Hoy
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-700 dark:text-blue-400">{formatCOP(stats.todayPayments)}</div>
+                <p className="text-xs text-blue-600 dark:text-blue-500 mt-1">Pagos a crédito realizados</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-red-200 dark:border-red-800 bg-red-50/30 dark:bg-red-950/20 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-red-700 dark:text-red-400 flex items-center gap-2">
+                  <FileText className="w-4 h-4" />
+                  Notas de Crédito Hoy
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-red-700 dark:text-red-400">-{formatCOP(stats.creditNotesToday)}</div>
+                <p className="text-xs text-red-600 dark:text-red-500 mt-1">Egresos por devoluciones</p>
+              </CardContent>
+            </Card>
+          </div>
         </div>
 
         {/* Facturas del día de hoy */}
@@ -1348,6 +1543,17 @@ export function InvoicesMenu() {
                                 >
                                   <Printer className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                 </Button>
+                                {invoice.is_credit && (invoice.status === 'paid' || invoice.status === 'partial_return') && (
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => handleOpenCreditNoteModal(invoice)}
+                                    className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 h-7 w-7 sm:h-8 sm:w-8 p-0"
+                                    title="Emitir Nota Crédito"
+                                  >
+                                    <FileX className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                                  </Button>
+                                )}
                                 {invoice.status !== 'pending_confirmation' && canRevertInvoice(invoice.created_at || '') && (
                                   <Button
                                     variant="ghost"
@@ -2182,6 +2388,189 @@ export function InvoicesMenu() {
                   Cerrar
                 </Button>
               </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Nota Crédito */}
+      <Dialog open={showCreditNoteModal} onOpenChange={(open) => { if (!issuingCreditNote) setShowCreditNoteModal(open); }}>
+        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-zinc-900 dark:text-zinc-100">
+              <FileX className="w-5 h-5 text-purple-600" />
+              Emitir Nota Crédito
+            </DialogTitle>
+            <DialogDescription className="text-zinc-500 dark:text-zinc-400">
+              Factura #{creditNoteInvoice?.number} · {creditNoteInvoice?.customer_name || 'Sin cliente'}
+            </DialogDescription>
+          </DialogHeader>
+
+          {creditNoteInvoice && (
+            <div className="space-y-5">
+              {/* Productos */}
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Selecciona los productos y cantidades a acreditar</p>
+                {creditNoteInvoice.items.map((item, i) => {
+                  const hasIds = item.unitIds && item.unitIds.length > 0;
+                  const qty = creditNoteQuantities[i] || 0;
+                  return (
+                    <Card key={i} className="border-zinc-200 dark:border-zinc-800">
+                      <CardContent className="p-4 space-y-3">
+                        <div className="flex items-center justify-between gap-4">
+                          <div className="flex-1">
+                            <p className="font-medium text-sm text-zinc-900 dark:text-zinc-100">{item.productName}</p>
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400">{item.quantity} und × {formatCOP(item.price)}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => setCreditNoteQuantities(prev => ({ ...prev, [i]: Math.max(0, (prev[i] || 0) - 1) }))}
+                              disabled={qty <= 0}
+                              className="w-7 h-7 rounded border border-zinc-300 dark:border-zinc-600 flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              <Minus className="w-3 h-3" />
+                            </button>
+                            <span className="w-6 text-center text-sm font-mono font-bold text-zinc-900 dark:text-zinc-100">{qty}</span>
+                            <button
+                              onClick={() => setCreditNoteQuantities(prev => ({ ...prev, [i]: Math.min(item.quantity, (prev[i] || 0) + 1) }))}
+                              disabled={qty >= item.quantity}
+                              className="w-7 h-7 rounded border border-zinc-300 dark:border-zinc-600 flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 disabled:opacity-30 disabled:cursor-not-allowed"
+                            >
+                              <span className="text-sm leading-none">+</span>
+                            </button>
+                          </div>
+                          <p className="text-sm font-medium text-purple-600 dark:text-purple-400 w-24 text-right">{formatCOP(item.price * qty)}</p>
+                        </div>
+
+                        {/* Selección de IDs si aplica */}
+                        {hasIds && qty > 0 && (
+                          <div className="pt-2 border-t border-zinc-100 dark:border-zinc-800">
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">Selecciona las IDs a acreditar ({qty} requeridas):</p>
+                            <div className="flex flex-wrap gap-1.5">
+                              {item.unitIds!.map((id: string) => {
+                                const selected = (creditNoteUnitIds[i] || []).includes(id);
+                                const maxReached = (creditNoteUnitIds[i] || []).length >= qty;
+                                return (
+                                  <button
+                                    key={id}
+                                    onClick={() => {
+                                      setCreditNoteUnitIds(prev => {
+                                        const cur = prev[i] || [];
+                                        if (selected) return { ...prev, [i]: cur.filter(x => x !== id) };
+                                        if (maxReached) return prev;
+                                        return { ...prev, [i]: [...cur, id] };
+                                      });
+                                    }}
+                                    className={`px-2 py-1 rounded text-xs font-mono border transition-colors ${
+                                      selected
+                                        ? 'bg-purple-100 dark:bg-purple-950 border-purple-400 text-purple-700 dark:text-purple-300'
+                                        : 'border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-purple-300'
+                                    } ${!selected && maxReached ? 'opacity-40 cursor-not-allowed' : ''}`}
+                                  >
+                                    {id}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                            {(creditNoteUnitIds[i] || []).length !== qty && (
+                              <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">Selecciona exactamente {qty} ID{qty > 1 ? 's' : ''}</p>
+                            )}
+                          </div>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+              </div>
+
+              {/* Total acreditado */}
+              {(() => {
+                const total = creditNoteInvoice.items.reduce((s, item, i) => s + item.price * (creditNoteQuantities[i] || 0), 0);
+                return total > 0 ? (
+                  <div className="flex justify-between items-center px-4 py-3 bg-purple-50 dark:bg-purple-950/30 rounded-lg border border-purple-200 dark:border-purple-800">
+                    <span className="text-sm font-medium text-purple-700 dark:text-purple-300">Total a acreditar</span>
+                    <span className="text-lg font-bold text-purple-600 dark:text-purple-400">{formatCOP(total)}</span>
+                  </div>
+                ) : null;
+              })()}
+
+              {/* Motivo y método de reembolso */}
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label className="text-sm text-zinc-700 dark:text-zinc-300">Motivo <span className="text-red-500">*</span></Label>
+                  <Input
+                    value={creditNoteReason}
+                    onChange={e => setCreditNoteReason(e.target.value)}
+                    placeholder="Ej: Producto defectuoso, error de precio..."
+                    className="text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-sm text-zinc-700 dark:text-zinc-300">Método de reembolso</Label>
+                  <Select value={creditNoteRefundMethod} onValueChange={setCreditNoteRefundMethod}>
+                    <SelectTrigger className="text-sm">
+                      <SelectValue placeholder="Seleccionar..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="efectivo">Efectivo</SelectItem>
+                      <SelectItem value="transferencia">Transferencia</SelectItem>
+                      <SelectItem value="descuento">Descuento en próxima compra</SelectItem>
+                      <SelectItem value="saldo_a_favor">Saldo a favor</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {creditNoteRefundMethod === 'saldo_a_favor' && (
+                  <div className="space-y-1.5">
+                    <Label className="text-sm text-zinc-700 dark:text-zinc-300">
+                      Aplicar a factura pendiente del cliente
+                    </Label>
+                    {pendingCustomerInvoices.length === 0 ? (
+                      <p className="text-xs text-amber-600 dark:text-amber-400 py-2">
+                        Este cliente no tiene facturas a crédito pendientes. El saldo quedará registrado como nota crédito.
+                      </p>
+                    ) : (
+                      <Select value={targetInvoiceId} onValueChange={setTargetInvoiceId}>
+                        <SelectTrigger className="text-sm">
+                          <SelectValue placeholder="Seleccionar factura..." />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {pendingCustomerInvoices.map(inv => (
+                            <SelectItem key={inv.id} value={inv.id}>
+                              #{inv.number} — Saldo: {formatCOP(inv.credit_balance ?? inv.total)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                )}
+                <div className="space-y-1.5">
+                  <Label className="text-sm text-zinc-700 dark:text-zinc-300">Notas adicionales</Label>
+                  <Input
+                    value={creditNoteNotes}
+                    onChange={e => setCreditNoteNotes(e.target.value)}
+                    placeholder="Opcional..."
+                    className="text-sm"
+                  />
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button variant="outline" onClick={() => setShowCreditNoteModal(false)} disabled={issuingCreditNote}>
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={handleIssueCreditNote}
+                  disabled={issuingCreditNote}
+                  className="bg-purple-600 hover:bg-purple-700 text-white"
+                >
+                  {issuingCreditNote ? (
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Emitiendo...</>
+                  ) : (
+                    <><FileX className="w-4 h-4 mr-2" />Emitir Nota Crédito</>
+                  )}
+                </Button>
+              </DialogFooter>
             </div>
           )}
         </DialogContent>

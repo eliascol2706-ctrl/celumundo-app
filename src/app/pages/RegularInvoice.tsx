@@ -465,13 +465,25 @@ export function RegularInvoice() {
 
       // Procesar cada grupo de productos
       for (const [productId, groupItems] of productGroups) {
-        const product = products.find((p) => p.id === productId);
-        if (!product) continue;
+        // ✅ OBTENER STOCK ACTUALIZADO desde BD (no del estado local)
+        const { supabase, getCurrentCompany } = await import('../lib/supabase');
+        const company = getCurrentCompany();
+        const { data: currentProduct, error } = await supabase
+          .from('products')
+          .select('stock, registered_ids')
+          .eq('id', productId)
+          .eq('company', company)
+          .single();
+
+        if (error || !currentProduct) {
+          console.error('Error al obtener stock actualizado:', error);
+          continue;
+        }
 
         // Sumar cantidades totales para este producto
         const totalQuantity = groupItems.reduce((sum, item) => sum + item.quantity, 0);
-        const newStock = product.stock - totalQuantity;
-        let newRegisteredIds = product.registered_ids;
+        const newStock = currentProduct.stock - totalQuantity;
+        let newRegisteredIds = currentProduct.registered_ids;
 
         // Procesar unit_ids de todos los items de este producto
         for (const item of groupItems) {
