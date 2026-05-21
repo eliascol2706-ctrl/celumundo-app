@@ -1752,7 +1752,7 @@ export function FinancialManagement() {
                         </div>
                         <div className="text-left">
                           <CardTitle className="text-lg">Egresos</CardTitle>
-                          <p className="text-sm text-zinc-500 dark:text-zinc-400">{formatCOP(stats.currentMonth.totalCostos + stats.currentMonth.totalGastos)}</p>
+                          <p className="text-sm text-zinc-500 dark:text-zinc-400">{formatCOP(stats.currentMonth.costosDeProductos + stats.currentMonth.totalGastos)}</p>
                         </div>
                       </div>
                       {egresosOpen ? <ChevronUp className="w-5 h-5" /> : <ChevronDown className="w-5 h-5" />}
@@ -1771,7 +1771,7 @@ export function FinancialManagement() {
                     </div>
                     <div className="flex justify-between py-2 font-semibold">
                       <span className="text-sm">Total Egresos</span>
-                      <span className="text-sm">{formatCOP(stats.currentMonth.totalCostos + stats.currentMonth.totalGastos)}</span>
+                      <span className="text-sm">{formatCOP(stats.currentMonth.costosDeProductos + stats.currentMonth.totalGastos)}</span>
                     </div>
                   </CardContent>
                 </CollapsibleContent>

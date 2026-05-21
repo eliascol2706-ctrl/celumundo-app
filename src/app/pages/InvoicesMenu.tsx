@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router';
-import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2, ChevronLeft, ChevronRight, Edit } from 'lucide-react';
+import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2, ChevronLeft, ChevronRight, Edit, Minus } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -52,7 +52,8 @@ export function InvoicesMenu() {
 
   // Estados para filtros de facturas
   const [searchTerm, setSearchTerm] = useState('');
-  const [periodFilter, setPeriodFilter] = useState<'today' | 'yesterday' | 'currentMonth' | 'previousMonth' | 'all'>('today');
+  const [periodFilter, setPeriodFilter] = useState<'today' | 'yesterday' | 'currentMonth' | 'previousMonth' | 'all' | 'custom'>('today');
+  const [customDate, setCustomDate] = useState<string>('');
   const [sortBy, setSortBy] = useState<'recent' | 'oldest' | 'highest' | 'lowest'>('recent');
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'efectivo' | 'transferencia' | 'nequi' | 'daviplata' | 'otros' | 'mixto'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending_confirmation' | 'pending' | 'partial_return'>('all');
@@ -71,6 +72,11 @@ export function InvoicesMenu() {
   // Estados para modal de edición de factura en confirmación
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+
+  // Estados para modal de selección de ID a restar
+  const [showIdSubtractModal, setShowIdSubtractModal] = useState(false);
+  const [subtractingItemIndex, setSubtractingItemIndex] = useState<number | null>(null);
+  const [selectedIdToSubtract, setSelectedIdToSubtract] = useState<string | null>(null);
 
   useEffect(() => {
     loadStats();
@@ -98,7 +104,7 @@ export function InvoicesMenu() {
   // Resetear página cuando cambian los filtros
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, periodFilter, sortBy, paymentFilter, statusFilter]);
+  }, [searchTerm, periodFilter, sortBy, paymentFilter, statusFilter, customDate]);
 
   const loadStats = async () => {
     setLoading(true);
@@ -254,6 +260,8 @@ export function InvoicesMenu() {
           currentDate.setMonth(currentDate.getMonth() - 1);
           const previousMonth = currentDate.toISOString().slice(0, 7); // YYYY-MM
           return invDate.startsWith(previousMonth);
+        } else if (periodFilter === 'custom') {
+          return customDate ? invDate === customDate : false;
         }
         return true;
       });
@@ -736,6 +744,84 @@ export function InvoicesMenu() {
     }
   };
 
+  // Inicia la resta: si tiene IDs abre el modal de selección, si no resta directo
+  const handleInitSubtractProduct = (productIndex: number) => {
+    if (!editingInvoice) return;
+    const item = editingInvoice.items[productIndex];
+    if (item.quantity <= 1) {
+      // Restar el único restante equivale a eliminar
+      if (confirm(`¿Eliminar "${item.productName}" de la factura? (Es la última unidad)\n\nEsto restaurará el stock y habilitará las ID's.`)) {
+        handleRemoveProductFromInvoice(productIndex);
+      }
+      return;
+    }
+    if (item.unitIds && item.unitIds.length > 0) {
+      setSubtractingItemIndex(productIndex);
+      setSelectedIdToSubtract(null);
+      setShowIdSubtractModal(true);
+    } else {
+      handleSubtractProductQuantity(productIndex, null);
+    }
+  };
+
+  const handleSubtractProductQuantity = async (productIndex: number, idToRemove: string | null) => {
+    if (!editingInvoice) return;
+
+    const item = editingInvoice.items[productIndex];
+    const product = products.find(p => p.id === item.productId);
+
+    if (!product) {
+      toast.error('Producto no encontrado en el inventario');
+      return;
+    }
+
+    try {
+      // 1. Restaurar 1 unidad de stock
+      if (!item.productId.startsWith('common-')) {
+        await updateProduct(product.id, { stock: product.stock + 1 });
+      }
+
+      // 2. Re-habilitar la ID seleccionada si aplica
+      if (idToRemove && product.registered_ids) {
+        const updatedRegisteredIds = product.registered_ids.map((idObj: any) =>
+          idObj.id === idToRemove ? { ...idObj, disabled: false } : idObj
+        );
+        await updateProduct(product.id, { registered_ids: updatedRegisteredIds });
+      }
+
+      // 3. Actualizar el item en la factura
+      const newQuantity = item.quantity - 1;
+      const newUnitIds = idToRemove
+        ? (item.unitIds || []).filter((id: string) => id !== idToRemove)
+        : item.unitIds;
+      const newItemTotal = item.price * newQuantity;
+
+      const updatedItems = editingInvoice.items.map((it, idx) =>
+        idx === productIndex
+          ? { ...it, quantity: newQuantity, total: newItemTotal, unitIds: newUnitIds }
+          : it
+      );
+
+      const subtotal = updatedItems.reduce((sum, it) => sum + it.total, 0);
+      const tax = subtotal * 0;
+      const total = subtotal + tax;
+
+      await updateInvoice(editingInvoice.id, { items: updatedItems, subtotal, tax, total });
+
+      setEditingInvoice({ ...editingInvoice, items: updatedItems, subtotal, tax, total });
+
+      const invoices = await getInvoices();
+      const pending = invoices.filter(inv => inv.status === 'pending_confirmation');
+      setPendingInvoices(pending);
+
+      toast.success('Unidad restada y stock restaurado');
+      loadStats();
+    } catch (error) {
+      console.error('Error al restar producto:', error);
+      toast.error('Error al restar la unidad');
+    }
+  };
+
   const handlePreviewInvoice = (invoice: Invoice) => {
     // 🔧 SANITIZAR: Convertir objetos en unitIds a strings
     // (corrige facturas antiguas que guardaron objetos en lugar de strings)
@@ -985,8 +1071,22 @@ export function InvoicesMenu() {
                       <SelectItem value="currentMonth">Mes Actual</SelectItem>
                       <SelectItem value="previousMonth">Mes Anterior</SelectItem>
                       <SelectItem value="all">Todas las Facturas</SelectItem>
+                      <SelectItem value="custom">Fecha personalizada</SelectItem>
                     </SelectContent>
                   </Select>
+                  {periodFilter === 'custom' && (
+                    <div className="mt-1 space-y-1">
+                      <Input
+                        type="date"
+                        value={customDate}
+                        onChange={e => setCustomDate(e.target.value)}
+                        className="h-9 text-xs sm:text-sm"
+                      />
+                      {!customDate && (
+                        <p className="text-xs text-zinc-400 dark:text-zinc-500">Selecciona una fecha</p>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Filtro de Ordenamiento */}
@@ -1059,6 +1159,7 @@ export function InvoicesMenu() {
                   onClick={() => {
                     setSearchTerm('');
                     setPeriodFilter('today');
+                    setCustomDate('');
                     setSortBy('recent');
                     setPaymentFilter('all');
                     setStatusFilter('all');
@@ -2044,18 +2145,29 @@ export function InvoicesMenu() {
                             </div>
                           )}
                         </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            if (confirm(`¿Eliminar "${item.productName}" de la factura?\n\nEsto restaurará el stock y habilitará las ID's.`)) {
-                              handleRemoveProductFromInvoice(index);
-                            }
-                          }}
-                          className="border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-950 text-red-700 dark:text-red-400"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
+                        <div className="flex flex-col gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              if (confirm(`¿Eliminar "${item.productName}" de la factura?\n\nEsto restaurará el stock y habilitará las ID's.`)) {
+                                handleRemoveProductFromInvoice(index);
+                              }
+                            }}
+                            className="border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-950 text-red-700 dark:text-red-400"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleInitSubtractProduct(index)}
+                            className="border-orange-300 dark:border-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950 text-orange-700 dark:text-orange-400"
+                            title="Restar 1 unidad"
+                          >
+                            <Minus className="w-4 h-4" />
+                          </Button>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
@@ -2072,6 +2184,59 @@ export function InvoicesMenu() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de selección de ID a restar */}
+      <Dialog open={showIdSubtractModal} onOpenChange={(open) => {
+        setShowIdSubtractModal(open);
+        if (!open) { setSubtractingItemIndex(null); setSelectedIdToSubtract(null); }
+      }}>
+        <DialogContent className="max-w-sm bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Seleccionar ID a restar</DialogTitle>
+            <DialogDescription className="text-zinc-500 dark:text-zinc-400">
+              Elige cuál unidad deseas restar de la factura.
+            </DialogDescription>
+          </DialogHeader>
+          {subtractingItemIndex !== null && editingInvoice && (() => {
+            const item = editingInvoice.items[subtractingItemIndex];
+            return (
+              <div className="space-y-2 py-2">
+                {(item.unitIds || []).map((id: string, idx: number) => (
+                  <button
+                    key={idx}
+                    onClick={() => setSelectedIdToSubtract(id)}
+                    className={`w-full text-left px-4 py-3 rounded-lg border transition-colors text-sm font-mono ${
+                      selectedIdToSubtract === id
+                        ? 'border-orange-400 bg-orange-50 dark:bg-orange-950 text-orange-700 dark:text-orange-300'
+                        : 'border-zinc-200 dark:border-zinc-700 hover:border-orange-300 dark:hover:border-orange-700 text-zinc-800 dark:text-zinc-200'
+                    }`}
+                  >
+                    ID: {id}
+                  </button>
+                ))}
+              </div>
+            );
+          })()}
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowIdSubtractModal(false)}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={!selectedIdToSubtract}
+              onClick={async () => {
+                if (subtractingItemIndex === null || !selectedIdToSubtract) return;
+                setShowIdSubtractModal(false);
+                await handleSubtractProductQuantity(subtractingItemIndex, selectedIdToSubtract);
+                setSubtractingItemIndex(null);
+                setSelectedIdToSubtract(null);
+              }}
+              className="bg-orange-600 hover:bg-orange-700 text-white"
+            >
+              Restar unidad
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
