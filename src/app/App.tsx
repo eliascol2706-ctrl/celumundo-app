@@ -5,6 +5,7 @@ import { Toaster } from './components/ui/sonner';
 import { SplashScreen } from './components/SplashScreen';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { SupabaseConnectionError } from './components/SupabaseConnectionError';
+import { OfflineScreen } from './components/OfflineScreen';
 import { supabase } from './lib/supabase';
 
 export default function App() {
@@ -68,6 +69,7 @@ export default function App() {
     <ErrorBoundary>
       <RouterProvider router={router} />
       <Toaster />
+      <OfflineScreen />
     </ErrorBoundary>
   );
 }

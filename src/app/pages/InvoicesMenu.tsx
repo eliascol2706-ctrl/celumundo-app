@@ -735,8 +735,10 @@ export function InvoicesMenu() {
       const updatedItems = editingInvoice.items.filter((_, index) => index !== productIndex);
 
       if (updatedItems.length === 0) {
-        // Si no quedan productos, eliminar la factura completa
-        await deleteInvoice(editingInvoice.id);
+        // Stock ya fue restaurado arriba; eliminar solo el registro sin volver a restaurar stock
+        const company = getCurrentCompany();
+        await supabase.from('common_products').delete().eq('invoice_id', editingInvoice.id).eq('company', company);
+        await supabase.from('invoices').delete().eq('id', editingInvoice.id).eq('company', company);
         toast.success('Factura eliminada (no quedaban productos)');
         setShowEditModal(false);
         setEditingInvoice(null);
@@ -2364,15 +2366,17 @@ export function InvoicesMenu() {
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => handleInitSubtractProduct(index)}
-                            className="border-orange-300 dark:border-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950 text-orange-700 dark:text-orange-400"
-                            title="Restar 1 unidad"
-                          >
-                            <Minus className="w-4 h-4" />
-                          </Button>
+                          {item.quantity > 1 && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleInitSubtractProduct(index)}
+                              className="border-orange-300 dark:border-orange-700 hover:bg-orange-50 dark:hover:bg-orange-950 text-orange-700 dark:text-orange-400"
+                              title="Restar 1 unidad"
+                            >
+                              <Minus className="w-4 h-4" />
+                            </Button>
+                          )}
                         </div>
                       </div>
                     </CardContent>
