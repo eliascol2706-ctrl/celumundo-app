@@ -48,6 +48,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { isPrintingAvailable } from '../lib/platform-detector';
 import { LabelPrinterConfigDialog } from './LabelPrinterConfigDialog';
 import { UnitIDManager } from './UnitIDManager';
+import { DevPanelCustomersTab } from './DevPanelCustomersTab';
 
 const adminNavigation = [
   // Sección 1: Gestión de Inventario
@@ -185,7 +186,7 @@ export function Layout() {
   const [devPanelTokenDialogOpen, setDevPanelTokenDialogOpen] = useState(false);
   const [devPanelDialogOpen, setDevPanelDialogOpen] = useState(false);
   const [devPanelToken, setDevPanelToken] = useState("");
-  const [devPanelTab, setDevPanelTab] = useState<'closures' | 'invoices' | 'unit_ids'>('closures');
+  const [devPanelTab, setDevPanelTab] = useState<'closures' | 'invoices' | 'unit_ids' | 'customers'>('closures');
 
   // Enfocar input cuando se abre el diálogo
   useEffect(() => {
@@ -1528,6 +1529,19 @@ export function Layout() {
                   Gestión de ID's
                 </div>
               </button>
+              <button
+                onClick={() => setDevPanelTab('customers')}
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  devPanelTab === 'customers'
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-gray-700'
+                }`}
+              >
+                <div className="flex items-center gap-2">
+                  <Users className="h-4 w-4" />
+                  Gestión de Clientes y Crédito
+                </div>
+              </button>
             </div>
 
             {/* Contenido de tabs */}
@@ -1551,6 +1565,10 @@ export function Layout() {
                 onClose={() => {}}
                 inline={true}
               />
+            )}
+
+            {devPanelTab === 'customers' && (
+              <DevPanelCustomersTab />
             )}
           </DialogContent>
         </Dialog>

@@ -289,11 +289,6 @@ export function FinancialManagement() {
     // Calcular el costo total de los productos de la factura
     let totalCost = 0;
     invoice.items.forEach(item => {
-      // Excluir items que fueron devueltos en un cambio
-      if (item.exchanged && !item.fromExchange) {
-        return;
-      }
-
       const product = products.find(p => p.id === item.productId);
       if (product && product.current_cost) {
         totalCost += product.current_cost * item.quantity;
@@ -401,11 +396,6 @@ export function FinancialManagement() {
       let costosDeProductos = 0;
       facturasParaCostos.forEach((invoice) => {
         invoice.items.forEach((item) => {
-          // Excluir items que fueron devueltos en un cambio
-          if (item.exchanged && !item.fromExchange) {
-            return;
-          }
-
           const product = products.find((p) => p.id === item.productId);
           if (product && product.current_cost) {
             costosDeProductos += product.current_cost * item.quantity;
@@ -419,11 +409,6 @@ export function FinancialManagement() {
 
       facturasPagasList.forEach((invoice) => {
         invoice.items.forEach((item) => {
-          // Excluir items que fueron devueltos en un cambio
-          if (item.exchanged && !item.fromExchange) {
-            return;
-          }
-
           const product = products.find((p) => p.id === item.productId);
           if (product && product.current_cost) {
             totalCostos += product.current_cost * item.quantity;
@@ -446,11 +431,14 @@ export function FinancialManagement() {
 
       const totalGastos = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
+      // Impacto de utilidad por cambios del mes (profit_difference)
+      const exchangeProfitImpact = monthExchanges.reduce((sum, ex) => sum + (Number(ex.profit_difference) || 0), 0);
+
       // NUEVO: Ganancias Netas usando Ingresos del Mes (solo facturas pagas y parciales)
-      const gananciasNetas = ingresoNeto - costosDeProductos - totalGastos;
+      const gananciasNetas = ingresoNeto - costosDeProductos - totalGastos + exchangeProfitImpact;
 
       // Mantener ganancias original para compatibilidad
-      const ganancias = ingresoNeto - totalCostos - totalGastos;
+      const ganancias = ingresoNeto - totalCostos - totalGastos + exchangeProfitImpact;
 
       const margen = ingresoNeto > 0 ? (gananciasNetas / ingresoNeto) * 100 : 0;
 
@@ -773,11 +761,6 @@ export function FinancialManagement() {
     let costos = 0;
     dayInvoices.forEach(invoice => {
       invoice.items.forEach(item => {
-        // Excluir items que fueron devueltos en un cambio
-        if (item.exchanged && !item.fromExchange) {
-          return;
-        }
-
         const product = products.find(p => p.id === item.productId);
         if (product && product.current_cost) {
           costos += product.current_cost * item.quantity;
@@ -785,11 +768,14 @@ export function FinancialManagement() {
       });
     });
 
+    // Impacto de utilidad por cambios del día (profit_difference)
+    const exchangeProfitImpact = dayExchanges.reduce((sum, ex) => sum + (Number(ex.profit_difference) || 0), 0);
+
     // Calcular gastos
     const gastos = dayExpenses.reduce((sum, exp) => sum + exp.amount, 0);
 
-    // Calcular ganancias
-    const ganancias = ingresosNetos - costos - gastos;
+    // Calcular ganancias (incluyendo impacto de utilidad de cambios)
+    const ganancias = ingresosNetos - costos - gastos + exchangeProfitImpact;
 
     return {
       invoices: dayInvoices,
@@ -1010,11 +996,6 @@ export function FinancialManagement() {
       let costos = 0;
       paidInvoices.forEach(invoice => {
         invoice.items.forEach(item => {
-          // Excluir items que fueron devueltos en un cambio
-          if (item.exchanged && !item.fromExchange) {
-            return;
-          }
-
           const product = products.find(p => p.id === item.productId);
           if (product && product.current_cost) {
             costos += product.current_cost * item.quantity;
@@ -1022,12 +1003,14 @@ export function FinancialManagement() {
         });
       });
 
+      const monthExchangeProfitImpact = monthExchanges.reduce((sum, ex) => sum + (Number(ex.profit_difference) || 0), 0);
+
       last6Months.push({
         month: date.toLocaleDateString('es-CO', { month: 'short' }),
         monthKey: monthStr, // Añadir key única con año-mes
         ingresos,
         gastos,
-        ganancias: ingresos - gastos - costos
+        ganancias: ingresos - gastos - costos + monthExchangeProfitImpact
       });
     }
 
@@ -2747,11 +2730,6 @@ export function FinancialManagement() {
             // Procesar TODAS las facturas pagadas para capturar tanto costos como ingresos
             facturasParaCostos.forEach((invoice) => {
               invoice.items.forEach((item) => {
-                // Excluir items que fueron devueltos en un cambio
-                if (item.exchanged && !item.fromExchange) {
-                  return;
-                }
-
                 const product = products.find((p) => p.id === item.productId);
                 const unitCost = product?.current_cost || 0;
 
@@ -2795,14 +2773,12 @@ export function FinancialManagement() {
 
             facturasRegulares.forEach((invoice) => {
               invoice.items.forEach((item) => {
-                if (item.exchanged && !item.fromExchange) return;
                 ingresosRegulares += item.total;
               });
             });
 
             facturasCredito.forEach((invoice) => {
               invoice.items.forEach((item) => {
-                if (item.exchanged && !item.fromExchange) return;
                 ingresosCredito += item.total;
               });
             });

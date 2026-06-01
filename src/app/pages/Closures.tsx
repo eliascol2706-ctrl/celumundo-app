@@ -252,16 +252,12 @@ export function Closures() {
       .filter(inv => (inv.status === 'paid' || inv.status === 'partial_return' || inv.status === 'returned') && !inv.is_credit)
       .reduce((sum, inv) => sum + inv.total, 0);
 
-    // CAMBIO CRÍTICO: Filtrar devoluciones por la fecha de la factura original, NO por la fecha de la devolución
-    // Ejemplo: Si una factura del día 27 se devuelve el día 28, la devolución cuenta para el cierre del día 27
+    // Las devoluciones impactan el cierre del día en que se realizaron,
+    // sin importar la fecha de la factura original.
     const todayReturns = returns.filter(ret => {
-      // Buscar la factura original
-      const originalInvoice = invoices.find(inv => inv.id === ret.invoice_id);
-      if (!originalInvoice) return false;
-
-      // Solo contar la devolución si la factura original es del día que se está cerrando
-      const invoiceDate = extractColombiaDate(originalInvoice.date);
-      return invoiceDate === today;
+      if (!ret.date) return false;
+      const returnDate = extractColombiaDate(ret.date);
+      return returnDate === today;
     });
 
     const totalReturns = todayReturns.reduce((sum, ret) => sum + ret.total, 0);
@@ -326,8 +322,9 @@ export function Closures() {
         .reduce((sum, inv) => {
           return sum + inv.items.reduce((itemSum: number, item: any) => itemSum + item.quantity, 0);
         }, 0),
-      creditPayments: todayCreditPayments, // Incluir abonos del día
-      exchanges: todayExchanges, // NUEVO: Incluir cambios del día
+      creditPayments: todayCreditPayments,
+      exchanges: todayExchanges,
+      returns: todayReturns,
     };
   };
 
@@ -521,7 +518,6 @@ export function Closures() {
     invoicesForCost.forEach(invoice => {
       if (invoice.items && Array.isArray(invoice.items)) {
         invoice.items.forEach((item: any) => {
-          if (item.exchanged && !item.fromExchange) return;
           const product = products.find(p => p.id === item.productId);
           if (product && product.current_cost) {
             totalProductCost += product.current_cost * item.quantity;
@@ -530,8 +526,13 @@ export function Closures() {
       }
     });
 
-    // Ganancias reales: ingresos netos - costos - gastos
-    const realProfit = ingresoNetos - totalProductCost - totalExpenses;
+    // Impacto de utilidad por cambios del mes (profit_difference)
+    const exchangeProfitImpact = currentMonthExchanges.reduce((sum, ex) => {
+      return sum + (Number(ex.profit_difference) || 0);
+    }, 0);
+
+    // Ganancias reales: ingresos netos - costos - gastos + impacto de utilidad de cambios
+    const realProfit = ingresoNetos - totalProductCost - totalExpenses + exchangeProfitImpact;
 
     // Crear objetos Date para obtener nombres de meses en español
     const previousMonthDate = new Date(previousMonthStr + '-01T12:00:00');
@@ -1230,10 +1231,10 @@ export function Closures() {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold text-green-600 dark:text-green-400">
-                  COP {formatCOP(monthlyStats.netRevenue + (monthlyStats.totalCreditPayments || 0))}
+                  COP {formatCOP(monthlyStats.totalRevenue)}
                 </div>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Facturas pagadas + Abonos
+                  Suma de todos los cierres del mes
                 </p>
               </CardContent>
             </Card>

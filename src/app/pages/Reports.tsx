@@ -1,11 +1,13 @@
-import { useState, useEffect } from 'react';
-import { Package, DollarSign, TrendingDown, AlertCircle, Eye, TrendingUp, BarChart3, ShoppingCart, Sparkles } from 'lucide-react';
+import { useState, useEffect, useRef } from 'react';
+import { Package, DollarSign, TrendingDown, AlertCircle, Eye, TrendingUp, BarChart3, ShoppingCart, Sparkles, ClipboardList, Download, CheckCircle } from 'lucide-react';
 import { getAllProducts, getInvoices, getExpenses, type Product, type Invoice, type Expense } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
 import { formatCOP } from '../lib/currency';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 interface SalesAnalysisData {
   topSellingProducts: Array<{ name: string; code: string; quantity: number; revenue: number }>;
@@ -29,6 +31,12 @@ export default function Reports() {
   const [salesAnalysis, setSalesAnalysis] = useState<SalesAnalysisData | null>(null);
   const [showSalesAnalysis, setShowSalesAnalysis] = useState(false);
 
+  // Estados para reporte de inventario
+  const [showInventoryReport, setShowInventoryReport] = useState(false);
+  const [inventoryProgress, setInventoryProgress] = useState(0);
+  const [inventoryReady, setInventoryReady] = useState(false);
+  const inventoryPdfRef = useRef<Blob | null>(null);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -49,6 +57,157 @@ export default function Reports() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const openInventoryReport = async () => {
+    setInventoryProgress(0);
+    setInventoryReady(false);
+    inventoryPdfRef.current = null;
+    setShowInventoryReport(true);
+
+    // Simular progreso mientras se genera el PDF
+    const steps = [10, 25, 40, 60, 75, 88, 95];
+    for (const step of steps) {
+      await new Promise(r => setTimeout(r, 180));
+      setInventoryProgress(step);
+    }
+
+    // Generar PDF
+    const sorted = [...products].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+    const totalProducts = sorted.length;
+    const totalCost = sorted.reduce((s, p) => s + ((p.current_cost || 0) * (p.stock || 0)), 0);
+    const totalProfit = sorted.reduce((s, p) => {
+      const price = p.final_price || p.price1 || 0;
+      const cost = p.current_cost || 0;
+      return s + ((price - cost) * (p.stock || 0));
+    }, 0);
+
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const now = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    // ── Encabezado ──
+    doc.setFillColor(20, 20, 20);
+    doc.rect(0, 0, pageW, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('CELUMUNDO VIP', 14, 11);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Reporte de Inventario Completo', 14, 18);
+    doc.setFontSize(8);
+    doc.text(`Generado: ${now}`, 14, 24);
+
+    // ── Resumen ──
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text('RESUMEN GENERAL', 14, 36);
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.3);
+    doc.line(14, 37.5, pageW - 14, 37.5);
+
+    const summaryY = 43;
+    const col = (pageW - 28) / 3;
+    const summaryItems = [
+      { label: 'Total Productos', value: totalProducts.toString() },
+      { label: 'Costo Total Inventario', value: formatCOP(totalCost) },
+      { label: 'Utilidad Estimada Total', value: formatCOP(totalProfit) },
+    ];
+    summaryItems.forEach((item, i) => {
+      const x = 14 + col * i;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(80, 80, 80);
+      doc.text(item.label, x, summaryY);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(0, 0, 0);
+      doc.text(item.value, x, summaryY + 6);
+    });
+
+    // ── Tabla ──
+    const rows = sorted.map(p => {
+      const price = p.final_price || p.price1 || 0;
+      const cost = p.current_cost || 0;
+      const profit = (price - cost) * (p.stock || 0);
+      return [
+        p.name || '—',
+        p.category || '—',
+        formatCOP(price),
+        formatCOP(profit),
+        formatCOP(cost),
+        (p.stock ?? 0).toString(),
+      ];
+    });
+
+    autoTable(doc, {
+      startY: summaryY + 16,
+      head: [['Producto', 'Categoría', 'Precio Final', 'Utilidad Est.', 'Costo', 'Stock']],
+      body: rows,
+      styles: {
+        fontSize: 7.5,
+        cellPadding: 2.5,
+        textColor: [0, 0, 0],
+        lineColor: [180, 180, 180],
+        lineWidth: 0.15,
+      },
+      headStyles: {
+        fillColor: [20, 20, 20],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8,
+      },
+      alternateRowStyles: { fillColor: [245, 245, 245] },
+      columnStyles: {
+        0: { cellWidth: 55 },
+        1: { cellWidth: 30 },
+        2: { cellWidth: 28, halign: 'right' },
+        3: { cellWidth: 28, halign: 'right' },
+        4: { cellWidth: 28, halign: 'right' },
+        5: { cellWidth: 14, halign: 'center' },
+      },
+      margin: { left: 14, right: 14 },
+      didDrawPage: (data: any) => {
+        // Pie de página
+        const pageH = doc.internal.pageSize.getHeight();
+        doc.setFontSize(7);
+        doc.setTextColor(150, 150, 150);
+        doc.setFont('helvetica', 'normal');
+        doc.text(`CELUMUNDO VIP — Reporte de Inventario — ${now}`, 14, pageH - 6);
+        doc.text(`Página ${data.pageNumber}`, pageW - 14, pageH - 6, { align: 'right' });
+      },
+    });
+
+    // ── Totales finales al pie de la tabla ──
+    const finalY: number = (doc as any).lastAutoTable.finalY + 6;
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.4);
+    doc.line(14, finalY, pageW - 14, finalY);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.5);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`Total productos registrados: ${totalProducts}`, 14, finalY + 6);
+    doc.text(`Costo total del inventario: ${formatCOP(totalCost)}`, 14, finalY + 12);
+    doc.text(`Utilidad estimada total: ${formatCOP(totalProfit)}`, 14, finalY + 18);
+
+    inventoryPdfRef.current = doc.output('blob');
+
+    setInventoryProgress(100);
+    await new Promise(r => setTimeout(r, 350));
+    setInventoryReady(true);
+  };
+
+  const downloadInventoryPdf = () => {
+    if (!inventoryPdfRef.current) return;
+    const url = URL.createObjectURL(inventoryPdfRef.current);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `inventario-celumundo-${new Date().toISOString().slice(0, 10)}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
 
   // Analizar ventas del mes
@@ -242,13 +401,23 @@ export default function Reports() {
           <h2 className="text-3xl font-bold">Reportes</h2>
           <p className="text-muted-foreground mt-1">Resumen y análisis del negocio</p>
         </div>
-        <Button
-          onClick={analyzeMonthlySales}
-          className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
-        >
-          <BarChart3 className="h-4 w-4 mr-2" />
-          Análisis de Ventas
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            onClick={openInventoryReport}
+            variant="outline"
+            className="border-zinc-400 dark:border-zinc-600 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          >
+            <ClipboardList className="h-4 w-4 mr-2" />
+            Reporte de Inventario
+          </Button>
+          <Button
+            onClick={analyzeMonthlySales}
+            className="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white"
+          >
+            <BarChart3 className="h-4 w-4 mr-2" />
+            Análisis de Ventas
+          </Button>
+        </div>
       </div>
 
       {/* Tarjetas de resumen */}
@@ -809,6 +978,85 @@ export default function Reports() {
               </div>
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Reporte de Inventario */}
+      <Dialog open={showInventoryReport} onOpenChange={(open) => { if (!open && inventoryReady) { setShowInventoryReport(false); } else if (!open && inventoryProgress === 0) { setShowInventoryReport(false); } }}>
+        <DialogContent className="max-w-sm w-[95vw] bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-zinc-900 dark:text-zinc-100">
+              <ClipboardList className="w-5 h-5 text-zinc-600 dark:text-zinc-400" />
+              Reporte de Inventario
+            </DialogTitle>
+            <DialogDescription className="text-zinc-500 dark:text-zinc-400 text-sm">
+              Inventario completo con precios, costos y utilidades
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 space-y-6">
+            {!inventoryReady ? (
+              <div className="space-y-4">
+                <div className="text-center space-y-1">
+                  <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    {inventoryProgress < 100 ? 'Generando reporte...' : 'Finalizando...'}
+                  </p>
+                  <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                    Procesando {products.length} productos
+                  </p>
+                </div>
+
+                {/* Barra de progreso */}
+                <div className="space-y-2">
+                  <div className="w-full bg-zinc-200 dark:bg-zinc-800 rounded-full h-3 overflow-hidden">
+                    <div
+                      className="h-3 rounded-full bg-zinc-800 dark:bg-zinc-200 transition-all duration-300 ease-out"
+                      style={{ width: `${inventoryProgress}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs text-zinc-400 dark:text-zinc-500">
+                    <span>Progreso</span>
+                    <span className="font-mono font-medium text-zinc-700 dark:text-zinc-300">{inventoryProgress}%</span>
+                  </div>
+                </div>
+
+                <div className="text-xs text-zinc-400 dark:text-zinc-500 space-y-0.5 pl-1">
+                  {inventoryProgress >= 10 && <p>✓ Cargando productos...</p>}
+                  {inventoryProgress >= 40 && <p>✓ Calculando costos y utilidades...</p>}
+                  {inventoryProgress >= 75 && <p>✓ Construyendo tabla de inventario...</p>}
+                  {inventoryProgress >= 95 && <p>✓ Armando documento PDF...</p>}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <div className="flex flex-col items-center gap-2 py-2">
+                  <div className="w-14 h-14 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                    <CheckCircle className="w-8 h-8 text-zinc-700 dark:text-zinc-300" />
+                  </div>
+                  <p className="font-semibold text-zinc-900 dark:text-zinc-100">¡Reporte listo!</p>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 text-center">
+                    {products.length} productos incluidos
+                  </p>
+                </div>
+
+                <Button
+                  onClick={downloadInventoryPdf}
+                  className="w-full bg-zinc-900 hover:bg-zinc-700 dark:bg-zinc-100 dark:hover:bg-zinc-300 dark:text-zinc-900 text-white font-semibold"
+                >
+                  <Download className="w-4 h-4 mr-2" />
+                  Descargar PDF
+                </Button>
+
+                <Button
+                  variant="outline"
+                  onClick={() => setShowInventoryReport(false)}
+                  className="w-full border-zinc-300 dark:border-zinc-700"
+                >
+                  Cerrar
+                </Button>
+              </div>
+            )}
+          </div>
         </DialogContent>
       </Dialog>
     </div>

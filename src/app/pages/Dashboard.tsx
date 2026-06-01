@@ -41,9 +41,10 @@ export function Dashboard() {
     totalReturnAmount: 0,
     netRevenue: 0,
     returnRate: 0,
-    totalCreditBalance: 0, // NUEVO: Saldo por cobrar
-    totalCustomers: 0, // NUEVO: Total de clientes
-    pendingCreditInvoices: 0, // NUEVO: Facturas a crédito pendientes
+    totalCreditBalance: 0,
+    totalCustomers: 0,
+    pendingCreditInvoices: 0,
+    last3MonthsData: [] as { month: string; revenue: number; monthKey: string }[],
   });
 
   const [lowStockItems, setLowStockItems] = useState<any[]>([]);
@@ -115,6 +116,24 @@ export function Dashboard() {
 
         const invoicesTotalRevenue = invoices.filter(i => i.status === 'paid' || i.status === 'partial_return').reduce((sum, inv) => sum + inv.total, 0);
 
+        // Calcular ingresos de los últimos 3 meses
+        const now = new Date();
+        const last3MonthsData = [2, 1, 0].map(monthsAgo => {
+          const date = new Date(now.getFullYear(), now.getMonth() - monthsAgo, 1);
+          const year = date.getFullYear();
+          const month = date.getMonth();
+          const monthKey = `${year}-${String(month + 1).padStart(2, '0')}`;
+          const monthName = date.toLocaleDateString('es-CO', { month: 'short', year: '2-digit' });
+          const revenue = invoices
+            .filter(i => {
+              if (i.status !== 'paid' && i.status !== 'partial_return') return false;
+              const d = new Date(i.date);
+              return d.getFullYear() === year && d.getMonth() === month;
+            })
+            .reduce((sum, inv) => sum + inv.total, 0);
+          return { month: monthName, revenue, monthKey };
+        });
+
         setStats({
           totalProducts: products.length,
           totalInvoices: invoices.length,
@@ -126,9 +145,10 @@ export function Dashboard() {
           totalReturnAmount: returnsStats.totalReturnAmount,
           netRevenue,
           returnRate: returnsStats.returnRate,
-          totalCreditBalance, // NUEVO: Saldo por cobrar
-          totalCustomers: customers.length, // NUEVO: Total de clientes
-          pendingCreditInvoices, // NUEVO: Facturas a crédito pendientes
+          totalCreditBalance,
+          totalCustomers: customers.length,
+          pendingCreditInvoices,
+          last3MonthsData,
         });
 
         setLowStockItems(lowStock.slice(0, 5));
@@ -294,14 +314,33 @@ export function Dashboard() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="border-green-200 dark:border-green-800 bg-green-50 dark:bg-green-950/30 hover:shadow-lg transition-all duration-300">
           <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-green-700 dark:text-green-300">Ingresos Netos</CardTitle>
+            <CardTitle className="text-sm font-medium text-green-700 dark:text-green-300">Ingresos Últimos 3 Meses</CardTitle>
             <TrendingUp className="h-4 w-4 text-green-600 dark:text-green-400" />
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-green-700 dark:text-green-300">
-              {formatCOP(stats.totalRevenue)}
+              {formatCOP(stats.last3MonthsData.reduce((s, m) => s + m.revenue, 0))}
             </div>
-            <p className="text-xs text-green-600 dark:text-green-400 mt-1">Facturas pagadas</p>
+            <div className="mt-3 space-y-1.5">
+              {stats.last3MonthsData.map((m, i) => {
+                const max = Math.max(...stats.last3MonthsData.map(x => x.revenue), 1);
+                const pct = (m.revenue / max) * 100;
+                return (
+                  <div key={m.monthKey}>
+                    <div className="flex justify-between text-xs text-green-700 dark:text-green-300 mb-0.5">
+                      <span className="capitalize">{m.month}</span>
+                      <span className="font-medium">{formatCOP(m.revenue)}</span>
+                    </div>
+                    <div className="h-1.5 bg-green-100 dark:bg-green-900 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all ${i === 2 ? 'bg-green-500 dark:bg-green-400' : 'bg-green-300 dark:bg-green-600'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </CardContent>
         </Card>
 

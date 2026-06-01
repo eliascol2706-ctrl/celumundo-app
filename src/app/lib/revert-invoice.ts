@@ -25,7 +25,7 @@ export const getRevertTimeRemaining = (invoiceCreatedAt: string): number => {
   return Math.max(0, Math.ceil(30 - diffInMinutes));
 };
 
-// Revertir factura: elimina la factura y restaura el inventario
+// Revertir factura: la marca como 'anulada' y restaura el inventario
 export const revertInvoice = async (invoiceId: string): Promise<RevertInvoiceResult> => {
   try {
     const company = getCurrentCompany();
@@ -113,7 +113,7 @@ export const revertInvoice = async (invoiceId: string): Promise<RevertInvoiceRes
       });
     }
 
-    // 5. Si es factura a crédito, eliminar los pagos asociados
+    // 5. Si es factura a crédito, eliminar los pagos asociados (ya no aplican)
     if (invoice.is_credit) {
       await supabase
         .from('credit_payments')
@@ -122,28 +122,24 @@ export const revertInvoice = async (invoiceId: string): Promise<RevertInvoiceRes
         .eq('company', company);
     }
 
-    // 5.5. Eliminar productos comunes asociados a esta factura
-    await supabase
-      .from('common_products')
-      .delete()
-      .eq('invoice_id', invoiceId)
-      .eq('company', company);
-
-    // 6. Eliminar la factura
-    const { error: deleteError } = await supabase
+    // 6. Marcar la factura como 'anulada' (no se elimina, queda como registro)
+    const { error: updateError } = await supabase
       .from('invoices')
-      .delete()
+      .update({
+        status: 'anulada',
+        updated_at: new Date().toISOString(),
+      })
       .eq('id', invoiceId)
       .eq('company', company);
 
-    if (deleteError) {
-      console.error('Error al eliminar factura:', deleteError);
-      return { success: false, message: 'Error al eliminar la factura' };
+    if (updateError) {
+      console.error('Error al anular factura:', updateError);
+      return { success: false, message: 'Error al anular la factura' };
     }
 
     return {
       success: true,
-      message: `Factura #${invoice.number} revertida exitosamente. Stock restaurado.`,
+      message: `Factura #${invoice.number} anulada. El inventario fue restaurado.`,
     };
   } catch (error) {
     console.error('Error al revertir factura:', error);

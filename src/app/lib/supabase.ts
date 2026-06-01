@@ -68,7 +68,7 @@ export interface Invoice {
   subtotal: number;
   tax: number;
   total: number;
-  status: 'pending' | 'paid' | 'cancelled' | 'partial_return' | 'returned' | 'pending_confirmation'; // ACTUALIZADO: Agregado 'pending_confirmation'
+  status: 'pending' | 'paid' | 'cancelled' | 'partial_return' | 'returned' | 'pending_confirmation' | 'anulada';
   payment_method?: string;
   payment_cash?: number;
   payment_transfer?: number;
@@ -78,8 +78,29 @@ export interface Invoice {
   is_credit?: boolean; // Si es una venta a crédito
   credit_balance?: number; // Saldo pendiente por pagar
   due_date?: string; // Fecha de vencimiento para créditos
+  history_movements?: HistoryMovement[];
   created_at?: string;
   updated_at?: string;
+}
+
+export interface HistoryMovementProduct {
+  productId: string;
+  productName: string;
+  quantity: number;
+  salePrice: number;
+  totalSalePrice: number;
+  cost: number;
+  totalCost: number;
+  profit: number;
+}
+
+export interface HistoryMovement {
+  id: string;
+  type: 'DEVOLUCIÓN' | 'CAMBIO';
+  date: string;
+  performed_by: string;
+  affected_products: HistoryMovementProduct[];
+  delivered_products?: HistoryMovementProduct[];
 }
 
 export interface Customer {
@@ -247,6 +268,7 @@ export interface Exchange {
   new_unit_ids?: string[];
 
   price_difference?: number;
+  profit_difference?: number;
   payment_method?: string;
   payment_amount?: number;
   payment_cash?: number;
@@ -1414,6 +1436,36 @@ export const updateInvoice = async (id: string, updates: Partial<Invoice>): Prom
   return data;
 };
 
+export const addHistoryMovement = async (
+  invoiceId: string,
+  movement: Omit<HistoryMovement, 'id'>
+): Promise<boolean> => {
+  try {
+    const company = getCurrentCompany();
+    const { data: invoice, error } = await supabase
+      .from('invoices')
+      .select('history_movements')
+      .eq('id', invoiceId)
+      .eq('company', company)
+      .single();
+
+    if (error || !invoice) return false;
+
+    const currentHistory: HistoryMovement[] = invoice.history_movements || [];
+    const newMovement: HistoryMovement = { ...movement, id: crypto.randomUUID() };
+
+    const { error: updateError } = await supabase
+      .from('invoices')
+      .update({ history_movements: [...currentHistory, newMovement] })
+      .eq('id', invoiceId)
+      .eq('company', company);
+
+    return !updateError;
+  } catch {
+    return false;
+  }
+};
+
 export const deleteInvoice = async (id: string): Promise<boolean> => {
   try {
     const company = getCurrentCompany();
@@ -2185,161 +2237,38 @@ export const addReturn = async (returnData: Omit<Return, 'id' | 'return_number' 
     }
   }
   
-  // Actualizar estado de la factura y eliminar productos devueltos
-  const { data: invoice } = await supabase
-    .from('invoices')
-    .select('*')
-    .eq('id', returnData.invoice_id)
-    .single();
-
-  if (invoice) {
-    // Calcular si es devolución completa
-    const allReturns = await getReturnsByInvoice(returnData.invoice_id);
-
-    // Crear un mapa de cantidades devueltas por productId (solo para productos devolvibles)
-    const totalReturnedItems: { [key: string]: number } = {};
-
-    // Sumar cantidades devueltas (incluyendo la actual)
-    [...allReturns, data as Return].forEach(ret => {
-      ret.items.forEach(item => {
-        totalReturnedItems[item.productId] = (totalReturnedItems[item.productId] || 0) + item.quantity;
-      });
-    });
-
-    // Actualizar items de la factura: eliminar productos devueltos o reducir cantidad
-    // IMPORTANTE: Solo afectar productos que NO sean exchanged (sin fromExchange)
-    // Procesamos en orden y vamos restando de las cantidades devueltas disponibles
-    const remainingReturned: { [key: string]: number } = { ...totalReturnedItems };
-
-    const updatedItems = invoice.items
-      .map((invItem: InvoiceItem) => {
-        // Si el producto fue cambiado (exchanged sin fromExchange), mantenerlo sin cambios
-        // porque NO puede devolverse
-        if (invItem.exchanged && !invItem.fromExchange) {
-          return invItem;
-        }
-
-        // Verificar cuánto de este producto específico se devolvió
-        const returnedQty = remainingReturned[invItem.productId] || 0;
-
-        if (returnedQty <= 0) {
-          // No se devolvió nada de este item, mantenerlo igual
-          return invItem;
-        }
-
-        // Calcular cuánto reducir de este item específico
-        const qtyToReduce = Math.min(invItem.quantity, returnedQty);
-        const remainingQty = invItem.quantity - qtyToReduce;
-
-        // Actualizar el contador de cantidades devueltas restantes
-        remainingReturned[invItem.productId] = returnedQty - qtyToReduce;
-
-        if (remainingQty <= 0) {
-          // Producto completamente devuelto, no incluirlo
-          return null;
-        } else {
-          // Producto parcialmente devuelto o no afectado, ajustar cantidad
-          return {
-            ...invItem,
-            quantity: remainingQty,
-            total: remainingQty * invItem.price
-          };
-        }
-      })
-      .filter((item: InvoiceItem | null) => item !== null); // Eliminar productos completamente devueltos
-
-    // Verificar si todos los productos fueron devueltos
-    const allProductsReturned = updatedItems.length === 0;
-
-    // Recalcular totales de la factura
-    const newSubtotal = updatedItems.reduce((sum: number, item: InvoiceItem) => sum + item.total, 0);
-    const taxRate = invoice.subtotal > 0 ? invoice.tax / invoice.subtotal : 0;
-    const newTax = newSubtotal * taxRate;
-    const newTotal = newSubtotal + newTax;
-
-    // NUEVO: Calcular payment_cash, payment_transfer y payment_other proporcionalmente
-    const originalTotal = invoice.total || 0;
-    const ratio = originalTotal > 0 ? newTotal / originalTotal : 0;
-
-    const newPaymentCash = (invoice.payment_cash || 0) * ratio;
-    const newPaymentTransfer = (invoice.payment_transfer || 0) * ratio;
-    const newPaymentOther = (invoice.payment_other || 0) * ratio;
-
-    // Actualizar estado de factura y items
-    const newStatus = allProductsReturned ? 'returned' : 'partial_return';
-    await updateInvoice(returnData.invoice_id, {
-      status: newStatus,
-      items: updatedItems,
-      subtotal: newSubtotal,
-      tax: newTax,
-      total: newTotal,
-      payment_cash: newPaymentCash,
-      payment_transfer: newPaymentTransfer,
-      payment_other: newPaymentOther
-    });
-
-    // NUEVO: Ajustar cierre diario si la devolución es de una factura de un día anterior
-    const invoiceDateStr = extractColombiaDate(invoice.date);
-    const returnDateStr = extractColombiaDate(returnData.date);
-
-    if (invoiceDateStr !== returnDateStr) {
-      // La devolución es de una factura de un día diferente
-      // Buscar el cierre del día de la factura original
-      const { data: dailyClosure } = await supabase
-        .from('daily_closures')
-        .select('*')
-        .eq('company', company)
-        .eq('date', invoiceDateStr)
+  // Escribir en el historial de la factura sin modificarla
+  try {
+    const affectedProducts: HistoryMovementProduct[] = [];
+    for (const item of returnData.items) {
+      if (item.productId.startsWith('common-')) continue;
+      const { data: prod } = await supabase
+        .from('products')
+        .select('current_cost')
+        .eq('id', item.productId)
         .single();
-
-      if (dailyClosure) {
-        // Calcular cuánto se devolvió en efectivo, transferencia, etc.
-        const returnAmount = returnData.total;
-        const returnedCash = (invoice.payment_cash || 0) - newPaymentCash;
-        const returnedTransfer = (invoice.payment_transfer || 0) - newPaymentTransfer;
-
-        // Calcular ganancia devuelta (costo de productos devueltos)
-        let returnedProductCost = 0;
-        for (const item of returnData.items) {
-          if (item.productId.startsWith('common-')) continue;
-
-          const { data: product } = await supabase
-            .from('products')
-            .select('current_cost')
-            .eq('id', item.productId)
-            .single();
-
-          if (product && product.current_cost) {
-            returnedProductCost += product.current_cost * item.quantity;
-          }
-        }
-
-        const returnedProfit = returnAmount - returnedProductCost;
-
-        // Preparar actualización del cierre diario
-        const closureUpdate: any = {
-          total: dailyClosure.total - returnAmount,
-          total_cash: dailyClosure.total_cash - returnedCash,
-          total_transfer: dailyClosure.total_transfer - returnedTransfer
-        };
-
-        // Solo actualizar profit_generated si la factura es a crédito
-        if (invoice.is_credit) {
-          closureUpdate.profit_generated = (dailyClosure.profit_generated || 0) - returnedProfit;
-        }
-
-        // Actualizar profit_collected solo si la factura estaba pagada (paid o partial_return)
-        if (invoice.status === 'paid' || invoice.status === 'partial_return') {
-          closureUpdate.profit_collected = (dailyClosure.profit_collected || 0) - returnedProfit;
-        }
-
-        // Actualizar el cierre diario
-        await supabase
-          .from('daily_closures')
-          .update(closureUpdate)
-          .eq('id', dailyClosure.id);
-      }
+      const cost = prod?.current_cost || 0;
+      affectedProducts.push({
+        productId: item.productId,
+        productName: item.productName,
+        quantity: item.quantity,
+        salePrice: item.price,
+        totalSalePrice: item.total,
+        cost,
+        totalCost: cost * item.quantity,
+        profit: item.price - cost,
+      });
     }
+    if (affectedProducts.length > 0) {
+      await addHistoryMovement(returnData.invoice_id, {
+        type: 'DEVOLUCIÓN',
+        date: new Date().toISOString(),
+        performed_by: returnData.processed_by,
+        affected_products: affectedProducts,
+      });
+    }
+  } catch (histError) {
+    console.error('Error writing return history:', histError);
   }
 
   return data;
@@ -2402,9 +2331,17 @@ export const revertReturn = async (returnId: string): Promise<boolean> => {
         const newStock = product.stock - item.quantity;
         let newRegisteredIds = product.registered_ids || [];
 
-        // Si el producto usa IDs únicas, eliminarlas del array
+        // Si el producto usa IDs únicas, volver a inhabilitarlas (disabled: true)
         if (product.use_unit_ids && item.unitIds && item.unitIds.length > 0) {
-          newRegisteredIds = newRegisteredIds.filter((id: string) => !item.unitIds!.includes(id));
+          newRegisteredIds = newRegisteredIds.map((idObj: any) => {
+            const currentId = typeof idObj === 'string' ? idObj : idObj.id;
+            if (item.unitIds!.includes(currentId)) {
+              return typeof idObj === 'string'
+                ? { id: idObj, disabled: true }
+                : { ...idObj, disabled: true };
+            }
+            return idObj;
+          });
         }
 
         await updateProduct(item.productId, {
@@ -2414,161 +2351,24 @@ export const revertReturn = async (returnId: string): Promise<boolean> => {
       }
     }
 
-    // Obtener todas las devoluciones de esta factura (excluyendo la actual)
-    const allReturns = await getReturnsByInvoice(returnData.invoice_id);
-    const otherReturns = allReturns.filter(r => r.id !== returnId);
-
-    // Reconstruir los items de la factura agregando los items revertidos
-    const currentItems = invoice.items as InvoiceItem[];
-    const updatedItems = [...currentItems];
-
-    // Agregar de vuelta los items de la devolución
-    returnData.items.forEach((returnItem: any) => {
-      const existingItemIndex = updatedItems.findIndex(
-        (invItem) => invItem.productId === returnItem.productId
-      );
-
-      if (existingItemIndex >= 0) {
-        // El producto ya existe en la factura, aumentar la cantidad
-        updatedItems[existingItemIndex] = {
-          ...updatedItems[existingItemIndex],
-          quantity: updatedItems[existingItemIndex].quantity + returnItem.quantity,
-          total: (updatedItems[existingItemIndex].quantity + returnItem.quantity) * updatedItems[existingItemIndex].price
-        };
-      } else {
-        // El producto no existe, agregarlo
-        updatedItems.push({
-          productId: returnItem.productId,
-          productName: returnItem.productName,
-          productCode: returnItem.productCode || '',
-          quantity: returnItem.quantity,
-          price: returnItem.price,
-          total: returnItem.quantity * returnItem.price,
-          useUnitIds: returnItem.useUnitIds || false,
-          unitIds: returnItem.unitIds || []
-        });
-      }
-    });
-
-    // Recalcular totales
-    const newSubtotal = updatedItems.reduce((sum, item) => sum + item.total, 0);
-    const taxRate = invoice.subtotal > 0 ? invoice.tax / invoice.subtotal : 0;
-    const newTax = newSubtotal * taxRate;
-    const newTotal = newSubtotal + newTax;
-
-    // NUEVO: Calcular payment_cash, payment_transfer y payment_other proporcionalmente
-    const originalTotal = invoice.total || 0;
-    const ratio = originalTotal > 0 ? newTotal / originalTotal : 0;
-
-    const newPaymentCash = (invoice.payment_cash || 0) * ratio;
-    const newPaymentTransfer = (invoice.payment_transfer || 0) * ratio;
-    const newPaymentOther = (invoice.payment_other || 0) * ratio;
-
-    // Determinar el nuevo estado de la factura
-    let newStatus: 'paid' | 'partial_return' | 'returned' = 'paid';
-
-    if (otherReturns.length > 0) {
-      // Hay otras devoluciones, verificar si son totales o parciales
-      const totalReturnedItems: { [key: string]: number } = {};
-      otherReturns.forEach(ret => {
-        ret.items.forEach(item => {
-          totalReturnedItems[item.productId] = (totalReturnedItems[item.productId] || 0) + item.quantity;
-        });
-      });
-
-      // Verificar si todos los productos están devueltos
-      const allReturned = updatedItems.every(item => {
-        const returnedQty = totalReturnedItems[item.productId] || 0;
-        return returnedQty >= item.quantity;
-      });
-
-      newStatus = allReturned ? 'returned' : 'partial_return';
-    }
-
-    // Actualizar la factura
-    const { error: updateError } = await supabase
-      .from('invoices')
-      .update({
-        status: newStatus,
-        items: updatedItems,
-        subtotal: newSubtotal,
-        tax: newTax,
-        total: newTotal,
-        payment_cash: newPaymentCash,
-        payment_transfer: newPaymentTransfer,
-        payment_other: newPaymentOther
-      })
-      .eq('id', returnData.invoice_id);
-
-    if (updateError) {
-      console.error('Error actualizando factura:', updateError);
-      return false;
-    }
-
-    // NUEVO: Restaurar valores en el cierre diario si la devolución fue de un día anterior
-    const company = getCurrentCompany();
-    const invoiceDateStr = extractColombiaDate(invoice.date);
-    const returnDateStr = extractColombiaDate(returnData.date);
-
-    if (invoiceDateStr !== returnDateStr) {
-      // La devolución fue de una factura de un día diferente
-      // Buscar el cierre del día de la factura original
-      const { data: dailyClosure } = await supabase
-        .from('daily_closures')
-        .select('*')
-        .eq('company', company)
-        .eq('date', invoiceDateStr)
+    // Eliminar también el historial de esta devolución de la factura
+    try {
+      const { data: inv } = await supabase
+        .from('invoices')
+        .select('history_movements')
+        .eq('id', returnData.invoice_id)
         .single();
-
-      if (dailyClosure) {
-        // Calcular cuánto se devolvió en efectivo, transferencia, etc.
-        const returnAmount = returnData.total;
-
-        // Calcular cuánto se había restado de efectivo y transferencia
-        const returnedCash = (newPaymentCash - (invoice.payment_cash || 0));
-        const returnedTransfer = (newPaymentTransfer - (invoice.payment_transfer || 0));
-
-        // Calcular ganancia devuelta (costo de productos devueltos)
-        let returnedProductCost = 0;
-        for (const item of returnData.items) {
-          if (item.productId.startsWith('common-')) continue;
-
-          const { data: product } = await supabase
-            .from('products')
-            .select('current_cost')
-            .eq('id', item.productId)
-            .single();
-
-          if (product && product.current_cost) {
-            returnedProductCost += product.current_cost * item.quantity;
-          }
-        }
-
-        const returnedProfit = returnAmount - returnedProductCost;
-
-        // Preparar actualización del cierre diario (RESTAURAR valores)
-        const closureUpdate: any = {
-          total: dailyClosure.total + returnAmount,
-          total_cash: dailyClosure.total_cash + Math.abs(returnedCash),
-          total_transfer: dailyClosure.total_transfer + Math.abs(returnedTransfer)
-        };
-
-        // Solo restaurar profit_generated si la factura es a crédito
-        if (invoice.is_credit) {
-          closureUpdate.profit_generated = (dailyClosure.profit_generated || 0) + returnedProfit;
-        }
-
-        // Restaurar profit_collected si después de revertir la factura queda pagada
-        if (newStatus === 'paid' || newStatus === 'partial_return') {
-          closureUpdate.profit_collected = (dailyClosure.profit_collected || 0) + returnedProfit;
-        }
-
-        // RESTAURAR (sumar de vuelta) los valores al cierre diario
+      if (inv && inv.history_movements) {
+        const filtered = (inv.history_movements as HistoryMovement[]).filter(
+          m => !(m.type === 'DEVOLUCIÓN' && m.date === returnData.date && m.performed_by === returnData.processed_by)
+        );
         await supabase
-          .from('daily_closures')
-          .update(closureUpdate)
-          .eq('id', dailyClosure.id);
+          .from('invoices')
+          .update({ history_movements: filtered })
+          .eq('id', returnData.invoice_id);
       }
+    } catch (histError) {
+      console.error('Error removing return history entry:', histError);
     }
 
     // Eliminar el registro de devolución
@@ -3709,145 +3509,64 @@ export const addExchange = async (exchangeData: Omit<Exchange, 'id' | 'exchange_
   }
 
   // ============================================
-  // ACTUALIZAR FACTURA CON INFORMACIÓN DEL CAMBIO
+  // CALCULAR profit_difference Y REGISTRAR HISTORIAL
+  // Las facturas NO se modifican — el cambio queda en el historial
   // ============================================
-  if (exchangeData.invoice_id && data) {
+  if (data) {
     try {
-      console.log(`🔄 Updating invoice ${exchangeData.invoice_number} with exchange ${data.id}`);
-
-      // Obtener la factura actual
-      const { data: invoice, error: invoiceError } = await supabase
-        .from('invoices')
-        .select('*')
-        .eq('id', exchangeData.invoice_id)
-        .eq('company', company)
-        .single();
-
-      if (invoiceError) {
-        console.error('Error fetching invoice for update:', invoiceError);
-        throw invoiceError;
-      }
-
-      if (invoice) {
-        console.log(`📋 Current invoice items:`, invoice.items);
-
-        // Actualizar los items de la factura marcando los cambiados
-        let updatedItems = invoice.items.map((item: InvoiceItem) => {
-          // Buscar si este producto fue devuelto (comparar por productId)
-          const returnedProduct = exchangeData.original_products.find(
-            (p: ExchangeProduct) => p.productId === item.productId
-          );
-
-          if (returnedProduct) {
-            console.log(`✏️ Marking product ${item.productName} as exchanged`);
-            // Marcar como cambiado y agregar productos entregados
-            return {
-              ...item,
-              exchanged: true,
-              exchangeId: data.id,
-              exchangedFor: !isPendingExchange ? exchangeData.new_products : []
-            };
-          }
-
-          return item;
+      const affectedProducts: HistoryMovementProduct[] = [];
+      for (const prod of exchangeData.original_products) {
+        if (prod.productId.startsWith('common-')) continue;
+        const { data: p } = await supabase.from('products').select('current_cost').eq('id', prod.productId).single();
+        const cost = p?.current_cost || 0;
+        affectedProducts.push({
+          productId: prod.productId,
+          productName: prod.productName,
+          quantity: prod.quantity,
+          salePrice: prod.price,
+          totalSalePrice: prod.total,
+          cost,
+          totalCost: cost * prod.quantity,
+          profit: prod.price - cost,
         });
-
-        // Si NO es un cambio pendiente, agregar los nuevos productos al array de items
-        // Estos aparecerán como productos vendidos normales para cálculos de costos
-        if (!isPendingExchange && exchangeData.new_products.length > 0) {
-          console.log(`➕ Adding ${exchangeData.new_products.length} new products to invoice items`);
-
-          const newItems: InvoiceItem[] = exchangeData.new_products.map((newProd: ExchangeProduct) => ({
-            productId: newProd.productId,
-            productName: newProd.productName,
-            quantity: newProd.quantity,
-            price: newProd.price,
-            total: newProd.total,
-            unitIds: newProd.unitIds || [],
-            // Marcar estos items como parte del cambio para referencia
-            fromExchange: true,
-            exchangeId: data.id
-          } as any));
-
-          updatedItems = [...updatedItems, ...newItems];
-        }
-
-        console.log(`📋 Updated invoice items:`, updatedItems);
-
-        // Recalcular el total de la factura
-        // Ignorar items con exchanged: true (productos devueltos)
-        // Sumar solo items normales y items con fromExchange: true (productos entregados en cambio)
-        const newTotal = updatedItems.reduce((sum: number, item: any) => {
-          // Ignorar productos que fueron devueltos (exchanged sin fromExchange)
-          if (item.exchanged && !item.fromExchange) {
-            return sum;
-          }
-          // Sumar el resto (items normales y productos nuevos del cambio)
-          return sum + item.total;
-        }, 0);
-
-        console.log(`💰 Recalculated invoice total: ${invoice.total} → ${newTotal}`);
-
-        // Actualizar métodos de pago según el cambio
-        let updatedPaymentCash = invoice.payment_cash || 0;
-        let updatedPaymentTransfer = invoice.payment_transfer || 0;
-        let updatedPaymentOther = invoice.payment_other || 0;
-
-        // Solo actualizar si NO es un cambio pendiente (los pendientes no tienen pago todavía)
-        if (!isPendingExchange) {
-          // Si price_difference > 0: cliente paga más (SUMAR)
-          // Si price_difference < 0: se devuelve dinero (RESTAR)
-          const priceDiff = exchangeData.price_difference || 0;
-
-          if (priceDiff > 0) {
-            // Cliente paga la diferencia - SUMAR
-            updatedPaymentCash += (exchangeData.payment_cash || 0);
-            updatedPaymentTransfer += (exchangeData.payment_transfer || 0);
-            updatedPaymentOther += (exchangeData.payment_other || 0);
-            console.log(`💳 Cliente pagó más (+${priceDiff}) - Sumando pagos`);
-          } else if (priceDiff < 0) {
-            // Se devuelve dinero - RESTAR
-            updatedPaymentCash -= (exchangeData.payment_cash || 0);
-            updatedPaymentTransfer -= (exchangeData.payment_transfer || 0);
-            updatedPaymentOther -= (exchangeData.payment_other || 0);
-            console.log(`💳 Se devuelve dinero (${priceDiff}) - Restando pagos`);
-          }
-
-          console.log(`💳 Updated payment methods - Cash: ${updatedPaymentCash}, Transfer: ${updatedPaymentTransfer}, Other: ${updatedPaymentOther}`);
-        }
-
-        console.log(`💾 Saving updated invoice to database...`);
-
-        // Actualizar la factura con los items modificados, el nuevo total y los métodos de pago
-        const { error: updateError } = await supabase
-          .from('invoices')
-          .update({
-            items: updatedItems,
-            total: newTotal,
-            payment_cash: updatedPaymentCash,
-            payment_transfer: updatedPaymentTransfer,
-            payment_other: updatedPaymentOther,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', exchangeData.invoice_id)
-          .eq('company', company);
-
-        if (updateError) {
-          console.error('❌ Error updating invoice:', updateError);
-          throw updateError;
-        }
-
-        console.log(`✅ Invoice ${invoice.number} updated successfully with exchange information`);
-      } else {
-        console.warn('⚠️ Invoice not found for update');
       }
-    } catch (error) {
-      console.error('❌ Error updating invoice with exchange info:', error);
-      // No fallar la operación completa si no se puede actualizar la factura
-      // pero sí loguear el error detalladamente
+      const deliveredProducts: HistoryMovementProduct[] = [];
+      if (!isPendingExchange) {
+        for (const prod of exchangeData.new_products) {
+          if (prod.productId.startsWith('common-')) continue;
+          const { data: p } = await supabase.from('products').select('current_cost').eq('id', prod.productId).single();
+          const cost = p?.current_cost || 0;
+          deliveredProducts.push({
+            productId: prod.productId,
+            productName: prod.productName,
+            quantity: prod.quantity,
+            salePrice: prod.price,
+            totalSalePrice: prod.total,
+            cost,
+            totalCost: cost * prod.quantity,
+            profit: prod.price - cost,
+          });
+        }
+
+        // Calcular diferencia de utilidad y persistirla en el registro del cambio
+        const returnedProfit = affectedProducts.reduce((sum, p) => sum + p.profit * p.quantity, 0);
+        const deliveredProfit = deliveredProducts.reduce((sum, p) => sum + p.profit * p.quantity, 0);
+        const profitDiff = deliveredProfit - returnedProfit;
+        await supabase.from('exchanges').update({ profit_difference: profitDiff }).eq('id', data.id);
+      }
+
+      if (exchangeData.invoice_id) {
+        await addHistoryMovement(exchangeData.invoice_id, {
+          type: 'CAMBIO',
+          date: new Date().toISOString(),
+          performed_by: exchangeData.registered_by,
+          affected_products: affectedProducts,
+          delivered_products: deliveredProducts.length > 0 ? deliveredProducts : undefined,
+        });
+      }
+    } catch (histError) {
+      console.error('Error writing exchange history:', histError);
     }
-  } else {
-    console.log('ℹ️ No invoice_id provided or exchange data is null, skipping invoice update');
   }
 
   return data;
@@ -3887,9 +3606,29 @@ export const finalizeExchange = async (
       return null;
     }
 
-    // 2. Calcular diferencia de precio
+    // 2. Calcular diferencia de precio y utilidad
     const new_total = finalizeData.new_products.reduce((sum, p) => sum + p.total, 0);
     const price_difference = new_total - exchange.original_total;
+
+    // Calcular profit_difference: (utilidad entregados) - (utilidad devueltos)
+    let profit_difference_value = 0;
+    {
+      let returnedProfit = 0;
+      for (const prod of (exchange.original_products || [])) {
+        if (prod.productId.startsWith('common-')) continue;
+        const { data: p } = await supabase.from('products').select('current_cost').eq('id', prod.productId).single();
+        const cost = p?.current_cost || 0;
+        returnedProfit += (prod.price - cost) * prod.quantity;
+      }
+      let deliveredProfit = 0;
+      for (const prod of finalizeData.new_products) {
+        if (prod.productId.startsWith('common-')) continue;
+        const { data: p } = await supabase.from('products').select('current_cost').eq('id', prod.productId).single();
+        const cost = p?.current_cost || 0;
+        deliveredProfit += (prod.price - cost) * prod.quantity;
+      }
+      profit_difference_value = deliveredProfit - returnedProfit;
+    }
 
     // 3. Procesar cada producto nuevo (sacar del inventario)
     for (const newProd of finalizeData.new_products) {
@@ -3999,6 +3738,7 @@ export const finalizeExchange = async (
         new_total: new_total,
         new_unit_ids: finalizeData.new_products[0]?.unitIds || [],
         price_difference: price_difference,
+        profit_difference: profit_difference_value,
         payment_method: finalizeData.payment_method,
         payment_cash: finalizeData.payment_cash || 0,
         payment_transfer: finalizeData.payment_transfer || 0,
@@ -4014,129 +3754,51 @@ export const finalizeExchange = async (
       return null;
     }
 
-    // 6. Actualizar la factura con los productos entregados
+    // 6. Registrar en el historial de la factura (sin modificar la factura)
     if (exchange.invoice_id && updatedExchange) {
       try {
-        console.log(`🔄 Finalizing invoice ${exchange.invoice_number} with exchange ${exchangeId}`);
-
-        const { data: invoice, error: invoiceError } = await supabase
-          .from('invoices')
-          .select('*')
-          .eq('id', exchange.invoice_id)
-          .eq('company', company)
-          .single();
-
-        if (invoiceError) {
-          console.error('❌ Error fetching invoice for finalize:', invoiceError);
-          throw invoiceError;
-        }
-
-        if (invoice) {
-          console.log(`📋 Current invoice items before finalize:`, invoice.items);
-
-          // Actualizar los items marcando los cambiados con los productos entregados
-          let updatedItems = invoice.items.map((item: InvoiceItem) => {
-            // Si este item ya fue marcado como exchanged con este exchangeId, agregar los productos entregados
-            if (item.exchanged && item.exchangeId === exchangeId) {
-              console.log(`✏️ Adding exchangedFor products to ${item.productName}`);
-              return {
-                ...item,
-                exchangedFor: finalizeData.new_products
-              };
-            }
-            return item;
+        const affectedProducts: HistoryMovementProduct[] = [];
+        for (const prod of (exchange.original_products || [])) {
+          if (prod.productId.startsWith('common-')) continue;
+          const { data: p } = await supabase.from('products').select('current_cost').eq('id', prod.productId).single();
+          const cost = p?.current_cost || 0;
+          affectedProducts.push({
+            productId: prod.productId,
+            productName: prod.productName,
+            quantity: prod.quantity,
+            salePrice: prod.price,
+            totalSalePrice: prod.total,
+            cost,
+            totalCost: cost * prod.quantity,
+            profit: prod.price - cost,
           });
-
-          // Agregar los nuevos productos al array de items
-          // Estos aparecerán como productos vendidos normales para cálculos de costos
-          if (finalizeData.new_products.length > 0) {
-            console.log(`➕ Adding ${finalizeData.new_products.length} new products to invoice items`);
-
-            const newItems: InvoiceItem[] = finalizeData.new_products.map((newProd: ExchangeProduct) => ({
-              productId: newProd.productId,
-              productName: newProd.productName,
-              quantity: newProd.quantity,
-              price: newProd.price,
-              total: newProd.total,
-              unitIds: newProd.unitIds || [],
-              // Marcar estos items como parte del cambio para referencia
-              fromExchange: true,
-              exchangeId: exchangeId
-            } as any));
-
-            updatedItems = [...updatedItems, ...newItems];
-          }
-
-          console.log(`📋 Updated invoice items after finalize:`, updatedItems);
-
-          // Recalcular el total de la factura
-          // Ignorar items con exchanged: true (productos devueltos)
-          // Sumar solo items normales y items con fromExchange: true (productos entregados en cambio)
-          const newTotal = updatedItems.reduce((sum: number, item: any) => {
-            // Ignorar productos que fueron devueltos (exchanged sin fromExchange)
-            if (item.exchanged && !item.fromExchange) {
-              return sum;
-            }
-            // Sumar el resto (items normales y productos nuevos del cambio)
-            return sum + item.total;
-          }, 0);
-
-          console.log(`💰 Recalculated invoice total: ${invoice.total} → ${newTotal}`);
-
-          // Actualizar métodos de pago según el cambio finalizado
-          let updatedPaymentCash = invoice.payment_cash || 0;
-          let updatedPaymentTransfer = invoice.payment_transfer || 0;
-          let updatedPaymentOther = invoice.payment_other || 0;
-
-          // Si price_difference > 0: cliente paga más (SUMAR)
-          // Si price_difference < 0: se devuelve dinero (RESTAR)
-          if (price_difference > 0) {
-            // Cliente paga la diferencia - SUMAR
-            updatedPaymentCash += (finalizeData.payment_cash || 0);
-            updatedPaymentTransfer += (finalizeData.payment_transfer || 0);
-            updatedPaymentOther += (finalizeData.payment_other || 0);
-            console.log(`💳 Cliente pagó más (+${price_difference}) - Sumando pagos`);
-          } else if (price_difference < 0) {
-            // Se devuelve dinero - RESTAR
-            updatedPaymentCash -= (finalizeData.payment_cash || 0);
-            updatedPaymentTransfer -= (finalizeData.payment_transfer || 0);
-            updatedPaymentOther -= (finalizeData.payment_other || 0);
-            console.log(`💳 Se devuelve dinero (${price_difference}) - Restando pagos`);
-          }
-
-          console.log(`💳 Updated payment methods - Cash: ${updatedPaymentCash}, Transfer: ${updatedPaymentTransfer}, Other: ${updatedPaymentOther}`);
-
-          console.log(`💾 Saving finalized invoice to database...`);
-
-          // Actualizar la factura con los items modificados, el nuevo total y los métodos de pago
-          const { error: updateError } = await supabase
-            .from('invoices')
-            .update({
-              items: updatedItems,
-              total: newTotal,
-              payment_cash: updatedPaymentCash,
-              payment_transfer: updatedPaymentTransfer,
-              payment_other: updatedPaymentOther,
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', exchange.invoice_id)
-            .eq('company', company);
-
-          if (updateError) {
-            console.error('❌ Error updating invoice:', updateError);
-            throw updateError;
-          }
-
-          console.log(`✅ Invoice ${invoice.number} finalized successfully with exchange products`);
-        } else {
-          console.warn('⚠️ Invoice not found for finalize update');
         }
-      } catch (error) {
-        console.error('❌ Error updating invoice with finalized exchange:', error);
-        // No fallar la operación si no se puede actualizar la factura
+        const deliveredProducts: HistoryMovementProduct[] = [];
+        for (const prod of finalizeData.new_products) {
+          if (prod.productId.startsWith('common-')) continue;
+          const { data: p } = await supabase.from('products').select('current_cost').eq('id', prod.productId).single();
+          const cost = p?.current_cost || 0;
+          deliveredProducts.push({
+            productId: prod.productId,
+            productName: prod.productName,
+            quantity: prod.quantity,
+            salePrice: prod.price,
+            totalSalePrice: prod.total,
+            cost,
+            totalCost: cost * prod.quantity,
+            profit: prod.price - cost,
+          });
+        }
+        await addHistoryMovement(exchange.invoice_id, {
+          type: 'CAMBIO',
+          date: new Date().toISOString(),
+          performed_by: exchange.registered_by,
+          affected_products: affectedProducts,
+          delivered_products: deliveredProducts.length > 0 ? deliveredProducts : undefined,
+        });
+      } catch (histError) {
+        console.error('Error writing finalize exchange history:', histError);
       }
-    } else {
-      console.log('ℹ️ No invoice_id or updatedExchange, skipping invoice finalize update');
     }
 
     console.log(`✅ Exchange ${exchange.exchange_number} finalized successfully`);
@@ -4240,58 +3902,7 @@ export const cancelExchange = async (exchangeId: string): Promise<boolean> => {
     }
 
     // 3. Revertir cambios en la factura (remover marcadores de cambio)
-    if (exchange.invoice_id) {
-      const { data: invoice, error: invoiceError } = await supabase
-        .from('invoices')
-        .select('*')
-        .eq('id', exchange.invoice_id)
-        .eq('company', company)
-        .single();
-
-      if (invoice && !invoiceError) {
-        // 1. Eliminar items que fueron agregados por este cambio (fromExchange)
-        // 2. Limpiar marcadores del item devuelto
-        const updatedItems = invoice.items
-          .filter((item: any) => {
-            // Eliminar items agregados por este cambio
-            if (item.fromExchange && item.exchangeId === exchangeId) {
-              console.log(`🗑️ Removing exchange product: ${item.productName}`);
-              return false;
-            }
-            return true;
-          })
-          .map((item: any) => {
-            // Si este item tiene el exchangeId que estamos cancelando, remover los marcadores
-            if (item.exchangeId === exchangeId && item.exchanged) {
-              const { exchanged, exchangeId: _, exchangedFor, fromExchange, ...cleanItem } = item;
-              console.log(`🔄 Reverting exchanged product: ${item.productName}`);
-              return cleanItem;
-            }
-            return item;
-          });
-
-        // Recalcular el total de la factura (debe volver al total original)
-        const newTotal = updatedItems.reduce((sum: number, item: any) => {
-          // Ignorar productos que fueron devueltos (exchanged sin fromExchange)
-          if (item.exchanged && !item.fromExchange) {
-            return sum;
-          }
-          // Sumar el resto
-          return sum + item.total;
-        }, 0);
-
-        await supabase
-          .from('invoices')
-          .update({
-            items: updatedItems,
-            total: newTotal
-          })
-          .eq('id', exchange.invoice_id)
-          .eq('company', company);
-
-        console.log(`✅ Invoice items reverted successfully, total: ${invoice.total} → ${newTotal}`);
-      }
-    }
+    // Las facturas son inmutables — no se modifican al cancelar el cambio
 
     // 4. Eliminar el cambio pendiente (no marcarlo como cancelado)
     const { error: deleteError } = await supabase
@@ -4530,89 +4141,7 @@ export const deleteExchange = async (exchangeId: string): Promise<boolean> => {
       }
     }
 
-    // 3. Revertir cambios en la factura (remover marcadores de cambio)
-    if (exchange.invoice_id) {
-      const { data: invoice, error: invoiceError } = await supabase
-        .from('invoices')
-        .select('*')
-        .eq('id', exchange.invoice_id)
-        .eq('company', company)
-        .single();
-
-      if (invoice && !invoiceError) {
-        // 1. Eliminar items que fueron agregados por este cambio (fromExchange)
-        // 2. Limpiar marcadores del item devuelto
-        const updatedItems = invoice.items
-          .filter((item: any) => {
-            // Eliminar items agregados por este cambio
-            if (item.fromExchange && item.exchangeId === exchangeId) {
-              console.log(`🗑️ Removing exchange product: ${item.productName}`);
-              return false;
-            }
-            return true;
-          })
-          .map((item: any) => {
-            // Si este item tiene el exchangeId que estamos eliminando, remover los marcadores
-            if (item.exchangeId === exchangeId && item.exchanged) {
-              const { exchanged, exchangeId: _, exchangedFor, fromExchange, ...cleanItem } = item;
-              console.log(`🔄 Reverting exchanged product: ${item.productName}`);
-              return cleanItem;
-            }
-            return item;
-          });
-
-        // Recalcular el total de la factura (debe volver al total original)
-        const newTotal = updatedItems.reduce((sum: number, item: any) => {
-          // Ignorar productos que fueron devueltos (exchanged sin fromExchange)
-          if (item.exchanged && !item.fromExchange) {
-            return sum;
-          }
-          // Sumar el resto
-          return sum + item.total;
-        }, 0);
-
-        // Revertir los métodos de pago del cambio eliminado
-        let updatedPaymentCash = invoice.payment_cash || 0;
-        let updatedPaymentTransfer = invoice.payment_transfer || 0;
-        let updatedPaymentOther = invoice.payment_other || 0;
-
-        // Solo revertir si el cambio tenía estado completado (pendientes no tienen payment)
-        if (exchange.status === 'completed') {
-          const priceDiff = exchange.price_difference || 0;
-
-          // Hacer lo inverso de lo que se hizo al crear
-          if (priceDiff > 0) {
-            // Al crear se SUMÓ, ahora RESTAR
-            updatedPaymentCash -= (exchange.payment_cash || 0);
-            updatedPaymentTransfer -= (exchange.payment_transfer || 0);
-            updatedPaymentOther -= (exchange.payment_other || 0);
-            console.log(`💳 Revirtiendo pago positivo - Restando pagos`);
-          } else if (priceDiff < 0) {
-            // Al crear se RESTÓ, ahora SUMAR
-            updatedPaymentCash += (exchange.payment_cash || 0);
-            updatedPaymentTransfer += (exchange.payment_transfer || 0);
-            updatedPaymentOther += (exchange.payment_other || 0);
-            console.log(`💳 Revirtiendo devolución de dinero - Sumando pagos`);
-          }
-
-          console.log(`💳 Reverted payment methods - Cash: ${updatedPaymentCash}, Transfer: ${updatedPaymentTransfer}, Other: ${updatedPaymentOther}`);
-        }
-
-        await supabase
-          .from('invoices')
-          .update({
-            items: updatedItems,
-            total: newTotal,
-            payment_cash: updatedPaymentCash,
-            payment_transfer: updatedPaymentTransfer,
-            payment_other: updatedPaymentOther
-          })
-          .eq('id', exchange.invoice_id)
-          .eq('company', company);
-
-        console.log(`✅ Invoice items reverted successfully, total: ${invoice.total} → ${newTotal}`);
-      }
-    }
+    // Las facturas son inmutables — no se modifican al eliminar el cambio
 
     // 4. Eliminar el cambio de la base de datos
     const { error: deleteError } = await supabase

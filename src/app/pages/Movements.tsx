@@ -12,6 +12,11 @@ import {
   Tag,
   Hash,
   Edit,
+  RotateCcw,
+  AlertTriangle,
+  CheckCircle,
+  ChevronRight,
+  PackageX,
 } from "lucide-react";
 import {
   getMovements,
@@ -59,6 +64,7 @@ import { Textarea } from "../components/ui/textarea";
 import { toast } from "sonner";
 import { formatCOP } from "../lib/currency";
 import { jsPDF } from "jspdf";
+import autoTable from "jspdf-autotable";
 import JsBarcode from "jsbarcode";
 import { includesIgnoreAccents } from "../lib/string-utils";
 import { printLabels } from "../lib/label-printer";
@@ -114,6 +120,15 @@ export default function Movements() {
   // Prevenir doble clic
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Estados para módulo Reinicio
+  const [showResetDialog, setShowResetDialog] = useState(false);
+  const [allProductsForReset, setAllProductsForReset] = useState<Product[]>([]);
+  const [resetExclusions, setResetExclusions] = useState<Set<string>>(new Set());
+  const [resetStep, setResetStep] = useState<"select" | "confirm" | "done">("select");
+  const [resetting, setResetting] = useState(false);
+  const [resetSearchTerm, setResetSearchTerm] = useState("");
+  const [resetCategoryFilter, setResetCategoryFilter] = useState<string>("all");
+
   // Estados para búsqueda y filtros de productos
   const [productSearchTerm, setProductSearchTerm] = useState("");
   const [productSortFilter, setProductSortFilter] = useState<"price-desc" | "price-asc" | "stock-asc" | "stock-desc">("price-desc");
@@ -133,6 +148,32 @@ export default function Movements() {
   useEffect(() => {
     loadMovements();
   }, []);
+
+  const openResetDialog = async () => {
+    setResetStep("select");
+    setResetExclusions(new Set());
+    setResetSearchTerm("");
+    setResetCategoryFilter("all");
+    const all = await getAllProducts();
+    setAllProductsForReset(all.sort((a, b) => (a.name || "").localeCompare(b.name || "")));
+    setShowResetDialog(true);
+  };
+
+  const executeReset = async () => {
+    setResetting(true);
+    try {
+      const toReset = allProductsForReset.filter(p => !resetExclusions.has(p.id));
+      for (const product of toReset) {
+        await updateProduct(product.id, { stock: 0 });
+      }
+      setResetStep("done");
+      toast.success(`Reinicio completado: ${toReset.length} productos reiniciados a 0`);
+    } catch {
+      toast.error("Error al reiniciar el inventario");
+    } finally {
+      setResetting(false);
+    }
+  };
 
   const loadMovements = async () => {
     const data = await getMovements();
@@ -735,75 +776,139 @@ export default function Movements() {
   const handleDownloadPDF = () => {
     if (!completedMovement) return;
 
-    const doc = new jsPDF();
+    const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
     const receipt = completedMovement;
-
-    // Título
-    doc.setFontSize(16);
-    doc.text("CELUMUNDO VIP", 105, 20, { align: "center" });
-    doc.setFontSize(12);
-    doc.text(
-      `COMPROBANTE DE ${receipt.type === "entry" ? "ENTRADA" : "SALIDA"}`,
-      105,
-      26,
-      { align: "center" },
-    );
-    doc.line(10, 30, 200, 30);
-
-    // Información del movimiento
-    doc.setFontSize(10);
-    doc.text(`Referencia: ${receipt.reference}`, 10, 40);
-    doc.text(`Fecha: ${receipt.date}`, 10, 46);
-    doc.text(`Usuario: ${receipt.user}`, 10, 52);
-    doc.text(`Motivo: ${receipt.reason}`, 10, 58);
-    doc.line(10, 62, 200, 62);
-
-    // Encabezado de productos
-    doc.setFontSize(10);
-    doc.text("PRODUCTOS", 105, 70, { align: "center" });
-    doc.line(10, 74, 200, 74);
-
-    // Detalles de productos
-    let y = 80;
-    receipt.items.forEach((item: any) => {
-      doc.text(`${item.productCode} - ${item.productName}`, 10, y);
-      doc.text(`  Cantidad: ${item.quantity}`, 10, y + 6);
-      doc.text(`  Costo: ${formatCOP(item.finalCost)}`, 10, y + 12);
-      
-      // Mostrar IDs si existen
-      if (item.unitIds && item.unitIds.length > 0) {
-        doc.text(`  IDs: ${item.unitIds.join(", ")}`, 10, y + 18);
-        y += 18;
-      }
-      
-      if (
-        receipt.type === "entry" &&
-        item.newCost !== undefined &&
-        item.newCost !== item.currentCost
-      ) {
-        doc.text(
-          `  (Costo anterior: ${formatCOP(item.currentCost)})`,
-          10,
-          y + 6,
-        );
-        y += 6;
-      }
-      
-      y += 18;
+    const pageW = doc.internal.pageSize.getWidth();
+    const isEntry = receipt.type === "entry";
+    const tipoLabel = isEntry ? "ENTRADA" : "SALIDA";
+    const now = new Date().toLocaleString("es-CO", {
+      timeZone: "America/Bogota",
+      day: "2-digit", month: "2-digit", year: "numeric",
+      hour: "2-digit", minute: "2-digit",
     });
 
-    // Totales
-    doc.line(10, y + 10, 200, y + 10);
-    doc.text(`Total Productos: ${receipt.items.length}`, 10, y + 20);
-    doc.text(
-      `Total Unidades: ${receipt.items.reduce((sum: number, item: any) => sum + item.quantity, 0)}`,
-      10,
-      y + 26,
-    );
+    // ── Encabezado negro ──────────────────────────────────────
+    doc.setFillColor(15, 15, 15);
+    doc.rect(0, 0, pageW, 30, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("CELUMUNDO VIP", pageW / 2, 11, { align: "center" });
+    doc.setFontSize(10);
+    doc.setFont("helvetica", "normal");
+    doc.text(`COMPROBANTE DE ${tipoLabel}`, pageW / 2, 18, { align: "center" });
+    doc.setFontSize(7.5);
+    doc.text(`Generado: ${now}`, pageW / 2, 25, { align: "center" });
 
-    // Descargar PDF
+    // ── Info del movimiento ───────────────────────────────────
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.text("DATOS DEL MOVIMIENTO", 14, 40);
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.3);
+    doc.line(14, 41.5, pageW - 14, 41.5);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor(60, 60, 60);
+    const infoItems = [
+      ["Referencia", receipt.reference],
+      ["Fecha", receipt.date],
+      ["Usuario", receipt.user],
+      ["Motivo", receipt.reason],
+    ];
+    infoItems.forEach(([label, value], i) => {
+      const x = i % 2 === 0 ? 14 : pageW / 2 + 4;
+      const y = 49 + Math.floor(i / 2) * 7;
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(0, 0, 0);
+      doc.text(`${label}:`, x, y);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(60, 60, 60);
+      doc.text(String(value ?? "—"), x + 22, y);
+    });
+
+    // ── Tabla de productos ────────────────────────────────────
+    const rows = receipt.items.map((item: any) => {
+      const unitCost = item.finalCost ?? item.currentCost ?? 0;
+      const totalCost = unitCost * item.quantity;
+      const ids = item.unitIds && item.unitIds.length > 0
+        ? item.unitIds.join(", ")
+        : "";
+      return [
+        item.productCode || "—",
+        item.productName + (ids ? `\nIDs: ${ids}` : ""),
+        item.quantity.toString(),
+        formatCOP(unitCost),
+        formatCOP(totalCost),
+      ];
+    });
+
+    const totalUnits: number = receipt.items.reduce((s: number, it: any) => s + it.quantity, 0);
+    const totalCostInventory: number = receipt.items.reduce((s: number, it: any) => {
+      const c = it.finalCost ?? it.currentCost ?? 0;
+      return s + c * it.quantity;
+    }, 0);
+
+    autoTable(doc, {
+      startY: 67,
+      head: [[
+        "Código",
+        isEntry ? "Nombre del Producto" : "Nombre del Producto",
+        isEntry ? "Cant. Ingresada" : "Cant. Descargada",
+        "Costo Unitario",
+        "Costo Total",
+      ]],
+      body: rows,
+      styles: {
+        fontSize: 8,
+        cellPadding: 3,
+        textColor: [0, 0, 0],
+        lineColor: [200, 200, 200],
+        lineWidth: 0.15,
+      },
+      headStyles: {
+        fillColor: [15, 15, 15],
+        textColor: [255, 255, 255],
+        fontStyle: "bold",
+        fontSize: 8.5,
+        halign: "center",
+      },
+      alternateRowStyles: { fillColor: [247, 247, 247] },
+      columnStyles: {
+        0: { cellWidth: 28, halign: "center" },
+        1: { cellWidth: "auto" },
+        2: { cellWidth: 26, halign: "center" },
+        3: { cellWidth: 32, halign: "right" },
+        4: { cellWidth: 32, halign: "right" },
+      },
+      margin: { left: 14, right: 14 },
+      didDrawPage: (data: any) => {
+        const pageH = doc.internal.pageSize.getHeight();
+        doc.setFontSize(7);
+        doc.setTextColor(160, 160, 160);
+        doc.setFont("helvetica", "normal");
+        doc.text(`CELUMUNDO VIP — Comprobante de ${tipoLabel} — Ref: ${receipt.reference}`, 14, pageH - 6);
+        doc.text(`Pág. ${data.pageNumber}`, pageW - 14, pageH - 6, { align: "right" });
+      },
+    });
+
+    // ── Totales finales ───────────────────────────────────────
+    const finalY: number = (doc as any).lastAutoTable.finalY + 6;
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.4);
+    doc.line(14, finalY, pageW - 14, finalY);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`Total de productos distintos: ${receipt.items.length}`, 14, finalY + 7);
+    doc.text(`Total de unidades ${isEntry ? "ingresadas" : "descargadas"}: ${totalUnits}`, 14, finalY + 14);
+    doc.text(`Costo total del inventario movido: ${formatCOP(totalCostInventory)}`, 14, finalY + 21);
+
     doc.save(
-      `${completedMovement.type === "entry" ? "Entrada" : "Salida"}-${completedMovement.reference}.pdf`,
+      `Comprobante-${tipoLabel}-${receipt.reference}.pdf`,
     );
     toast.success("Comprobante descargado como PDF");
   };
@@ -1689,6 +1794,33 @@ export default function Movements() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Módulo Reinicio */}
+      <Card className="border-zinc-200 dark:border-zinc-800">
+        <CardContent className="pt-5 pb-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
+                <RotateCcw className="h-5 w-5 text-zinc-600 dark:text-zinc-400" />
+              </div>
+              <div>
+                <p className="font-semibold text-zinc-900 dark:text-zinc-100 text-sm">Reinicio de Inventario</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  Establece el stock de todos los productos en 0. Puedes excluir productos específicos antes de confirmar.
+                </p>
+              </div>
+            </div>
+            <Button
+              variant="outline"
+              onClick={openResetDialog}
+              className="border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex-shrink-0 gap-2"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Abrir Reinicio
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Filtros */}
       <Card>
@@ -3039,6 +3171,233 @@ export default function Movements() {
                 : ''}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modal de Reinicio de Inventario ─────────────────────── */}
+      <Dialog open={showResetDialog} onOpenChange={(open) => { if (!resetting) setShowResetDialog(open); }}>
+        <DialogContent className="max-w-2xl w-[95vw] max-h-[90vh] flex flex-col bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-zinc-900 dark:text-zinc-100">
+              <RotateCcw className="w-5 h-5 text-zinc-500" />
+              Reinicio de Inventario
+            </DialogTitle>
+            <DialogDescription className="text-zinc-500 dark:text-zinc-400 text-sm">
+              Establece el stock en 0 para todos los productos seleccionados. Puedes excluir los que no deseas afectar.
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* PASO: seleccionar exclusiones */}
+          {resetStep === "select" && (
+            <div className="flex flex-col gap-4 overflow-hidden flex-1 min-h-0">
+              <div className="flex items-center gap-3 p-3 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/40">
+                <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                <p className="text-xs text-amber-800 dark:text-amber-300 leading-relaxed">
+                  Esta acción es <strong>irreversible</strong>. Los productos marcados con{" "}
+                  <span className="font-semibold">✓</span> serán <strong>excluidos</strong> del reinicio y mantendrán su stock actual.
+                </p>
+              </div>
+
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
+                  <Input
+                    placeholder="Buscar producto..."
+                    value={resetSearchTerm}
+                    onChange={(e) => setResetSearchTerm(e.target.value)}
+                    className="pl-9 bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700"
+                  />
+                </div>
+                <Select value={resetCategoryFilter} onValueChange={setResetCategoryFilter}>
+                  <SelectTrigger className="w-44 bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700">
+                    <SelectValue placeholder="Categoría" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas las categorías</SelectItem>
+                    {Array.from(new Set(allProductsForReset.map(p => p.category).filter(Boolean))).sort().map(cat => (
+                      <SelectItem key={cat} value={cat!}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="flex items-center justify-between text-xs text-zinc-500 dark:text-zinc-400 px-1">
+                <span>
+                  {allProductsForReset.length} productos en total —{" "}
+                  <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                    {resetExclusions.size} excluidos
+                  </span>
+                </span>
+                <div className="flex gap-3">
+                  {resetCategoryFilter !== "all" && (
+                    <button
+                      onClick={() => {
+                        const catProducts = allProductsForReset.filter(p => p.category === resetCategoryFilter);
+                        const allCatExcluded = catProducts.every(p => resetExclusions.has(p.id));
+                        const next = new Set(resetExclusions);
+                        catProducts.forEach(p => allCatExcluded ? next.delete(p.id) : next.add(p.id));
+                        setResetExclusions(next);
+                      }}
+                      className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 underline underline-offset-2"
+                    >
+                      {allProductsForReset.filter(p => p.category === resetCategoryFilter).every(p => resetExclusions.has(p.id))
+                        ? "Incluir categoría"
+                        : "Excluir categoría"}
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      if (resetExclusions.size === allProductsForReset.length) {
+                        setResetExclusions(new Set());
+                      } else {
+                        setResetExclusions(new Set(allProductsForReset.map(p => p.id)));
+                      }
+                    }}
+                    className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 underline underline-offset-2"
+                  >
+                    {resetExclusions.size === allProductsForReset.length ? "Deseleccionar todos" : "Excluir todos"}
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-y-auto flex-1 min-h-0 border border-zinc-200 dark:border-zinc-800 rounded-xl divide-y divide-zinc-100 dark:divide-zinc-800">
+                {allProductsForReset
+                  .filter(p => {
+                    const matchSearch = !resetSearchTerm ||
+                      p.name?.toLowerCase().includes(resetSearchTerm.toLowerCase()) ||
+                      p.code?.toLowerCase().includes(resetSearchTerm.toLowerCase());
+                    const matchCategory = resetCategoryFilter === "all" || p.category === resetCategoryFilter;
+                    return matchSearch && matchCategory;
+                  })
+                  .map(product => {
+                    const excluded = resetExclusions.has(product.id);
+                    return (
+                      <label
+                        key={product.id}
+                        className={`flex items-center gap-3 px-4 py-2.5 cursor-pointer transition-colors ${
+                          excluded
+                            ? "bg-emerald-50 dark:bg-emerald-950/30"
+                            : "hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={excluded}
+                          onChange={() => {
+                            const next = new Set(resetExclusions);
+                            if (excluded) next.delete(product.id);
+                            else next.add(product.id);
+                            setResetExclusions(next);
+                          }}
+                          className="w-4 h-4 rounded accent-emerald-600"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{product.name}</p>
+                          <p className="text-xs text-zinc-400 dark:text-zinc-500">{product.code || "Sin código"} · Stock actual: <span className="font-medium">{product.stock ?? 0}</span></p>
+                        </div>
+                        {excluded && (
+                          <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex-shrink-0">Excluido</span>
+                        )}
+                      </label>
+                    );
+                  })}
+              </div>
+
+              <DialogFooter className="flex flex-row gap-2 pt-2">
+                <Button variant="outline" onClick={() => setShowResetDialog(false)} className="flex-1 border-zinc-300 dark:border-zinc-700">
+                  Cancelar
+                </Button>
+                <Button
+                  onClick={() => setResetStep("confirm")}
+                  disabled={allProductsForReset.length - resetExclusions.size === 0}
+                  className="flex-1 bg-zinc-900 hover:bg-zinc-700 dark:bg-zinc-100 dark:hover:bg-zinc-300 dark:text-zinc-900 text-white gap-2"
+                >
+                  Continuar
+                  <ChevronRight className="w-4 h-4" />
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {/* PASO: confirmación */}
+          {resetStep === "confirm" && (
+            <div className="flex flex-col gap-5">
+              <div className="rounded-xl border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30 p-4 space-y-2">
+                <div className="flex items-center gap-2">
+                  <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0" />
+                  <p className="font-semibold text-red-800 dark:text-red-300 text-sm">¿Confirmar reinicio?</p>
+                </div>
+                <p className="text-xs text-red-700 dark:text-red-400 leading-relaxed pl-7">
+                  Se establecerá el stock en <strong>0</strong> para{" "}
+                  <strong>{allProductsForReset.length - resetExclusions.size}</strong> productos.{" "}
+                  {resetExclusions.size > 0 && (
+                    <>{resetExclusions.size} productos excluidos mantendrán su stock.</>
+                  )}
+                  {" "}Esta acción no se puede deshacer.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3 text-center">
+                <div className="rounded-lg border border-zinc-200 dark:border-zinc-800 p-3">
+                  <p className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{allProductsForReset.length}</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">Total productos</p>
+                </div>
+                <div className="rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/20 p-3">
+                  <p className="text-2xl font-bold text-red-700 dark:text-red-400">{allProductsForReset.length - resetExclusions.size}</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">Se reiniciarán</p>
+                </div>
+                <div className="rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/20 p-3">
+                  <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{resetExclusions.size}</p>
+                  <p className="text-xs text-zinc-500 mt-0.5">Excluidos</p>
+                </div>
+              </div>
+
+              <DialogFooter className="flex flex-row gap-2">
+                <Button variant="outline" onClick={() => setResetStep("select")} disabled={resetting} className="flex-1 border-zinc-300 dark:border-zinc-700">
+                  Volver
+                </Button>
+                <Button
+                  onClick={executeReset}
+                  disabled={resetting}
+                  className="flex-1 bg-red-600 hover:bg-red-700 text-white gap-2"
+                >
+                  {resetting ? (
+                    <>
+                      <RotateCcw className="w-4 h-4 animate-spin" />
+                      Reiniciando...
+                    </>
+                  ) : (
+                    <>
+                      <PackageX className="w-4 h-4" />
+                      Confirmar Reinicio
+                    </>
+                  )}
+                </Button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {/* PASO: completado */}
+          {resetStep === "done" && (
+            <div className="flex flex-col items-center gap-5 py-4">
+              <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                <CheckCircle className="w-9 h-9 text-zinc-700 dark:text-zinc-300" />
+              </div>
+              <div className="text-center space-y-1">
+                <p className="font-bold text-zinc-900 dark:text-zinc-100 text-lg">¡Reinicio completado!</p>
+                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                  {allProductsForReset.length - resetExclusions.size} productos reiniciados a stock 0.
+                  {resetExclusions.size > 0 && ` ${resetExclusions.size} excluidos sin cambios.`}
+                </p>
+              </div>
+              <Button
+                onClick={() => setShowResetDialog(false)}
+                className="bg-zinc-900 hover:bg-zinc-700 dark:bg-zinc-100 dark:hover:bg-zinc-300 dark:text-zinc-900 text-white px-8"
+              >
+                Cerrar
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

@@ -272,19 +272,9 @@ export default function Exchanges() {
       return;
     }
 
-    // Validar stock
-    if (tempProduct.stock < tempQuantity) {
-      toast.error(`Stock insuficiente. Disponible: ${tempProduct.stock}`);
-      return;
-    }
-
     // Validar IDs únicas si aplica
     if (tempProduct.use_unit_ids) {
       const availableIds = getAvailableIds(tempProduct);
-      if (availableIds.length < tempQuantity) {
-        toast.error('No hay suficientes IDs únicas disponibles');
-        return;
-      }
       if (tempUnitIds.length !== tempQuantity) {
         toast.error(`Debes seleccionar ${tempQuantity} ID(s) única(s)`);
         return;
@@ -1172,14 +1162,14 @@ export default function Exchanges() {
                       <p className="font-medium">Busca productos para entregar</p>
                       <p className="text-sm mt-1">Ingresa el código o nombre del producto</p>
                     </div>
-                  ) : searchedProducts.filter(p => p.stock > 0).length === 0 ? (
+                  ) : searchedProducts.length === 0 ? (
                     <div className="text-center py-12 text-muted-foreground">
                       <Package2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>No se encontraron productos con stock</p>
+                      <p>No se encontraron productos</p>
                     </div>
                   ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4">
-                      {searchedProducts.filter(p => p.stock > 0).map((product) => (
+                      {searchedProducts.map((product) => (
                         <button
                           key={product.id}
                           onClick={() => {
@@ -1237,7 +1227,6 @@ export default function Exchanges() {
                         <Input
                           type="number"
                           min="1"
-                          max={tempProduct.stock}
                           value={tempQuantity}
                           onChange={(e) => setTempQuantity(parseInt(e.target.value) || 1)}
                         />
@@ -1607,14 +1596,14 @@ export default function Exchanges() {
                     <Search className="h-12 w-12 mx-auto mb-4 opacity-50" />
                     <p className="font-medium">Busca productos para entregar</p>
                   </div>
-                ) : finalizeSearchedProducts.filter(p => p.stock > 0).length === 0 ? (
+                ) : finalizeSearchedProducts.length === 0 ? (
                   <div className="text-center py-12 text-muted-foreground">
                     <Package2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                    <p>No se encontraron productos con stock</p>
+                    <p>No se encontraron productos</p>
                   </div>
                 ) : (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4">
-                    {finalizeSearchedProducts.filter(p => p.stock > 0).map((product) => (
+                    {finalizeSearchedProducts.map((product) => (
                       <button
                         key={product.id}
                         onClick={() => {

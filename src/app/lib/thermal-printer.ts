@@ -286,6 +286,113 @@ export const printThermalInvoice = async (options: ThermalInvoiceOptions): Promi
   }
 };
 
+// Generar HTML para comprobante de abono
+const generatePaymentReceiptHTML = (payment: any, invoice: any): string => {
+  const companyName = getCurrentCompany() === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
+
+  const methodLabel: Record<string, string> = {
+    efectivo: 'Efectivo',
+    cash: 'Efectivo',
+    transferencia: 'Transferencia',
+    transfer: 'Transferencia',
+    nequi: 'Nequi',
+    daviplata: 'Daviplata',
+    otros: 'Otros',
+    other: 'Otros',
+  };
+
+  const paymentDate = new Date(payment.date);
+  const dateStr = paymentDate.toLocaleString('es-ES', {
+    timeZone: 'America/Bogota',
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  const totalAbonado = invoice?._allPayments
+    ? invoice._allPayments.reduce((s: number, p: any) => s + p.amount, 0)
+    : payment.amount;
+
+  return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          @page { size: 80mm auto; margin: 0; padding: 0; }
+          * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; margin: 0; padding: 0; }
+          body {
+            width: 70mm; max-width: 70mm;
+            font-family: 'Arial', 'Helvetica Neue', Helvetica, sans-serif;
+            font-size: 11px; font-weight: 500;
+            padding: 2mm 3mm; background: white; color: #000; line-height: 1.5;
+          }
+          .header { text-align: center; margin-bottom: 3mm; border-bottom: 2px solid black; padding-bottom: 2mm; }
+          .info { margin-bottom: 3mm; font-size: 10px; border-bottom: 1px solid black; padding-bottom: 2mm; }
+          .total-section {
+            margin: 3mm 0; border-top: 2px solid black; border-bottom: 2px solid black;
+            padding: 3mm 0; text-align: center; background: #f0f0f0;
+          }
+          .footer { text-align: center; font-size: 10px; margin-top: 3mm; padding-top: 2mm; color: #000; }
+          .row { display: flex; justify-content: space-between; margin-bottom: 1mm; font-size: 10px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div style="font-size: 15px; font-weight: 800; margin-bottom: 2mm;">${companyName}</div>
+          <div style="font-size: 13px; font-weight: 700; margin-bottom: 1mm;">COMPROBANTE DE ABONO</div>
+          ${invoice ? `<div style="font-size: 11px;">Factura No. ${invoice.number}</div>` : ''}
+        </div>
+
+        <div class="info">
+          ${invoice?.customer_name ? `<div style="margin-bottom: 1mm;">Cliente: ${invoice.customer_name}</div>` : ''}
+          ${payment.customer_document ? `<div style="margin-bottom: 1mm;">Doc: ${payment.customer_document}</div>` : ''}
+          <div style="margin-bottom: 1mm;">Fecha: ${dateStr}</div>
+          ${payment.registered_by ? `<div style="margin-bottom: 1mm;">Registrado por: ${payment.registered_by}</div>` : ''}
+          <div style="margin-bottom: 1mm;">Método: ${methodLabel[payment.payment_method] || payment.payment_method}</div>
+          ${payment.notes ? `<div style="margin-bottom: 1mm;">Nota: ${payment.notes}</div>` : ''}
+        </div>
+
+        <div class="total-section">
+          <div style="font-size: 12px; font-weight: 700; margin-bottom: 2mm;">MONTO ABONADO</div>
+          <div style="font-size: 20px; font-weight: 800;">${formatCOP(payment.amount)}</div>
+        </div>
+
+        ${invoice ? `
+        <div style="margin-bottom: 3mm; font-size: 10px; border-bottom: 1px solid black; padding-bottom: 2mm;">
+          <div class="row"><span>Total factura:</span><span>${formatCOP(invoice.total)}</span></div>
+          <div class="row"><span>Saldo pendiente:</span><span>${formatCOP(invoice.credit_balance ?? 0)}</span></div>
+        </div>` : ''}
+
+        <div class="footer">
+          <div style="margin: 2mm 0; border-top: 1px solid black; padding-top: 2mm;"></div>
+          <div style="font-size: 12px; font-weight: 800; margin-bottom: 2mm;">GRACIAS POR SU PAGO</div>
+          <div style="font-size: 11px; margin-bottom: 1mm;">${companyName}</div>
+          <div style="font-size: 10px; color: #333;">${new Date().toLocaleString('es-ES')}</div>
+        </div>
+        <div style="height: 30mm; width: 100%;"></div>
+        <div style="page-break-after: always;"></div>
+      </body>
+    </html>
+  `;
+};
+
+export const printThermalPayment = async (payment: any, invoice?: any): Promise<boolean> => {
+  try {
+    const html = generatePaymentReceiptHTML(payment, invoice || null);
+    const config = await getPrinterConfig();
+    const printerName = config.thermal || 'web-fallback';
+    const success = await printDirect(printerName, html, 'thermal');
+    if (!success) throw new Error('Error al enviar a la impresora');
+    return true;
+  } catch (error) {
+    console.error('Error al imprimir comprobante de abono:', error);
+    throw error;
+  }
+};
+
 /**
  * Impresión térmica vía navegador web (para testing sin impresora física).
  * Crea un iframe oculto y lanza window.print() directamente.

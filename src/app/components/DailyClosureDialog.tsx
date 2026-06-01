@@ -27,6 +27,7 @@ interface DailyClosureDialogProps {
     creditInvoices: number;
     creditPayments?: any[]; // Abonos a créditos del día
     exchanges?: any[]; // Cambios del día
+    returns?: any[]; // Devoluciones del día
     serviceRevenue?: number; // NUEVO: Ingresos de servicio técnico
   };
   dayToClose: string; // YYYY-MM-DD date to close
@@ -71,12 +72,6 @@ export function DailyClosureDialog({
       // Solo contar facturas pagadas o parcialmente devueltas
       if (invoice.status === 'paid' || invoice.status === 'partial_return') {
         invoice.items.forEach((item: any) => {
-          // Excluir items que fueron devueltos en un cambio (exchanged: true sin fromExchange: true)
-          if (item.exchanged && !item.fromExchange) {
-            return; // No contar este item
-          }
-
-          // Buscar el producto para obtener su costo actual
           const product = products.find(p => p.id === item.productId);
           if (product) {
             const itemCost = product.current_cost * item.quantity;
@@ -87,6 +82,21 @@ export function DailyClosureDialog({
     });
 
     return totalCost;
+  };
+
+  // Calcular utilidad perdida por devoluciones del día
+  const calculateReturnsProfitImpact = () => {
+    let lostProfit = 0;
+    (dailyStats.returns || []).forEach((ret: any) => {
+      if (!ret.items) return;
+      ret.items.forEach((item: any) => {
+        const product = products.find(p => p.id === item.productId);
+        const cost = product?.current_cost || 0;
+        const profit = (item.price || 0) - cost;
+        lostProfit += profit * item.quantity;
+      });
+    });
+    return lostProfit;
   };
 
   // Calcular ganancia POR CRÉDITO: Solo facturas a crédito del día
@@ -100,11 +110,6 @@ export function DailyClosureDialog({
         totalRevenue += invoice.total || 0;
 
         invoice.items.forEach((item: any) => {
-          // Excluir items que fueron devueltos en un cambio
-          if (item.exchanged && !item.fromExchange) {
-            return;
-          }
-
           const product = products.find(p => p.id === item.productId);
           if (product) {
             totalCost += product.current_cost * item.quantity;
@@ -128,11 +133,6 @@ export function DailyClosureDialog({
         totalRevenue += invoice.total || 0;
 
         invoice.items.forEach((item: any) => {
-          // Excluir items que fueron devueltos en un cambio
-          if (item.exchanged && !item.fromExchange) {
-            return;
-          }
-
           const product = products.find(p => p.id === item.productId);
           if (product) {
             totalCost += product.current_cost * item.quantity;
@@ -141,7 +141,15 @@ export function DailyClosureDialog({
       }
     });
 
-    return totalRevenue - totalCost;
+    // Sumar impacto de utilidad de cambios del día (profit_difference)
+    const exchangeProfitImpact = (dailyStats.exchanges || []).reduce((sum: number, ex: any) => {
+      return sum + (Number(ex.profit_difference) || 0);
+    }, 0);
+
+    // Restar utilidad perdida por devoluciones
+    const returnsProfitImpact = calculateReturnsProfitImpact();
+
+    return totalRevenue - totalCost + exchangeProfitImpact - returnsProfitImpact;
   };
 
   // Función para manejar el ordenamiento
@@ -594,6 +602,48 @@ export function DailyClosureDialog({
                       </div>
                     </CardContent>
                   </Card>
+
+                  {/* Card de Devoluciones */}
+                  {(dailyStats.returns || []).length > 0 && (
+                    <Card className="border-red-200 dark:border-red-800 bg-red-50/30 dark:bg-red-950/20">
+                      <CardHeader className="pb-2">
+                        <CardTitle className="text-sm font-semibold text-red-900 dark:text-red-100 flex items-center gap-2">
+                          🔄 Devoluciones del Día
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="grid grid-cols-3 gap-4 mb-3">
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1">N° Devoluciones</p>
+                            <p className="text-xl font-bold text-red-600 dark:text-red-400">
+                              {(dailyStats.returns || []).length}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1">Monto Devuelto</p>
+                            <p className="text-xl font-bold text-red-600 dark:text-red-400">
+                              -{formatCOP(dailyStats.totalReturns || 0)}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground mb-1">Utilidad Perdida</p>
+                            <p className="text-xl font-bold text-red-600 dark:text-red-400">
+                              -{formatCOP(calculateReturnsProfitImpact())}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="space-y-1 pt-2 border-t border-red-200 dark:border-red-800">
+                          {(dailyStats.returns || []).map((ret: any) => (
+                            <div key={ret.id} className="flex justify-between items-center text-xs">
+                              <span className="text-muted-foreground font-mono">{ret.return_number}</span>
+                              <span className="text-muted-foreground">{ret.customer_name || 'Sin cliente'}</span>
+                              <span className="font-medium text-red-600 dark:text-red-400">-{formatCOP(ret.total)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
 
                   {/* Fila 2: Ganancias */}
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1417,10 +1467,6 @@ export function DailyClosureDialog({
                       .filter(inv => inv.status === 'paid' || inv.status === 'partial_return')
                       .flatMap(invoice =>
                         invoice.items
-                          .filter((item: any) => {
-                            // Excluir items que fueron devueltos en un cambio
-                            return !(item.exchanged && !item.fromExchange);
-                          })
                           .map((item: any, itemIndex: number) => {
                             const product = products.find(p => p.id === item.productId);
                             const unitCost = product?.current_cost || 0;
@@ -1546,6 +1592,70 @@ export function DailyClosureDialog({
               </table>
             </div>
           </div>
+
+          {/* Sección de Cambios */}
+          {(dailyStats.exchanges || []).length > 0 && (
+            <div>
+              <h3 className="font-semibold text-sm mb-2">Impacto de Cambios del Día</h3>
+              <div className="border border-border rounded-lg overflow-hidden">
+                <table className="w-full">
+                  <thead className="bg-muted">
+                    <tr>
+                      <th className="text-left py-3 px-4 text-sm font-medium">Cambio</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium">Cliente</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium">Producto Devuelto</th>
+                      <th className="text-left py-3 px-4 text-sm font-medium">Producto Entregado</th>
+                      <th className="text-right py-3 px-4 text-sm font-medium">Dif. Precio</th>
+                      <th className="text-right py-3 px-4 text-sm font-medium">Dif. Utilidad</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(dailyStats.exchanges || []).map((exchange: any) => {
+                      const profitDiff = Number(exchange.profit_difference) || 0;
+                      const priceDiff = Number(exchange.price_difference) || 0;
+                      const originalNames = (exchange.original_products || []).map((p: any) => `${p.productName} x${p.quantity}`).join(', ') || exchange.original_product_name || '-';
+                      const newNames = (exchange.new_products || []).map((p: any) => `${p.productName} x${p.quantity}`).join(', ') || exchange.new_product_name || (exchange.status === 'pending' ? 'En espera' : '-');
+                      return (
+                        <tr key={exchange.id} className="border-b border-border hover:bg-muted/50">
+                          <td className="py-2 px-4">
+                            <span className="text-xs font-mono bg-muted px-2 py-1 rounded">{exchange.exchange_number}</span>
+                          </td>
+                          <td className="py-2 px-4 text-sm">{exchange.customer_name || '-'}</td>
+                          <td className="py-2 px-4 text-sm text-red-600 dark:text-red-400">{originalNames}</td>
+                          <td className="py-2 px-4 text-sm text-green-600 dark:text-green-400">{newNames}</td>
+                          <td className="py-2 px-4 text-right font-medium text-sm">
+                            <span className={priceDiff >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                              {priceDiff >= 0 ? '+' : ''}COP {formatCOP(priceDiff)}
+                            </span>
+                          </td>
+                          <td className="py-2 px-4 text-right font-bold">
+                            <span className={profitDiff >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                              {profitDiff >= 0 ? '+' : ''}COP {formatCOP(profitDiff)}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="bg-muted/50">
+                    <tr>
+                      <td colSpan={5} className="py-2 px-4 text-sm font-semibold text-right">Total impacto utilidad:</td>
+                      <td className="py-2 px-4 text-right font-bold">
+                        {(() => {
+                          const total = (dailyStats.exchanges || []).reduce((sum: number, ex: any) => sum + (Number(ex.profit_difference) || 0), 0);
+                          return (
+                            <span className={total >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}>
+                              {total >= 0 ? '+' : ''}COP {formatCOP(total)}
+                            </span>
+                          );
+                        })()}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          )}
 
           {/* Botón de Cerrar */}
           <div className="flex justify-end">

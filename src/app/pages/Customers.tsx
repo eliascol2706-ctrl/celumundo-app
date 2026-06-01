@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { User, CreditCard, DollarSign, FileText, Plus, Search, Eye, Printer, Trash2, XCircle, AlertTriangle } from 'lucide-react';
 import { getCustomers, getInvoices, getCreditPaymentsByInvoice, addCreditPayment, deleteCreditPayment, cancelCreditInvoice, type Customer, type Invoice, type CreditPayment, getCurrentUser } from '../lib/supabase';
+import { printThermalPayment } from '../lib/thermal-printer';
+import { isPrintingAvailable } from '../lib/platform-detector';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -31,6 +33,7 @@ export function Customers() {
     paymentMethod: 'cash',
     notes: ''
   });
+  const [pendingPrintPayment, setPendingPrintPayment] = useState<{ payment: CreditPayment; invoice: Invoice } | null>(null);
 
   useEffect(() => {
     loadData();
@@ -107,6 +110,7 @@ export function Customers() {
       toast.success('Abono registrado exitosamente');
       setIsPaymentDialogOpen(false);
       loadData();
+      setPendingPrintPayment({ payment: { ...payment, id: result.id || '' } as CreditPayment, invoice: selectedInvoice });
     } else {
       toast.error('Error al registrar el abono');
     }
@@ -737,6 +741,41 @@ export function Customers() {
                 Cancelar Factura
               </Button>
             )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de impresión tras registrar abono */}
+      <Dialog open={!!pendingPrintPayment} onOpenChange={(open) => { if (!open) setPendingPrintPayment(null); }}>
+        <DialogContent className="max-w-sm bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Abono realizado</DialogTitle>
+            <DialogDescription className="text-zinc-600 dark:text-zinc-400">
+              ¿Desea imprimir el comprobante?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setPendingPrintPayment(null)}>
+              Cerrar
+            </Button>
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+              disabled={!isPrintingAvailable()}
+              title={!isPrintingAvailable() ? 'La impresión solo está disponible en la app de escritorio' : undefined}
+              onClick={async () => {
+                if (pendingPrintPayment) {
+                  try {
+                    await printThermalPayment(pendingPrintPayment.payment, pendingPrintPayment.invoice);
+                  } catch {
+                    toast.error('Error al imprimir el comprobante');
+                  }
+                  setPendingPrintPayment(null);
+                }
+              }}
+            >
+              <Printer className="w-4 h-4" />
+              Imprimir
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

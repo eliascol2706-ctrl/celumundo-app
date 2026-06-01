@@ -12,18 +12,24 @@ import {
   XCircle,
   Clock
 } from 'lucide-react';
-import { 
-  getCreditMetrics, 
-  getTopDebtors, 
-  getRecentPayments, 
+import {
+  getCreditMetrics,
+  getTopDebtors,
+  getRecentPayments,
+  getInvoices,
   type Customer,
-  type CreditPayment 
+  type CreditPayment
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { formatCOP } from '../lib/currency';
 import { Badge } from '../components/ui/badge';
 import { useNavigate } from 'react-router';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
+import { printThermalPayment } from '../lib/thermal-printer';
+import { isPrintingAvailable } from '../lib/platform-detector';
+import { toast } from 'sonner';
+import { Printer } from 'lucide-react';
 
 interface Metrics {
   totalPortfolio: number;
@@ -52,6 +58,8 @@ export function CreditDashboard() {
   const [topDebtors, setTopDebtors] = useState<Debtor[]>([]);
   const [recentPayments, setRecentPayments] = useState<CreditPayment[]>([]);
   const [loading, setLoading] = useState(true);
+  const [invoicesMap, setInvoicesMap] = useState<Record<string, any>>({});
+  const [printingPayment, setPrintingPayment] = useState<CreditPayment | null>(null);
 
   useEffect(() => {
     loadDashboardData();
@@ -60,14 +68,18 @@ export function CreditDashboard() {
   const loadDashboardData = async () => {
     setLoading(true);
     try {
-      const [metricsData, debtorsData, paymentsData] = await Promise.all([
+      const [metricsData, debtorsData, paymentsData, invoicesData] = await Promise.all([
         getCreditMetrics(),
         getTopDebtors(5),
-        getRecentPayments(10)
+        getRecentPayments(10),
+        getInvoices(),
       ]);
       setMetrics(metricsData);
       setTopDebtors(debtorsData);
       setRecentPayments(paymentsData);
+      const map: Record<string, any> = {};
+      invoicesData.forEach(inv => { map[inv.id] = inv; });
+      setInvoicesMap(map);
     } catch (error) {
       console.error('Error loading dashboard data:', error);
     } finally {
@@ -101,6 +113,15 @@ export function CreditDashboard() {
       return <Badge variant="outline" className="bg-amber-100 text-amber-700 border-amber-200">Vencido</Badge>;
     }
     return <Badge variant="outline" className="bg-emerald-100 text-emerald-700 border-emerald-200">Al día</Badge>;
+  };
+
+  const handlePrintPayment = async (payment: CreditPayment) => {
+    try {
+      const invoice = invoicesMap[payment.invoice_id] || null;
+      await printThermalPayment(payment, invoice);
+    } catch {
+      toast.error('Error al imprimir el comprobante');
+    }
   };
 
   const getPaymentIcon = (method: string) => {
@@ -267,43 +288,92 @@ export function CreditDashboard() {
                 <p>No hay pagos registrados</p>
               </div>
             ) : (
-              <div className="divide-y divide-zinc-100">
-                {recentPayments.map((payment) => (
-                  <div 
-                    key={payment.id}
-                    className="p-4 hover:bg-zinc-50 dark:bg-zinc-800 transition-colors"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center text-lg">
-                          {getPaymentIcon(payment.payment_method)}
+              <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                {recentPayments.map((payment) => {
+                  const invoice = invoicesMap[payment.invoice_id];
+                  return (
+                    <div
+                      key={payment.id}
+                      className="p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/60 transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="w-10 h-10 rounded-full bg-emerald-100 dark:bg-emerald-950 flex items-center justify-center text-lg flex-shrink-0">
+                            {getPaymentIcon(payment.payment_method)}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-medium text-zinc-900 dark:text-zinc-100">{formatCOP(payment.amount)}</p>
+                            <p className="text-sm text-zinc-500 dark:text-zinc-400 capitalize">{payment.payment_method}</p>
+                            {invoice && (
+                              <p className="text-xs text-zinc-400 dark:text-zinc-500">Factura #{invoice.number}</p>
+                            )}
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium text-zinc-900 dark:text-zinc-100">{formatCOP(payment.amount)}</p>
-                          <p className="text-sm text-zinc-500 dark:text-zinc-400 capitalize">{payment.payment_method}</p>
+                        <div className="flex items-center gap-3 flex-shrink-0">
+                          <div className="text-right">
+                            <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                              {new Date(payment.date).toLocaleDateString('es-CO')}
+                            </p>
+                            <p className="text-xs text-zinc-400">
+                              {new Date(payment.date).toLocaleTimeString('es-CO', {
+                                hour: '2-digit',
+                                minute: '2-digit'
+                              })}
+                            </p>
+                          </div>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handlePrintPayment(payment)}
+                            disabled={!isPrintingAvailable()}
+                            className="border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400"
+                            title={isPrintingAvailable() ? 'Imprimir comprobante' : 'Solo disponible en la app de escritorio'}
+                          >
+                            <Printer className="w-4 h-4" />
+                          </Button>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                          {new Date(payment.date).toLocaleDateString('es-CO')}
-                        </p>
-                        <p className="text-xs text-zinc-400">
-                          {new Date(payment.date).toLocaleTimeString('es-CO', { 
-                            hour: '2-digit', 
-                            minute: '2-digit' 
-                          })}
-                        </p>
-                      </div>
+                      {payment.notes && (
+                        <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2 pl-13">{payment.notes}</p>
+                      )}
                     </div>
-                    {payment.notes && (
-                      <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-2 ml-13">{payment.notes}</p>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </CardContent>
         </Card>
+
+        {/* Modal de impresión tras registrar abono */}
+        <Dialog open={!!printingPayment} onOpenChange={(open) => { if (!open) setPrintingPayment(null); }}>
+          <DialogContent className="max-w-sm bg-white dark:bg-zinc-950">
+            <DialogHeader>
+              <DialogTitle className="text-zinc-900 dark:text-zinc-100">Abono realizado</DialogTitle>
+              <DialogDescription className="text-zinc-600 dark:text-zinc-400">
+                ¿Desea imprimir el comprobante?
+              </DialogDescription>
+            </DialogHeader>
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={() => setPrintingPayment(null)}>
+                Cerrar
+              </Button>
+              <Button
+                className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+                disabled={!isPrintingAvailable()}
+                title={!isPrintingAvailable() ? 'Solo disponible en la app de escritorio' : undefined}
+                onClick={async () => {
+                  if (printingPayment) {
+                    await handlePrintPayment(printingPayment);
+                    setPrintingPayment(null);
+                  }
+                }}
+              >
+                <Printer className="w-4 h-4" />
+                Imprimir
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

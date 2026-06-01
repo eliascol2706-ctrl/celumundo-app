@@ -311,12 +311,6 @@ export function FinancialClosures() {
         console.log(`  Items en factura: ${invoice.items.length}`);
 
         invoice.items.forEach((item: any) => {
-          // Excluir items que fueron devueltos en un cambio (exchanged: true sin fromExchange: true)
-          if (item.exchanged && !item.fromExchange) {
-            console.log(`    ❌ ${item.productName} - EXCLUIDO (item devuelto en cambio)`);
-            return; // No contar este item en los costos
-          }
-
           const product = products.find(p => p.id === item.productId);
           if (product && product.current_cost) {
             const itemCost = product.current_cost * item.quantity;

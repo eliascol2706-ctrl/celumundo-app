@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { DollarSign, CreditCard, Smartphone, Building2, Wallet } from 'lucide-react';
+import { DollarSign, CreditCard, Smartphone, Building2, Wallet, Printer } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -8,6 +8,8 @@ import { Textarea } from './ui/textarea';
 import { addCreditPayment, addCreditHistory, type Invoice, type CreditPayment, getCurrentUser } from '../lib/supabase';
 import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
+import { printThermalPayment } from '../lib/thermal-printer';
+import { isPrintingAvailable } from '../lib/platform-detector';
 
 interface PaymentDialogProps {
   isOpen: boolean;
@@ -21,6 +23,7 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [pendingPrintPayment, setPendingPrintPayment] = useState<CreditPayment | null>(null);
 
   const currentBalance = invoice.credit_balance || invoice.total;
 
@@ -51,7 +54,6 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
 
     const result = await addCreditPayment(payment);
     if (result) {
-      // Registrar en historial del cliente
       await addCreditHistory({
         customer_document: invoice.customer_document || '',
         event_type: 'payment',
@@ -66,6 +68,7 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
       setNotes('');
       onPaymentSuccess();
       onClose();
+      setPendingPrintPayment({ ...payment, id: result.id || '' } as CreditPayment);
     } else {
       toast.error('Error al registrar el pago');
     }
@@ -87,6 +90,7 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
   };
 
   return (
+    <>
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
         <DialogHeader>
@@ -223,5 +227,41 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/* Modal de impresión tras registrar abono */}
+    <Dialog open={!!pendingPrintPayment} onOpenChange={(open) => { if (!open) setPendingPrintPayment(null); }}>
+      <DialogContent className="max-w-sm bg-white dark:bg-zinc-950">
+        <DialogHeader>
+          <DialogTitle className="text-zinc-900 dark:text-zinc-100">Abono realizado</DialogTitle>
+          <DialogDescription className="text-zinc-600 dark:text-zinc-400">
+            ¿Desea imprimir el comprobante?
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2">
+          <Button variant="outline" onClick={() => setPendingPrintPayment(null)}>
+            Cerrar
+          </Button>
+          <Button
+            className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2"
+            disabled={!isPrintingAvailable()}
+            title={!isPrintingAvailable() ? 'La impresión solo está disponible en la app de escritorio' : undefined}
+            onClick={async () => {
+              if (pendingPrintPayment) {
+                try {
+                  await printThermalPayment(pendingPrintPayment, invoice);
+                } catch {
+                  toast.error('Error al imprimir el comprobante');
+                }
+                setPendingPrintPayment(null);
+              }
+            }}
+          >
+            <Printer className="w-4 h-4" />
+            Imprimir
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

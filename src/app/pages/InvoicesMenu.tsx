@@ -1,10 +1,10 @@
 import { useNavigate } from 'react-router';
-import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2, ChevronLeft, ChevronRight, Edit, Minus, FileX } from 'lucide-react';
+import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2, ChevronLeft, ChevronRight, Edit, Minus, FileX, History, RefreshCw, Package, ArrowLeftRight } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useEffect, useState } from 'react';
-import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, getCreditPayments, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges, updateInvoice, updateProduct, addCreditNote, getCreditNotes, getCreditNotesByInvoice, type CreditNote, type CreditNoteItem, addCreditPayment, addMovement } from '../lib/supabase';
+import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, type HistoryMovement, type HistoryMovementProduct, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, getCreditPayments, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges, getReturns, updateInvoice, updateProduct, addCreditNote, getCreditNotes, getCreditNotesByInvoice, type CreditNote, type CreditNoteItem, addCreditPayment, addMovement, addHistoryMovement, getDepartments, type Department } from '../lib/supabase';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
@@ -12,6 +12,7 @@ import { Label } from '../components/ui/label';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { ProductSalesReportDialog } from '../components/ProductSalesReportDialog';
+import { ProductSelectionModal } from '../components/ProductSelectionModal';
 import { printThermalInvoice as printThermalDirect } from '../lib/thermal-printer';
 import { printPDFInvoice } from '../lib/pdf-printer';
 import { isPrintingAvailable } from '../lib/platform-detector';
@@ -30,12 +31,15 @@ export function InvoicesMenu() {
     transferToday: 0,
     exchangeImpactToday: 0,
     todayPayments: 0,
-    creditNotesToday: 0
+    creditNotesToday: 0,
+    returnsToday: 0,
+    exchangesTotalToday: 0,
   });
   const [loading, setLoading] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
   const [todayInvoices, setTodayInvoices] = useState<Invoice[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingInvoices, setPendingInvoices] = useState<Invoice[]>([]);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
@@ -50,6 +54,9 @@ export function InvoicesMenu() {
   const [creditPayments, setCreditPayments] = useState<CreditPayment[]>([]);
   const [showPrintSelectionModal, setShowPrintSelectionModal] = useState(false);
   const [printMethod, setPrintMethod] = useState<'pdf' | 'thermal'>('pdf');
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [showHistoryDetailModal, setShowHistoryDetailModal] = useState(false);
+  const [selectedHistoryMovement, setSelectedHistoryMovement] = useState<HistoryMovement | null>(null);
 
   // Estados para filtros de facturas
   const [searchTerm, setSearchTerm] = useState('');
@@ -57,7 +64,7 @@ export function InvoicesMenu() {
   const [customDate, setCustomDate] = useState<string>('');
   const [sortBy, setSortBy] = useState<'recent' | 'oldest' | 'highest' | 'lowest'>('recent');
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'efectivo' | 'transferencia' | 'nequi' | 'daviplata' | 'otros' | 'mixto'>('all');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending_confirmation' | 'pending' | 'partial_return'>('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending_confirmation' | 'pending' | 'partial_return' | 'anulada'>('all');
 
   // Estados para paginación
   const [currentPage, setCurrentPage] = useState(1);
@@ -70,9 +77,26 @@ export function InvoicesMenu() {
   // Estado para modal de registro de ventas de productos
   const [showProductSalesReport, setShowProductSalesReport] = useState(false);
 
+  // Filtros del modal de facturas en confirmación
+  const [pendingSearch, setPendingSearch] = useState('');
+  const [pendingDateFilter, setPendingDateFilter] = useState<'all' | 'today' | 'yesterday' | 'week' | 'month'>('all');
+
   // Estados para modal de edición de factura en confirmación
   const [showEditModal, setShowEditModal] = useState(false);
   const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
+  const [showAddProductToEdit, setShowAddProductToEdit] = useState(false);
+  const [editPriceIndex, setEditPriceIndex] = useState<number | null>(null);
+  const [editPriceValue, setEditPriceValue] = useState(0);
+  const [showEditPriceModal, setShowEditPriceModal] = useState(false);
+  // Modal intermedio: cantidad y precio para producto a agregar
+  const [selectedProductToAdd, setSelectedProductToAdd] = useState<any | null>(null);
+  const [showAddQtyPriceModal, setShowAddQtyPriceModal] = useState(false);
+  const [addQty, setAddQty] = useState(1);
+  const [addPrice, setAddPrice] = useState(0);
+  // Modal selector de IDs únicas al agregar producto
+  const [showUnitIdSelectorForEdit, setShowUnitIdSelectorForEdit] = useState(false);
+  const [unitIdAvailableIds, setUnitIdAvailableIds] = useState<Array<{ id: string; note: string }>>([]);
+  const [unitIdSelectedIds, setUnitIdSelectedIds] = useState<string[]>([]);
 
   // Estados para modal de Nota Crédito
   const [showCreditNoteModal, setShowCreditNoteModal] = useState(false);
@@ -122,13 +146,16 @@ export function InvoicesMenu() {
   const loadStats = async () => {
     setLoading(true);
     try {
-      const [invoices, products, exchanges, creditPayments, creditNotes] = await Promise.all([
+      const [invoices, products, exchanges, creditPayments, creditNotes, returns, depts] = await Promise.all([
         getInvoices(),
         getAllProducts(),
         getExchanges(),
         getCreditPayments(),
-        getCreditNotes()
+        getCreditNotes(),
+        getReturns(),
+        getDepartments(),
       ]);
+      setDepartments(depts);
 
       // DEBUG: Verificar facturas con cambios
       const invoicesWithExchanges = invoices.filter(inv =>
@@ -201,6 +228,18 @@ export function InvoicesMenu() {
         return sum + (ex.price_difference || 0);
       }, 0);
 
+      const exchangesTotalToday = exchangesToday.reduce((sum, ex) => {
+        return sum + (ex.original_total || 0);
+      }, 0);
+
+      // Calcular devoluciones del día
+      const returnsToday = returns
+        .filter(ret => {
+          if (!ret.date) return false;
+          return extractColombiaDate(ret.date) === todayStr;
+        })
+        .reduce((sum, ret) => sum + (ret.total || 0), 0);
+
       // Calcular abonos a crédito del día (excluyendo notas de crédito)
       const paymentsToday = creditPayments.filter(payment => {
         const paymentDate = extractColombiaDate(payment.date);
@@ -246,7 +285,9 @@ export function InvoicesMenu() {
         transferToday,
         exchangeImpactToday,
         todayPayments,
-        creditNotesToday
+        creditNotesToday,
+        returnsToday,
+        exchangesTotalToday,
       });
 
       // Cargar TODAS las facturas (no solo las de hoy) para los filtros
@@ -331,6 +372,7 @@ export function InvoicesMenu() {
         if (statusFilter === 'pending_confirmation') return inv.status === 'pending_confirmation';
         if (statusFilter === 'pending') return inv.is_credit && inv.status === 'pending';
         if (statusFilter === 'partial_return') return inv.status === 'partial_return';
+        if (statusFilter === 'anulada') return inv.status === 'anulada';
         return true;
       });
     }
@@ -882,6 +924,91 @@ export function InvoicesMenu() {
     }
   };
 
+  const handleAddProductToConfirmationInvoice = async (product: any, quantity: number, price: number, unitIds: string[] = []) => {
+    if (!editingInvoice) return;
+    const company = getCurrentCompany();
+    try {
+      // Descontar stock
+      const { data: prod } = await supabase.from('products').select('*').eq('id', product.id).single();
+      if (!prod) { toast.error('Producto no encontrado'); return; }
+      if (prod.stock < quantity) { toast.error(`Stock insuficiente. Disponible: ${prod.stock}`); return; }
+
+      // Si tiene IDs únicas, marcarlas como vendidas
+      let updatedRegisteredIds = prod.registered_ids;
+      if (product.use_unit_ids && unitIds.length > 0) {
+        const { markIdsAsSold } = await import('../lib/unit-ids-utils');
+        updatedRegisteredIds = markIdsAsSold(prod.registered_ids || [], unitIds);
+      }
+
+      await supabase.from('products').update({
+        stock: prod.stock - quantity,
+        registered_ids: updatedRegisteredIds,
+      }).eq('id', product.id).eq('company', company);
+
+      await addMovement({
+        type: 'exit',
+        product_id: product.id,
+        product_name: product.name,
+        quantity,
+        reason: 'Agregado a factura en confirmación',
+        reference: `Factura ${editingInvoice.number}`,
+        user_name: getCurrentUser()?.username || 'Sistema',
+        unit_ids: unitIds,
+      });
+
+      const newItem = {
+        productId: product.id,
+        productName: product.name,
+        quantity,
+        price,
+        total: price * quantity,
+        unitIds,
+        useUnitIds: product.use_unit_ids || false,
+      };
+
+      const updatedItems = [...editingInvoice.items, newItem];
+      const subtotal = updatedItems.reduce((sum, it) => sum + it.total, 0);
+      const total = subtotal;
+
+      await updateInvoice(editingInvoice.id, { items: updatedItems, subtotal, tax: 0, total });
+      setEditingInvoice({ ...editingInvoice, items: updatedItems, subtotal, tax: 0, total });
+
+      const invoices = await getInvoices();
+      setPendingInvoices(invoices.filter(inv => inv.status === 'pending_confirmation'));
+      toast.success(`"${product.name}" agregado a la factura`);
+      loadStats();
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al agregar producto');
+    }
+  };
+
+  const handleEditProductPrice = async () => {
+    if (!editingInvoice || editPriceIndex === null) return;
+    if (editPriceValue <= 0) { toast.error('El precio debe ser mayor a 0'); return; }
+    try {
+      const updatedItems = editingInvoice.items.map((it, idx) => {
+        if (idx !== editPriceIndex) return it;
+        return { ...it, price: editPriceValue, total: editPriceValue * it.quantity };
+      });
+      const subtotal = updatedItems.reduce((sum, it) => sum + it.total, 0);
+      const total = subtotal;
+
+      await updateInvoice(editingInvoice.id, { items: updatedItems, subtotal, tax: 0, total });
+      setEditingInvoice({ ...editingInvoice, items: updatedItems, subtotal, tax: 0, total });
+      setShowEditPriceModal(false);
+      setEditPriceIndex(null);
+
+      const invoices = await getInvoices();
+      setPendingInvoices(invoices.filter(inv => inv.status === 'pending_confirmation'));
+      toast.success('Precio actualizado');
+      loadStats();
+    } catch (err) {
+      console.error(err);
+      toast.error('Error al actualizar precio');
+    }
+  };
+
   const handleOpenCreditNoteModal = (invoice: Invoice) => {
     setCreditNoteInvoice(invoice);
     const initialQty: Record<number, number> = {};
@@ -988,6 +1115,37 @@ export function InvoicesMenu() {
         } else {
           toast.success(`Nota Crédito ${result.number} emitida correctamente`);
         }
+
+        // Registrar en el historial de la factura
+        try {
+          const affectedProducts: HistoryMovementProduct[] = [];
+          for (const item of creditedItems) {
+            if (item.productId.startsWith('common-')) continue;
+            const { data: prod } = await supabase.from('products').select('current_cost').eq('id', item.productId).single();
+            const cost = prod?.current_cost || 0;
+            affectedProducts.push({
+              productId: item.productId,
+              productName: item.productName,
+              quantity: item.quantity,
+              salePrice: item.price,
+              totalSalePrice: item.total,
+              cost,
+              totalCost: cost * item.quantity,
+              profit: item.price - cost,
+            });
+          }
+          if (affectedProducts.length > 0) {
+            await addHistoryMovement(creditNoteInvoice.id, {
+              type: 'DEVOLUCIÓN',
+              date: new Date().toISOString(),
+              performed_by: getCurrentUser()?.username || 'Usuario',
+              affected_products: affectedProducts,
+            });
+          }
+        } catch (histError) {
+          console.error('Error writing return history:', histError);
+        }
+
         setShowCreditNoteModal(false);
         loadStats();
       } else {
@@ -1194,8 +1352,8 @@ export function InvoicesMenu() {
             </Card>
           </div>
 
-          {/* Segunda fila: 2 cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Segunda fila: 4 cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/20 shadow-sm">
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-blue-700 dark:text-blue-400 flex items-center gap-2">
@@ -1219,6 +1377,32 @@ export function InvoicesMenu() {
               <CardContent>
                 <div className="text-2xl font-bold text-red-700 dark:text-red-400">-{formatCOP(stats.creditNotesToday)}</div>
                 <p className="text-xs text-red-600 dark:text-red-500 mt-1">Egresos por devoluciones</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-orange-200 dark:border-orange-800 bg-orange-50/30 dark:bg-orange-950/20 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-orange-700 dark:text-orange-400 flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4" />
+                  Devoluciones Hoy
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-orange-700 dark:text-orange-400">-{formatCOP(stats.returnsToday)}</div>
+                <p className="text-xs text-orange-600 dark:text-orange-500 mt-1">Total devuelto</p>
+              </CardContent>
+            </Card>
+
+            <Card className="border-amber-200 dark:border-amber-800 bg-amber-50/30 dark:bg-amber-950/20 shadow-sm">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium text-amber-700 dark:text-amber-400 flex items-center gap-2">
+                  <ArrowRightLeft className="w-4 h-4" />
+                  Cambios Hoy
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-amber-700 dark:text-amber-400">{formatCOP(stats.exchangesTotalToday)}</div>
+                <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">Valor de productos cambiados</p>
               </CardContent>
             </Card>
           </div>
@@ -1343,6 +1527,7 @@ export function InvoicesMenu() {
                       <SelectItem value="pending_confirmation">En confirmación</SelectItem>
                       <SelectItem value="pending">Pendiente por crédito</SelectItem>
                       <SelectItem value="partial_return">Parcialmente devueltas</SelectItem>
+                      <SelectItem value="anulada">Anuladas</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1492,6 +1677,11 @@ export function InvoicesMenu() {
                                   <Clock className="w-3 h-3 mr-0.5 sm:mr-1" />
                                   <span className="hidden md:inline">Confirm</span>
                                 </Badge>
+                              ) : invoice.status === 'anulada' ? (
+                                <Badge variant="outline" className="bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border-zinc-300 dark:border-zinc-600 text-[10px] sm:text-xs">
+                                  <X className="w-3 h-3 mr-0.5 sm:mr-1" />
+                                  <span className="hidden md:inline">Anulada</span>
+                                </Badge>
                               ) : (
                                 <Badge variant="outline" className="bg-slate-50 dark:bg-slate-950 text-slate-700 dark:text-slate-400 border-slate-200 dark:border-slate-800 text-[10px] sm:text-xs">
                                   <Clock className="w-3 h-3 mr-0.5 sm:mr-1" />
@@ -1556,7 +1746,7 @@ export function InvoicesMenu() {
                                     <FileX className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                   </Button>
                                 )}
-                                {invoice.status !== 'pending_confirmation' && canRevertInvoice(invoice.created_at || '') && (
+                                {invoice.status !== 'pending_confirmation' && invoice.status !== 'anulada' && canRevertInvoice(invoice.created_at || '') && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -1639,14 +1829,62 @@ export function InvoicesMenu() {
             </DialogDescription>
           </DialogHeader>
 
-          {pendingInvoices.length === 0 ? (
+          {/* Buscador y filtros */}
+          <div className="flex flex-col sm:flex-row gap-2 pb-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+              <Input
+                placeholder="Buscar por # factura o cliente..."
+                value={pendingSearch}
+                onChange={(e) => setPendingSearch(e.target.value)}
+                className="pl-9 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 border-zinc-200 dark:border-zinc-700"
+              />
+            </div>
+            <div className="flex gap-1">
+              {(['all', 'today', 'yesterday', 'week', 'month'] as const).map((f) => (
+                <Button
+                  key={f}
+                  size="sm"
+                  variant={pendingDateFilter === f ? 'default' : 'outline'}
+                  onClick={() => setPendingDateFilter(f)}
+                  className={pendingDateFilter === f
+                    ? 'bg-amber-600 hover:bg-amber-700 text-white'
+                    : 'border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300'}
+                >
+                  {{ all: 'Todos', today: 'Hoy', yesterday: 'Ayer', week: 'Semana', month: 'Mes' }[f]}
+                </Button>
+              ))}
+            </div>
+          </div>
+
+          {(() => {
+            const colombiaNow = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Bogota' }));
+            const todayStr = colombiaNow.toISOString().slice(0, 10);
+            const yesterdayStr = new Date(colombiaNow.getTime() - 86400000).toISOString().slice(0, 10);
+            const weekAgo = new Date(colombiaNow.getTime() - 7 * 86400000).toISOString().slice(0, 10);
+            const monthStart = `${colombiaNow.getFullYear()}-${String(colombiaNow.getMonth() + 1).padStart(2, '0')}-01`;
+
+            const filtered = pendingInvoices.filter((inv) => {
+              const term = pendingSearch.toLowerCase();
+              if (term && !String(inv.number).includes(term) && !(inv.customer_name || '').toLowerCase().includes(term)) return false;
+              if (pendingDateFilter !== 'all') {
+                const d = extractColombiaDate(inv.date || inv.created_at || '');
+                if (pendingDateFilter === 'today' && d !== todayStr) return false;
+                if (pendingDateFilter === 'yesterday' && d !== yesterdayStr) return false;
+                if (pendingDateFilter === 'week' && d < weekAgo) return false;
+                if (pendingDateFilter === 'month' && d < monthStart) return false;
+              }
+              return true;
+            });
+
+            return filtered.length === 0 ? (
             <div className="text-center py-12 text-zinc-500 dark:text-zinc-400">
               <Clock className="w-16 h-16 mx-auto mb-4 text-zinc-300 dark:text-zinc-700" />
-              <p className="text-lg font-medium">No hay facturas pendientes</p>
+              <p className="text-lg font-medium">{pendingInvoices.length === 0 ? 'No hay facturas pendientes' : 'Sin resultados para esta búsqueda'}</p>
             </div>
           ) : (
             <div className="space-y-4">
-              {pendingInvoices.map((invoice) => (
+              {filtered.map((invoice) => (
                 <Card key={invoice.id} className="border-zinc-200 dark:border-zinc-800">
                   <CardContent className="p-4">
                     <div className="flex items-start justify-between">
@@ -1727,7 +1965,8 @@ export function InvoicesMenu() {
                 </Card>
               ))}
             </div>
-          )}
+          );
+          })()}
         </DialogContent>
       </Dialog>
 
@@ -2099,12 +2338,190 @@ export function InvoicesMenu() {
             </div>
           )}
 
-          <DialogFooter className="mt-4 sm:mt-6">
+          <DialogFooter className="mt-4 sm:mt-6 flex flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowHistoryModal(true)}
+              className="border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950 w-full sm:w-auto text-sm h-9 sm:h-10"
+            >
+              <History className="w-4 h-4 mr-2" />
+              Historial
+              {selectedInvoice?.history_movements && selectedInvoice.history_movements.length > 0 && (
+                <span className="ml-2 inline-flex items-center justify-center w-5 h-5 rounded-full bg-emerald-600 text-white text-xs font-bold">
+                  {selectedInvoice.history_movements.length}
+                </span>
+              )}
+            </Button>
             <Button
               variant="outline"
               onClick={() => setShowPreviewModal(false)}
               className="border-zinc-300 dark:border-zinc-700 w-full sm:w-auto text-sm h-9 sm:h-10"
             >
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Historial de Movimientos */}
+      <Dialog open={showHistoryModal} onOpenChange={setShowHistoryModal}>
+        <DialogContent className="max-w-lg w-[95vw] sm:w-full max-h-[85vh] overflow-y-auto bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="text-base sm:text-lg text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+              <History className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+              Historial — Factura #{selectedInvoice?.number}
+            </DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
+              Devoluciones y cambios registrados sobre esta factura
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 py-2">
+            {(!selectedInvoice?.history_movements || selectedInvoice.history_movements.length === 0) ? (
+              <div className="flex flex-col items-center justify-center py-10 text-zinc-400 dark:text-zinc-600 gap-3">
+                <RefreshCw className="w-10 h-10 opacity-40" />
+                <p className="text-sm">No hay movimientos registrados para esta factura.</p>
+              </div>
+            ) : (
+              selectedInvoice.history_movements.map((mov) => {
+                const isReturn = mov.type === 'DEVOLUCIÓN';
+                const dateLabel = new Date(mov.date).toLocaleString('es-CO', {
+                  timeZone: 'America/Bogota',
+                  day: '2-digit', month: '2-digit', year: 'numeric',
+                  hour: '2-digit', minute: '2-digit',
+                });
+                return (
+                  <div
+                    key={mov.id}
+                    className={`rounded-xl border p-3 sm:p-4 flex items-center justify-between gap-3 ${
+                      isReturn
+                        ? 'border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30'
+                        : 'border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className={`flex-shrink-0 w-9 h-9 rounded-full flex items-center justify-center ${
+                        isReturn ? 'bg-rose-100 dark:bg-rose-900' : 'bg-blue-100 dark:bg-blue-900'
+                      }`}>
+                        {isReturn
+                          ? <RotateCcw className="w-4 h-4 text-rose-600 dark:text-rose-400" />
+                          : <ArrowLeftRight className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                        }
+                      </div>
+                      <div className="min-w-0">
+                        <span className={`text-xs font-bold tracking-wider uppercase ${
+                          isReturn ? 'text-rose-700 dark:text-rose-400' : 'text-blue-700 dark:text-blue-400'
+                        }`}>
+                          {mov.type}
+                        </span>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                          {dateLabel} &middot; <span className="font-medium text-zinc-700 dark:text-zinc-300">{mov.performed_by}</span>
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => { setSelectedHistoryMovement(mov); setShowHistoryDetailModal(true); }}
+                      className={`flex-shrink-0 h-8 text-xs px-3 ${
+                        isReturn
+                          ? 'border-rose-300 dark:border-rose-700 text-rose-700 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900'
+                          : 'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900'
+                      }`}
+                    >
+                      Ver detalle
+                    </Button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowHistoryModal(false)} className="w-full sm:w-auto text-sm">
+              Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Detalle de Movimiento */}
+      <Dialog open={showHistoryDetailModal} onOpenChange={setShowHistoryDetailModal}>
+        <DialogContent className="max-w-xl w-[95vw] sm:w-full max-h-[85vh] overflow-y-auto bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="text-base sm:text-lg text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
+              {selectedHistoryMovement?.type === 'DEVOLUCIÓN'
+                ? <RotateCcw className="w-5 h-5 text-rose-500" />
+                : <ArrowLeftRight className="w-5 h-5 text-blue-500" />
+              }
+              Detalle — {selectedHistoryMovement?.type}
+            </DialogTitle>
+            <DialogDescription className="text-xs text-zinc-500 dark:text-zinc-400">
+              {selectedHistoryMovement && new Date(selectedHistoryMovement.date).toLocaleString('es-CO', {
+                timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric',
+                hour: '2-digit', minute: '2-digit',
+              })} &middot; Hecho por: <span className="font-medium">{selectedHistoryMovement?.performed_by}</span>
+            </DialogDescription>
+          </DialogHeader>
+
+          {selectedHistoryMovement && (
+            <div className="space-y-4 py-1">
+              {/* Productos afectados */}
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <Package className="w-4 h-4 text-rose-500 dark:text-rose-400" />
+                  <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                    Producto{selectedHistoryMovement.affected_products.length > 1 ? 's' : ''} afectado{selectedHistoryMovement.affected_products.length > 1 ? 's' : ''}
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {selectedHistoryMovement.affected_products.map((p, i) => (
+                    <div key={i} className="rounded-lg border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 p-3 text-xs space-y-1">
+                      <p className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">{p.productName}</p>
+                      <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-zinc-600 dark:text-zinc-400">
+                        <span>Cantidad: <strong>{p.quantity}</strong></span>
+                        <span>P. venta / u: <strong>{formatCOP(p.salePrice)}</strong></span>
+                        <span>P. venta total: <strong>{formatCOP(p.totalSalePrice)}</strong></span>
+                        <span>Costo unitario: <strong>{formatCOP(p.cost)}</strong></span>
+                        <span>Costo total: <strong>{formatCOP(p.totalCost)}</strong></span>
+                        <span>Utilidad: <strong className="text-emerald-600 dark:text-emerald-400">{formatCOP(p.profit)}</strong></span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Productos entregados (solo en CAMBIO) */}
+              {selectedHistoryMovement.delivered_products && selectedHistoryMovement.delivered_products.length > 0 && (
+                <div>
+                  <div className="flex items-center gap-2 mb-2">
+                    <Package className="w-4 h-4 text-blue-500 dark:text-blue-400" />
+                    <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                      Producto{selectedHistoryMovement.delivered_products.length > 1 ? 's' : ''} entregado{selectedHistoryMovement.delivered_products.length > 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="space-y-2">
+                    {selectedHistoryMovement.delivered_products.map((p, i) => (
+                      <div key={i} className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50 dark:bg-blue-950/30 p-3 text-xs space-y-1">
+                        <p className="font-semibold text-sm text-zinc-900 dark:text-zinc-100">{p.productName}</p>
+                        <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-zinc-600 dark:text-zinc-400">
+                          <span>Cantidad: <strong>{p.quantity}</strong></span>
+                          <span>P. venta / u: <strong>{formatCOP(p.salePrice)}</strong></span>
+                          <span>P. venta total: <strong>{formatCOP(p.totalSalePrice)}</strong></span>
+                          <span>Costo unitario: <strong>{formatCOP(p.cost)}</strong></span>
+                          <span>Costo total: <strong>{formatCOP(p.totalCost)}</strong></span>
+                          <span>Utilidad: <strong className="text-emerald-600 dark:text-emerald-400">{formatCOP(p.profit)}</strong></span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowHistoryDetailModal(false)} className="w-full sm:w-auto text-sm">
               Cerrar
             </Button>
           </DialogFooter>
@@ -2301,7 +2718,7 @@ export function InvoicesMenu() {
               Editar Factura en Confirmación
             </DialogTitle>
             <DialogDescription className="text-zinc-600 dark:text-zinc-400">
-              Elimine productos de la factura. El stock y las ID's serán restaurados automáticamente.
+              Edite productos de la factura. Los cambios de stock se aplican automáticamente.
             </DialogDescription>
           </DialogHeader>
 
@@ -2325,8 +2742,18 @@ export function InvoicesMenu() {
               </div>
 
               <div className="space-y-3">
-                <div className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-                  Productos ({editingInvoice.items.length})
+                <div className="flex items-center justify-between">
+                  <div className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                    Productos ({editingInvoice.items.length})
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => setShowAddProductToEdit(true)}
+                    className="bg-emerald-600 hover:bg-emerald-700 text-white gap-1"
+                  >
+                    <Package className="w-4 h-4" />
+                    Agregar Producto
+                  </Button>
                 </div>
                 {editingInvoice.items.map((item: any, index: number) => (
                   <Card key={index} className="border-zinc-200 dark:border-zinc-800">
@@ -2363,6 +2790,7 @@ export function InvoicesMenu() {
                               }
                             }}
                             className="border-red-300 dark:border-red-700 hover:bg-red-50 dark:hover:bg-red-950 text-red-700 dark:text-red-400"
+                            title="Eliminar producto"
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>
@@ -2377,6 +2805,19 @@ export function InvoicesMenu() {
                               <Minus className="w-4 h-4" />
                             </Button>
                           )}
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                              setEditPriceIndex(index);
+                              setEditPriceValue(item.price);
+                              setShowEditPriceModal(true);
+                            }}
+                            className="border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950 text-blue-700 dark:text-blue-400"
+                            title="Editar precio unitario"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </Button>
                         </div>
                       </div>
                     </CardContent>
@@ -2394,6 +2835,216 @@ export function InvoicesMenu() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* ProductSelectionModal para agregar producto a factura en confirmación */}
+      <ProductSelectionModal
+        open={showAddProductToEdit}
+        onOpenChange={setShowAddProductToEdit}
+        products={products}
+        departments={departments}
+        onSelectProduct={async (product) => {
+          setSelectedProductToAdd(product);
+          setShowAddProductToEdit(false);
+          if (product.use_unit_ids) {
+            const { getAvailableIds } = await import('../lib/unit-ids-utils');
+            const available = getAvailableIds(product.registered_ids || []);
+            if (available.length === 0) {
+              toast.error(`${product.name} no tiene IDs disponibles`);
+              return;
+            }
+            setUnitIdAvailableIds(available);
+            setUnitIdSelectedIds([]);
+            setAddPrice(product.final_price || 0);
+            setShowUnitIdSelectorForEdit(true);
+          } else {
+            setAddQty(1);
+            setAddPrice(product.final_price || 0);
+            setShowAddQtyPriceModal(true);
+          }
+        }}
+      />
+
+      {/* Modal selector de IDs únicas */}
+      <Dialog open={showUnitIdSelectorForEdit} onOpenChange={(open) => {
+        if (!open) { setUnitIdSelectedIds([]); }
+        setShowUnitIdSelectorForEdit(open);
+      }}>
+        <DialogContent className="max-w-2xl bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Seleccionar IDs de Unidades</DialogTitle>
+            <DialogDescription className="text-zinc-600 dark:text-zinc-400">
+              {selectedProductToAdd?.name} — Selecciona las IDs a agregar. La cantidad se ajusta automáticamente.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 max-h-[60vh] overflow-y-auto">
+            <div className="bg-zinc-50 dark:bg-zinc-900 p-3 rounded border border-zinc-200 dark:border-zinc-800">
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                IDs seleccionadas: <span className="font-medium text-zinc-900 dark:text-zinc-100">{unitIdSelectedIds.length}</span>
+              </p>
+            </div>
+            <div className="space-y-2">
+              {unitIdAvailableIds.length > 0 ? unitIdAvailableIds.map((item) => (
+                <div
+                  key={item.id}
+                  className={`p-3 rounded-lg border-2 transition-all ${
+                    unitIdSelectedIds.includes(item.id)
+                      ? 'border-green-500 bg-green-50 dark:border-green-600 dark:bg-green-950'
+                      : 'border-gray-200 bg-white dark:border-zinc-700 dark:bg-zinc-900'
+                  }`}
+                >
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUnitIdSelectedIds(prev =>
+                          prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]
+                        );
+                      }}
+                      className={`px-3 py-1.5 rounded font-mono text-sm font-medium transition-all ${
+                        unitIdSelectedIds.includes(item.id)
+                          ? 'bg-green-600 text-white dark:bg-green-700'
+                          : 'bg-gray-100 text-gray-700 hover:bg-gray-200 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700'
+                      }`}
+                    >
+                      {item.id}
+                    </button>
+                    {unitIdSelectedIds.includes(item.id) && (
+                      <span className="text-xs text-green-600 dark:text-green-400 font-medium">✓ Seleccionada</span>
+                    )}
+                  </div>
+                  {item.note && (
+                    <div className="mt-1 px-2 py-1 bg-blue-50 dark:bg-blue-950 rounded text-xs text-blue-700 dark:text-blue-300">
+                      {item.note}
+                    </div>
+                  )}
+                </div>
+              )) : (
+                <div className="text-center py-8 text-zinc-500 dark:text-zinc-400 text-sm">
+                  No hay IDs disponibles para este producto.
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => { setShowUnitIdSelectorForEdit(false); setUnitIdSelectedIds([]); }}>
+              Cancelar
+            </Button>
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={() => {
+                if (unitIdSelectedIds.length === 0) { toast.error('Debes seleccionar al menos 1 ID'); return; }
+                setShowUnitIdSelectorForEdit(false);
+                setShowAddQtyPriceModal(true);
+                setAddQty(unitIdSelectedIds.length);
+              }}
+            >
+              Confirmar Selección ({unitIdSelectedIds.length})
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de cantidad y precio tras seleccionar producto */}
+      <Dialog open={showAddQtyPriceModal} onOpenChange={setShowAddQtyPriceModal}>
+        <DialogContent className="max-w-sm bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Configurar Producto</DialogTitle>
+            <DialogDescription className="text-zinc-600 dark:text-zinc-400">
+              {selectedProductToAdd?.name}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label className="text-zinc-700 dark:text-zinc-300">Cantidad</Label>
+              <Input
+                type="number"
+                min={1}
+                value={addQty}
+                onChange={(e) => setAddQty(Math.max(1, parseInt(e.target.value) || 1))}
+                disabled={selectedProductToAdd?.use_unit_ids}
+                className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
+              />
+              {selectedProductToAdd?.use_unit_ids && (
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Cantidad fijada por IDs seleccionadas: {unitIdSelectedIds.join(', ')}
+                </div>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label className="text-zinc-700 dark:text-zinc-300">Precio unitario</Label>
+              <Input
+                type="number"
+                min={0}
+                value={addPrice}
+                onChange={(e) => setAddPrice(parseFloat(e.target.value) || 0)}
+                className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
+              />
+              <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                Total: {formatCOP(addQty * addPrice)}
+              </div>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowAddQtyPriceModal(false)}>Cancelar</Button>
+            <Button
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+              onClick={async () => {
+                if (selectedProductToAdd) {
+                  setShowAddQtyPriceModal(false);
+                  await handleAddProductToConfirmationInvoice(
+                    selectedProductToAdd,
+                    addQty,
+                    addPrice,
+                    selectedProductToAdd.use_unit_ids ? unitIdSelectedIds : []
+                  );
+                  setSelectedProductToAdd(null);
+                  setUnitIdSelectedIds([]);
+                }
+              }}
+            >
+              Agregar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de editar precio unitario */}
+      <Dialog open={showEditPriceModal} onOpenChange={setShowEditPriceModal}>
+        <DialogContent className="max-w-sm bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Editar Precio Unitario</DialogTitle>
+            <DialogDescription className="text-zinc-600 dark:text-zinc-400">
+              {editPriceIndex !== null && editingInvoice?.items[editPriceIndex]?.productName}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label className="text-zinc-700 dark:text-zinc-300">Nuevo precio por unidad</Label>
+              <Input
+                type="number"
+                min={0}
+                value={editPriceValue}
+                onChange={(e) => setEditPriceValue(parseFloat(e.target.value) || 0)}
+                className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
+              />
+              {editPriceIndex !== null && editingInvoice?.items[editPriceIndex] && (
+                <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                  Total: {formatCOP(editPriceValue * editingInvoice.items[editPriceIndex].quantity)}
+                </div>
+              )}
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditPriceModal(false)}>Cancelar</Button>
+            <Button
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+              onClick={handleEditProductPrice}
+            >
+              Guardar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
