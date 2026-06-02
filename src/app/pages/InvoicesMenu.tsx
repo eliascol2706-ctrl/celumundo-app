@@ -14,7 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { ProductSalesReportDialog } from '../components/ProductSalesReportDialog';
 import { ProductSelectionModal } from '../components/ProductSelectionModal';
 import { printThermalInvoice as printThermalDirect } from '../lib/thermal-printer';
-import { printPDFInvoice } from '../lib/pdf-printer';
+import { printPDFInvoice, generatePDFBlob } from '../lib/pdf-printer';
 import { isPrintingAvailable } from '../lib/platform-detector';
 import { revertInvoice, canRevertInvoice, getRevertTimeRemaining } from '../lib/revert-invoice';
 
@@ -1779,6 +1779,27 @@ export function InvoicesMenu() {
                                   title="Imprimir"
                                 >
                                   <Printer className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={async () => {
+                                    let payments: any[] = [];
+                                    if (invoice.is_credit) {
+                                      payments = await getCreditPaymentsByInvoice(invoice.id);
+                                    }
+                                    const blob = await generatePDFBlob({ invoice, creditPayments: payments, products });
+                                    const url = URL.createObjectURL(blob);
+                                    const a = document.createElement('a');
+                                    a.href = url;
+                                    a.download = `factura-${invoice.number}.pdf`;
+                                    a.click();
+                                    setTimeout(() => URL.revokeObjectURL(url), 5000);
+                                  }}
+                                  className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 h-7 w-7 sm:h-8 sm:w-8 p-0"
+                                  title="Descargar PDF"
+                                >
+                                  <Download className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                 </Button>
                                 {invoice.is_credit && (invoice.status === 'paid' || invoice.status === 'partial_return') && (
                                   <Button
