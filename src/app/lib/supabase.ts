@@ -1839,10 +1839,10 @@ export const createManualMovement = async (
     ? product.stock + quantity 
     : product.stock - quantity;
   
-  if (newStock < 0) {
+  if (type !== 'entry' && newStock < 0) {
     throw new Error('Stock insuficiente');
   }
-  
+
   await updateProduct(productId, { stock: newStock });
   
   return addMovement({

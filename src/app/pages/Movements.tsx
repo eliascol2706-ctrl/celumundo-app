@@ -504,7 +504,7 @@ export default function Movements() {
             ? product.stock + item.quantity
             : product.stock - item.quantity;
 
-        if (newStock < 0) {
+        if (formData.type !== "entry" && newStock < 0) {
           toast.error(`Stock insuficiente para ${product.name}`);
           return;
         }
