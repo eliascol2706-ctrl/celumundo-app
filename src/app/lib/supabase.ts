@@ -1323,9 +1323,9 @@ export const addInvoice = async (invoice: Omit<Invoice, 'id' | 'number' | 'compa
     throw new Error(validation.message || 'No se puede crear la factura');
   }
   
-  // Usar la fecha y hora actual de Colombia
-  const colombiaDateTime = getColombiaDateTime().toISOString();
-  
+  // Usar la fecha proporcionada o la fecha y hora actual de Colombia
+  const colombiaDateTime = (invoice as any).date || getColombiaDateTime().toISOString();
+
   // Intentar insertar con retry en caso de duplicate key
   let data = null;
   let nextNumber = '';

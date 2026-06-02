@@ -207,15 +207,46 @@ export function InvoicesMenu() {
       }, 0);
 
       // Calcular pagos en EFECTIVO del día (solo facturas pagadas)
-      const cashToday = paidInvoicesToday.reduce((sum, inv) => {
-        return sum + (inv.payment_cash || 0);
-      }, 0);
+      const cashFromInvoices = paidInvoicesToday.reduce((sum, inv) => sum + (inv.payment_cash || 0), 0);
 
       // Calcular pagos por TRANSFERENCIA del día (transferencia + nequi + daviplata)
-      const transferToday = paidInvoicesToday.reduce((sum, inv) => {
-        // Sumar payment_transfer y payment_other (que incluye nequi, daviplata, etc)
+      const transferFromInvoices = paidInvoicesToday.reduce((sum, inv) => {
         return sum + (inv.payment_transfer || 0) + (inv.payment_other || 0);
       }, 0);
+
+      // Descontar devoluciones del día según método de reembolso
+      const returnsOfDay = returns.filter(ret => ret.date && extractColombiaDate(ret.date) === todayStr);
+
+      const parseMixedRefund = (method: string) => {
+        // formato: "mixto:efectivo=X,transferencia=Y,nequi=Z,daviplata=W"
+        const result = { efectivo: 0, transfer: 0 };
+        if (!method.startsWith('mixto:')) return result;
+        method.slice(6).split(',').forEach(part => {
+          const [k, v] = part.split('=');
+          const val = parseFloat(v) || 0;
+          if (k === 'efectivo') result.efectivo += val;
+          if (['transferencia', 'nequi', 'daviplata'].includes(k)) result.transfer += val;
+        });
+        return result;
+      };
+
+      let cashRefundsToday = 0;
+      let transferRefundsToday = 0;
+      returnsOfDay.forEach(ret => {
+        const method = ret.refund_method || '';
+        if (method === 'efectivo') {
+          cashRefundsToday += ret.total || 0;
+        } else if (['transferencia', 'nequi', 'daviplata'].includes(method)) {
+          transferRefundsToday += ret.total || 0;
+        } else if (method.startsWith('mixto:')) {
+          const parsed = parseMixedRefund(method);
+          cashRefundsToday += parsed.efectivo;
+          transferRefundsToday += parsed.transfer;
+        }
+      });
+
+      const cashToday = cashFromInvoices - cashRefundsToday;
+      const transferToday = transferFromInvoices - transferRefundsToday;
 
       // Calcular impacto de cambios del día (solo cambios completados)
       const exchangesToday = exchanges.filter(ex => {
@@ -1311,8 +1342,8 @@ export function InvoicesMenu() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{formatCOP(stats.totalSalesToday)}</div>
-                <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-1">Facturas + abonos - notas crédito</p>
+                <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{formatCOP(stats.cashToday + stats.transferToday + stats.todayPayments)}</div>
+                <p className="text-xs text-emerald-600 dark:text-emerald-500 mt-1">Efectivo + transferencias + abonos</p>
                 {stats.exchangeImpactToday !== 0 && (
                   <p className={`text-xs mt-1 font-medium ${
                     stats.exchangeImpactToday > 0
@@ -1322,6 +1353,20 @@ export function InvoicesMenu() {
                     Impacto de cambios: {stats.exchangeImpactToday > 0 ? '+' : ''}{formatCOP(stats.exchangeImpactToday)}
                   </p>
                 )}
+                <div className="mt-3 pt-3 border-t border-emerald-200 dark:border-emerald-800 space-y-1.5">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-emerald-700 dark:text-emerald-400 flex items-center gap-1">💵 Efectivo</span>
+                    <span className="font-medium text-emerald-800 dark:text-emerald-300">{formatCOP(stats.cashToday)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-emerald-700 dark:text-emerald-400 flex items-center gap-1">🏦 Transferencias</span>
+                    <span className="font-medium text-emerald-800 dark:text-emerald-300">{formatCOP(stats.transferToday)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-emerald-700 dark:text-emerald-400 flex items-center gap-1">💳 Abonos</span>
+                    <span className="font-medium text-emerald-800 dark:text-emerald-300">{formatCOP(stats.todayPayments)}</span>
+                  </div>
+                </div>
               </CardContent>
             </Card>
 

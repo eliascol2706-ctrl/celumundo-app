@@ -356,6 +356,33 @@ export function DailyClosureDialog({
     // (saldo_a_favor y descuento) que aún no se han restado
     const creditNotesOther = creditNotesTotal - creditNotesCash - creditNotesTransfer;
 
+    // RESTAR DEVOLUCIONES DEL DÍA según método de reembolso
+    const parseMixedRefund = (method: string) => {
+      const result = { efectivo: 0, transfer: 0 };
+      if (!method.startsWith('mixto:')) return result;
+      method.slice(6).split(',').forEach(part => {
+        const [k, v] = part.split('=');
+        const val = parseFloat(v) || 0;
+        if (k === 'efectivo') result.efectivo += val;
+        if (['transferencia', 'nequi', 'daviplata'].includes(k)) result.transfer += val;
+      });
+      return result;
+    };
+
+    (dailyStats.returns || []).forEach((ret: any) => {
+      const method = (ret.refund_method || '').toLowerCase();
+      const amount = ret.total || 0;
+      if (method === 'efectivo') {
+        totalCash -= amount;
+      } else if (['transferencia', 'nequi', 'daviplata'].includes(method)) {
+        totalTransfer -= amount;
+      } else if (method.startsWith('mixto:')) {
+        const parsed = parseMixedRefund(method);
+        totalCash -= parsed.efectivo;
+        totalTransfer -= parsed.transfer;
+      }
+    });
+
     return {
       totalCash,
       totalTransfer,
@@ -371,7 +398,7 @@ export function DailyClosureDialog({
       creditNotesTotal,
       creditNotesCash,
       creditNotesTransfer,
-      total: totalCash + totalTransfer + totalOthers + totalAbonos + serviceRevenue - creditNotesOther
+      total: totalCash + totalTransfer + totalAbonos + serviceRevenue - creditNotesOther
     };
   };
 

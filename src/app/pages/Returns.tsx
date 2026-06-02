@@ -30,6 +30,8 @@ export function Returns() {
   const [returnType, setReturnType] = useState<'full' | 'partial'>('full');
   const [selectedItems, setSelectedItems] = useState<{ [key: string]: number }>({});
   const [returnReason, setReturnReason] = useState('');
+  const [refundMethod, setRefundMethod] = useState('efectivo');
+  const [mixedRefund, setMixedRefund] = useState({ efectivo: 0, transferencia: 0, nequi: 0, daviplata: 0 });
   const [searchTerm, setSearchTerm] = useState('');
   const [filterType, setFilterType] = useState<'all' | 'full' | 'partial'>('all');
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -67,6 +69,8 @@ export function Returns() {
     setReturnType('full');
     setSelectedItems({});
     setReturnReason('');
+    setRefundMethod('efectivo');
+    setMixedRefund({ efectivo: 0, transferencia: 0, nequi: 0, daviplata: 0 });
     setIsReturnDialogOpen(true);
   };
 
@@ -142,6 +146,15 @@ export function Returns() {
     if (!returnReason.trim()) {
       toast.error('Debes indicar un motivo para la devolución');
       return;
+    }
+
+    if (refundMethod === 'mixto') {
+      const mixedTotal = mixedRefund.efectivo + mixedRefund.transferencia + mixedRefund.nequi + mixedRefund.daviplata;
+      const returnTotal = calculateReturnTotal();
+      if (Math.abs(mixedTotal - returnTotal) > 1) {
+        toast.error(`La suma del reembolso mixto (${formatCOP(mixedTotal)}) debe ser exactamente ${formatCOP(returnTotal)}`);
+        return;
+      }
     }
 
     if (returnType === 'partial') {
@@ -224,6 +237,9 @@ export function Returns() {
         tax: returnTax,
         total: returnTotal,
         reason: returnReason,
+        refund_method: refundMethod === 'mixto'
+          ? `mixto:efectivo=${mixedRefund.efectivo},transferencia=${mixedRefund.transferencia},nequi=${mixedRefund.nequi},daviplata=${mixedRefund.daviplata}`
+          : refundMethod,
         processed_by: currentUser?.username || 'unknown',
         date: new Date().toISOString().split('T')[0],
         created_at: new Date().toISOString(),
@@ -715,6 +731,70 @@ export function Returns() {
                   />
                 </div>
 
+                {/* Método de reembolso */}
+                <div className="space-y-2">
+                  <Label>Método de Reembolso *</Label>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                    {[
+                      { value: 'efectivo', label: 'Efectivo', icon: '💵' },
+                      { value: 'transferencia', label: 'Transferencia', icon: '🏦' },
+                      { value: 'nequi', label: 'Nequi', icon: '📱' },
+                      { value: 'daviplata', label: 'Daviplata', icon: '💳' },
+                      { value: 'mixto', label: 'Mixto', icon: '🔀' },
+                    ].map((m) => (
+                      <button
+                        key={m.value}
+                        type="button"
+                        onClick={() => setRefundMethod(m.value)}
+                        className={`flex flex-col items-center gap-1 p-3 rounded-lg border-2 text-sm font-medium transition-all ${
+                          refundMethod === m.value
+                            ? 'border-red-500 bg-red-50 dark:border-red-600 dark:bg-red-950/40 text-red-700 dark:text-red-400'
+                            : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-700 dark:text-zinc-300'
+                        }`}
+                      >
+                        <span className="text-lg">{m.icon}</span>
+                        <span className="text-xs">{m.label}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {/* Desglose mixto */}
+                  {refundMethod === 'mixto' && (() => {
+                    const total = calculateReturnTotal();
+                    const assigned = mixedRefund.efectivo + mixedRefund.transferencia + mixedRefund.nequi + mixedRefund.daviplata;
+                    const remaining = total - assigned;
+                    const isExact = Math.abs(remaining) <= 1;
+                    return (
+                      <div className="mt-3 p-3 border-2 border-dashed border-red-200 dark:border-red-800 rounded-lg space-y-3">
+                        <div className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Distribuir {formatCOP(total)}</div>
+                        {([
+                          { key: 'efectivo', label: 'Efectivo', icon: '💵' },
+                          { key: 'transferencia', label: 'Transferencia', icon: '🏦' },
+                          { key: 'nequi', label: 'Nequi', icon: '📱' },
+                          { key: 'daviplata', label: 'Daviplata', icon: '💳' },
+                        ] as const).map(({ key, label, icon }) => (
+                          <div key={key} className="flex items-center gap-2">
+                            <span className="w-6 text-center">{icon}</span>
+                            <Label className="w-28 text-xs text-zinc-600 dark:text-zinc-400">{label}</Label>
+                            <Input
+                              type="number"
+                              min={0}
+                              value={mixedRefund[key] || ''}
+                              placeholder="0"
+                              onChange={(e) => setMixedRefund(prev => ({ ...prev, [key]: parseFloat(e.target.value) || 0 }))}
+                              className="flex-1 h-8 text-sm"
+                            />
+                          </div>
+                        ))}
+                        <div className={`flex justify-between text-sm font-medium pt-1 border-t ${isExact ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                          <span>Restante:</span>
+                          <span>{isExact ? '✓ Completo' : formatCOP(remaining)}</span>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+
                 {/* Total a devolver */}
                 <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30">
                   <CardContent className="pt-4">
@@ -746,7 +826,7 @@ export function Returns() {
             <Button 
               type="button" 
               onClick={handleConfirmReturn}
-              disabled={!selectedInvoice || !returnReason.trim() || isSubmitting}
+              disabled={!selectedInvoice || !returnReason.trim() || !refundMethod || isSubmitting}
               className="bg-red-600 hover:bg-red-700"
             >
               <CheckCircle className="h-4 w-4 mr-2" />
