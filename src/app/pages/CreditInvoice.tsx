@@ -1458,8 +1458,10 @@ export function CreditInvoice() {
                     <p className="text-sm mt-1">Agregue productos para continuar</p>
                   </div>
                 ) : (
-                  <div className="space-y-4">
-                    {items.map((item, index) => (
+                  <div className="space-y-4 max-h-[520px] overflow-y-auto pr-1">
+                    {[...items].reverse().map((item, reversedIndex) => {
+                      const index = items.length - 1 - reversedIndex;
+                      return (
                       <div
                         key={index}
                         className="p-4 bg-zinc-50 dark:bg-zinc-800 rounded-lg border border-zinc-200 dark:border-zinc-700"
@@ -1564,7 +1566,8 @@ export function CreditInvoice() {
                           </Button>
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </CardContent>
@@ -1621,6 +1624,17 @@ export function CreditInvoice() {
                   <div className="flex justify-between text-lg font-bold">
                     <span className="text-zinc-900 dark:text-zinc-100">Total:</span>
                     <span className="text-emerald-600 dark:text-emerald-400">{formatCOP(calculateTotal())}</span>
+                  </div>
+
+                  <div className="pt-2 border-t border-zinc-200 dark:border-zinc-700 space-y-2 text-sm text-zinc-600 dark:text-zinc-400">
+                    <div className="flex justify-between">
+                      <span>Productos:</span>
+                      <span className="font-medium">{items.length}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Total unidades:</span>
+                      <span className="font-medium">{items.reduce((sum, item) => sum + (item.quantity || 0), 0)}</span>
+                    </div>
                   </div>
 
                   {selectedCustomer && (

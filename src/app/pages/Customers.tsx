@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { User, CreditCard, DollarSign, FileText, Plus, Search, Eye, Printer, Trash2, XCircle, AlertTriangle } from 'lucide-react';
+import { User, CreditCard, DollarSign, FileText, Plus, Search, Eye, Printer, Trash2, XCircle, AlertTriangle, ImageIcon } from 'lucide-react';
 import { getCustomers, getInvoices, getCreditPaymentsByInvoice, addCreditPayment, deleteCreditPayment, cancelCreditInvoice, type Customer, type Invoice, type CreditPayment, getCurrentUser } from '../lib/supabase';
 import { printThermalPayment } from '../lib/thermal-printer';
 import { isPrintingAvailable } from '../lib/platform-detector';
@@ -26,6 +26,7 @@ export function Customers() {
   const [showSetupGuide, setShowSetupGuide] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeletingId, setIsDeletingId] = useState<string | null>(null);
+  const [proofImageUrl, setProofImageUrl] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
   const [paymentForm, setPaymentForm] = useState({
@@ -653,10 +654,21 @@ export function Customers() {
                           <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
                             {new Date(payment.date).toLocaleString('es-ES')}
                           </span>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1">
                             <span className="text-sm font-bold text-green-600">
                               {formatCOP(payment.amount)}
                             </span>
+                            {payment.proof_url && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => setProofImageUrl(payment.proof_url!)}
+                                className="h-6 w-6 p-0 hover:bg-blue-100 hover:text-blue-600"
+                                title="Ver comprobante"
+                              >
+                                <ImageIcon className="h-3 w-3" />
+                              </Button>
+                            )}
                             <Button
                               size="sm"
                               variant="ghost"
@@ -776,6 +788,36 @@ export function Customers() {
               <Printer className="w-4 h-4" />
               Imprimir
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal visualizar comprobante */}
+      <Dialog open={!!proofImageUrl} onOpenChange={(open) => { if (!open) setProofImageUrl(null); }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Comprobante de pago</DialogTitle>
+          </DialogHeader>
+          {proofImageUrl && (
+            <div className="flex justify-center py-2">
+              <img
+                src={proofImageUrl}
+                alt="Comprobante"
+                className="max-w-full max-h-[70vh] object-contain rounded-lg border border-zinc-200 dark:border-zinc-700"
+              />
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setProofImageUrl(null)}>Cerrar</Button>
+            {proofImageUrl && (
+              <Button
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                onClick={() => { window.open(proofImageUrl, '_blank'); }}
+              >
+                <ImageIcon className="w-4 h-4 mr-2" />
+                Abrir en pestaña
+              </Button>
+            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

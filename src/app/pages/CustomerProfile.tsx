@@ -19,7 +19,9 @@ import {
   Lock,
   Unlock,
   Link,
-  Copy
+  Copy,
+  ImageIcon,
+  X
 } from 'lucide-react';
 import {
   getCustomerByDocument,
@@ -632,6 +634,7 @@ export function CustomerProfile() {
 function PaymentsTab({ invoices }: { invoices: Invoice[] }) {
   const [payments, setPayments] = useState<Array<CreditPayment & { invoice_number: string }>>([]);
   const [loading, setLoading] = useState(true);
+  const [proofImageUrl, setProofImageUrl] = useState<string | null>(null);
 
   useEffect(() => {
     loadAllPayments();
@@ -685,6 +688,7 @@ function PaymentsTab({ invoices }: { invoices: Invoice[] }) {
   }
 
   return (
+    <>
     <div className="divide-y divide-zinc-100">
       {payments.map((payment) => (
         <div key={payment.id} className="p-4 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors">
@@ -700,11 +704,23 @@ function PaymentsTab({ invoices }: { invoices: Invoice[] }) {
                 </p>
               </div>
             </div>
-            <div className="text-right">
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">{new Date(payment.date).toLocaleDateString('es-CO')}</p>
-              <p className="text-xs text-zinc-400 dark:text-zinc-500">
-                {new Date(payment.date).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
-              </p>
+            <div className="flex items-center gap-2">
+              {payment.proof_url && (
+                <button
+                  onClick={() => setProofImageUrl(payment.proof_url!)}
+                  className="flex items-center gap-1 px-2 py-1 rounded-md text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950 hover:bg-blue-100 dark:hover:bg-blue-900 border border-blue-200 dark:border-blue-800 transition-colors"
+                  title="Ver comprobante"
+                >
+                  <ImageIcon className="w-3.5 h-3.5" />
+                  Comprobante
+                </button>
+              )}
+              <div className="text-right">
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">{new Date(payment.date).toLocaleDateString('es-CO')}</p>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500">
+                  {new Date(payment.date).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}
+                </p>
+              </div>
             </div>
           </div>
           {payment.notes && (
@@ -713,5 +729,32 @@ function PaymentsTab({ invoices }: { invoices: Invoice[] }) {
         </div>
       ))}
     </div>
+
+    {/* Modal comprobante */}
+    <Dialog open={!!proofImageUrl} onOpenChange={(open) => { if (!open) setProofImageUrl(null); }}>
+      <DialogContent className="w-[95vw] max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Comprobante de pago</DialogTitle>
+        </DialogHeader>
+        {proofImageUrl && (
+          <div className="flex justify-center py-2">
+            <img
+              src={proofImageUrl}
+              alt="Comprobante"
+              className="max-w-full max-h-[65vh] object-contain rounded-lg border border-zinc-200 dark:border-zinc-700"
+            />
+          </div>
+        )}
+        <div className="flex justify-end">
+          <button
+            onClick={() => setProofImageUrl(null)}
+            className="px-4 py-2 rounded-md border border-zinc-200 dark:border-zinc-700 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+          >
+            Cerrar
+          </button>
+        </div>
+      </DialogContent>
+    </Dialog>
+    </>
   );
 }

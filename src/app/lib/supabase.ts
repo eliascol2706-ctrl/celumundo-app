@@ -2706,6 +2706,31 @@ export const calculateInvoiceProfit = async (invoiceId: string): Promise<number>
   return profit;
 };
 
+export const uploadPaymentProof = async (file: File): Promise<string | null> => {
+  return new Promise((resolve) => {
+    const canvas = document.createElement('canvas');
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      const MAX = 1200;
+      let { width, height } = img;
+      if (width > MAX || height > MAX) {
+        if (width > height) { height = Math.round((height * MAX) / width); width = MAX; }
+        else { width = Math.round((width * MAX) / height); height = MAX; }
+      }
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext('2d')!.drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(objectUrl);
+      resolve(canvas.toDataURL('image/jpeg', 0.75));
+    };
+
+    img.onerror = () => { URL.revokeObjectURL(objectUrl); resolve(null); };
+    img.src = objectUrl;
+  });
+};
+
 export const addCreditPayment = async (payment: Omit<CreditPayment, 'id' | 'company' | 'created_at'>): Promise<CreditPayment | null> => {
   const company = getCurrentCompany();
 

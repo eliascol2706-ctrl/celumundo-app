@@ -1,11 +1,11 @@
-import { useState } from 'react';
-import { DollarSign, CreditCard, Smartphone, Building2, Wallet, Printer } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { DollarSign, CreditCard, Smartphone, Building2, Wallet, Printer, Paperclip, X, ImageIcon } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from './ui/dialog';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
-import { addCreditPayment, addCreditHistory, type Invoice, type CreditPayment, getCurrentUser } from '../lib/supabase';
+import { addCreditPayment, addCreditHistory, uploadPaymentProof, type Invoice, type CreditPayment, getCurrentUser } from '../lib/supabase';
 import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
 import { printThermalPayment } from '../lib/thermal-printer';
@@ -24,6 +24,9 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
   const [notes, setNotes] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [pendingPrintPayment, setPendingPrintPayment] = useState<CreditPayment | null>(null);
+  const [proofFile, setProofFile] = useState<File | null>(null);
+  const [proofPreview, setProofPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const currentBalance = invoice.credit_balance || invoice.total;
 
@@ -42,6 +45,12 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
 
     setIsSubmitting(true);
 
+    // Subir comprobante si hay uno adjunto
+    let proofUrl: string | undefined;
+    if (proofFile) {
+      proofUrl = await uploadPaymentProof(proofFile) ?? undefined;
+    }
+
     const payment: Omit<CreditPayment, 'id' | 'company' | 'created_at'> = {
       invoice_id: invoice.id,
       customer_document: invoice.customer_document || '',
@@ -49,6 +58,7 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
       amount: paymentAmount,
       payment_method: paymentMethod,
       notes: notes || undefined,
+      proof_url: proofUrl,
       registered_by: getCurrentUser()?.username || 'Sistema'
     };
 
@@ -66,6 +76,8 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
       toast.success('Pago registrado exitosamente');
       setAmount('');
       setNotes('');
+      setProofFile(null);
+      setProofPreview(null);
       onPaymentSuccess();
       onClose();
       setPendingPrintPayment({ ...payment, id: result.id || '' } as CreditPayment);
@@ -92,15 +104,15 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
   return (
     <>
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
-        <DialogHeader>
+      <DialogContent className="w-[95vw] max-w-lg sm:max-w-xl max-h-[90vh] flex flex-col overflow-hidden">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Registrar Pago</DialogTitle>
           <DialogDescription>
             Factura {invoice.number} • Saldo: {formatCOP(currentBalance)}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-4">
+        <div className="space-y-4 py-4 overflow-y-auto flex-1 pr-1">
           {/* Monto */}
           <div>
             <Label htmlFor="amount">Monto a Pagar *</Label>
@@ -192,6 +204,50 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
             />
           </div>
 
+          {/* Adjuntar comprobante */}
+          <div>
+            <Label>Adjuntar comprobante (opcional)</Label>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                setProofFile(file);
+                const reader = new FileReader();
+                reader.onload = (ev) => setProofPreview(ev.target?.result as string);
+                reader.readAsDataURL(file);
+              }}
+            />
+            {proofPreview ? (
+              <div className="mt-2 relative">
+                <img
+                  src={proofPreview}
+                  alt="Comprobante"
+                  className="w-full max-h-40 object-contain rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-900"
+                />
+                <button
+                  type="button"
+                  onClick={() => { setProofFile(null); setProofPreview(null); if (fileInputRef.current) fileInputRef.current.value = ''; }}
+                  className="absolute top-1 right-1 bg-red-500 hover:bg-red-600 text-white rounded-full p-0.5"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="mt-2 w-full flex items-center justify-center gap-2 p-3 border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-lg text-sm text-zinc-500 dark:text-zinc-400 hover:border-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-400 transition-colors"
+              >
+                <Paperclip className="w-4 h-4" />
+                Seleccionar imagen
+              </button>
+            )}
+          </div>
+
           {/* Preview */}
           {amount && parseFloat(amount) > 0 && (
             <div className="bg-zinc-50 rounded-lg p-4 border border-zinc-200">
@@ -213,7 +269,7 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0 pt-2 border-t border-zinc-100 dark:border-zinc-800">
           <Button variant="outline" onClick={onClose}>
             Cancelar
           </Button>
