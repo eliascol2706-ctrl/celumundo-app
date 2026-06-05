@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useBlocker } from 'react-router';
+import { useTaskQueue } from '../contexts/TaskQueueContext';
 import {
   ArrowLeft,
   Plus,
@@ -87,6 +88,7 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
 
 export function RegularInvoice() {
   const navigate = useNavigate();
+  const { addTask, updateTask } = useTaskQueue();
   const [products, setProducts] = useState<Product[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
   const [items, setItems] = useState<InvoiceItem[]>([]);
@@ -440,21 +442,51 @@ export function RegularInvoice() {
           created_by: user?.username || 'Usuario'
         }));
 
-        const { error: commonProductsError } = await supabase
+        await supabase
           .from('common_products')
           .insert(commonProductsData);
-
-        if (commonProductsError) {
-          console.error('Error saving common products:', commonProductsError);
-        }
       }
 
-      // Actualizar inventario - Agrupar items por productId para manejar correctamente
-      // casos donde el mismo producto aparece múltiples veces
-      const productGroups = new Map<string, typeof items>();
+      // ✅ PROCESAR INVENTARIO EN SEGUNDO PLANO
+      const taskId = addTask({
+        type: 'invoice',
+        message: `Procesando factura #${invoice.number}...`,
+        data: { invoiceId: invoice.id, invoiceNumber: invoice.number }
+      });
 
-      for (const item of items) {
-        // Saltar productos comunes (no están en inventario)
+      // Guardar la factura en localStorage para mostrar modal en InvoicesMenu
+      localStorage.setItem('lastCreatedInvoice', JSON.stringify(invoice));
+
+      // Marcar que debe proceder sin mostrar alerta
+      shouldProceedRef.current = true;
+
+      // ✅ REDIRIGIR INMEDIATAMENTE
+      navigate('/sistema/facturacion');
+
+      // ✅ PROCESAR EN SEGUNDO PLANO
+      processInvoiceInventory(invoice, items, invoiceStatus, taskId);
+
+    } catch (error) {
+      console.error('Error creating invoice:', error);
+      toast.error('Error al crear la factura');
+      setIsSubmitting(false);
+    }
+  };
+
+  // Función para procesar inventario en segundo plano
+  const processInvoiceInventory = async (
+    invoice: any,
+    invoiceItems: InvoiceItem[],
+    status: string,
+    taskId: string
+  ) => {
+    try {
+      updateTask(taskId, { status: 'processing', progress: 10 });
+
+      // Agrupar items por productId
+      const productGroups = new Map<string, typeof invoiceItems>();
+
+      for (const item of invoiceItems) {
         if (item.productId.startsWith('common-')) continue;
 
         if (!productGroups.has(item.productId)) {
@@ -463,53 +495,61 @@ export function RegularInvoice() {
         productGroups.get(item.productId)!.push(item);
       }
 
-      // Procesar cada grupo de productos
+      updateTask(taskId, { progress: 30 });
+
+      // Obtener productos
+      const { supabase, getCurrentCompany } = await import('../lib/supabase');
+      const company = getCurrentCompany();
+      const productIds = Array.from(productGroups.keys());
+
+      const { data: allProducts, error: fetchError } = await supabase
+        .from('products')
+        .select('id, stock, registered_ids')
+        .in('id', productIds)
+        .eq('company', company);
+
+      if (fetchError || !allProducts) {
+        throw new Error('Error al obtener información de productos');
+      }
+
+      updateTask(taskId, { progress: 50 });
+
+      const productsMap = new Map(allProducts.map(p => [p.id, p]));
+
+      // Preparar actualizaciones
+      const productUpdates = [];
+      const allMovements = [];
+
       for (const [productId, groupItems] of productGroups) {
-        // ✅ OBTENER STOCK ACTUALIZADO desde BD (no del estado local)
-        const { supabase, getCurrentCompany } = await import('../lib/supabase');
-        const company = getCurrentCompany();
-        const { data: currentProduct, error } = await supabase
-          .from('products')
-          .select('stock, registered_ids')
-          .eq('id', productId)
-          .eq('company', company)
-          .single();
+        const currentProduct = productsMap.get(productId);
+        if (!currentProduct) continue;
 
-        if (error || !currentProduct) {
-          console.error('Error al obtener stock actualizado:', error);
-          continue;
-        }
-
-        // Sumar cantidades totales para este producto
         const totalQuantity = groupItems.reduce((sum, item) => sum + item.quantity, 0);
         const newStock = currentProduct.stock - totalQuantity;
         let newRegisteredIds = currentProduct.registered_ids;
 
-        // Procesar unit_ids de todos los items de este producto
         for (const item of groupItems) {
           if (item.useUnitIds && item.unitIds && item.unitIds.length > 0) {
-            if (invoiceStatus === 'paid') {
-              // Si está paga: MARCAR como vendidas (no eliminar, para poder restaurar en devoluciones)
+            if (status === 'paid') {
               const { markIdsAsSold } = await import('../lib/unit-ids-utils');
               newRegisteredIds = markIdsAsSold(newRegisteredIds, item.unitIds);
             } else {
-              // Si está en confirmación: INHABILITAR las IDs temporalmente
               const { disableIds } = await import('../lib/unit-ids-utils');
               newRegisteredIds = disableIds(newRegisteredIds, item.unitIds, invoice.id);
             }
           }
         }
 
-        // Actualizar producto una sola vez con el stock total descontado
-        await updateProduct(productId, {
+        productUpdates.push({
+          id: productId,
           stock: newStock,
-          registered_ids: newRegisteredIds
+          registered_ids: newRegisteredIds,
+          company: company
         });
 
-        // Registrar movimiento solo si está paga
-        if (invoiceStatus === 'paid') {
+        if (status === 'paid') {
           for (const item of groupItems) {
-            await addMovement({
+            allMovements.push({
               type: 'exit',
               product_id: item.productId,
               product_name: item.productName,
@@ -517,31 +557,66 @@ export function RegularInvoice() {
               reason: `Venta regular - Factura ${invoice.number}`,
               reference: invoice.number,
               user_name: getCurrentUser()?.username || 'Usuario',
-              unit_ids: item.useUnitIds ? item.unitIds : []
+              unit_ids: item.useUnitIds ? item.unitIds : [],
+              date: new Date().toISOString(),
+              company: company
             });
           }
         }
       }
 
+      updateTask(taskId, { progress: 70 });
+
+      // Actualizar productos
+      if (productUpdates.length > 0) {
+        const updatePromises = productUpdates.map(update =>
+          supabase
+            .from('products')
+            .update({
+              stock: update.stock,
+              registered_ids: update.registered_ids
+            })
+            .eq('id', update.id)
+            .eq('company', update.company)
+        );
+
+        const results = await Promise.all(updatePromises);
+        const errors = results.filter(result => result.error);
+        if (errors.length > 0) {
+          throw new Error('Error al actualizar inventario');
+        }
+      }
+
+      updateTask(taskId, { progress: 90 });
+
+      // Insertar movimientos
+      if (allMovements.length > 0) {
+        await supabase
+          .from('movements')
+          .insert(allMovements);
+      }
+
+      updateTask(taskId, {
+        status: 'completed',
+        progress: 100,
+        message: `Factura #${invoice.number} procesada exitosamente`
+      });
+
       toast.success(
-        invoiceStatus === 'paid'
-          ? 'Factura creada y pagada exitosamente'
-          : 'Factura creada - Pendiente de confirmación de pago'
+        status === 'paid'
+          ? `Factura #${invoice.number} creada y pagada`
+          : `Factura #${invoice.number} creada - Pendiente de confirmación`
       );
 
-      // Guardar la factura en localStorage para mostrar modal en InvoicesMenu
-      localStorage.setItem('lastCreatedInvoice', JSON.stringify(invoice));
-
-      // Marcar que debe proceder sin mostrar alerta
-      shouldProceedRef.current = true;
-
-      // Navegar (el blocker procederá automáticamente)
-      navigate('/sistema/facturacion');
     } catch (error) {
-      console.error('Error creating invoice:', error);
-      toast.error('Error al crear la factura');
-    } finally {
-      setIsSubmitting(false);
+      console.error('Error processing inventory:', error);
+      updateTask(taskId, {
+        status: 'error',
+        progress: 0,
+        message: `Error procesando factura #${invoice.number}`,
+        error: error instanceof Error ? error.message : 'Error desconocido'
+      });
+      toast.error(`Error procesando factura #${invoice.number}`);
     }
   };
 
@@ -1290,7 +1365,7 @@ export function RegularInvoice() {
                                       {item.unitIds.map((id) => {
                                         const note = item.unitIdNotes?.[id] || '';
                                         return (
-                                          <div key={id} className="flex items-center gap-2">
+                                          <div key={`${index}-${id}`} className="flex items-center gap-2">
                                             <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400 rounded text-xs font-mono">
                                               {id}
                                             </span>
@@ -1722,7 +1797,7 @@ export function RegularInvoice() {
                             {item.unitIds.map((id) => {
                               const note = item.unitIdNotes?.[id] || '';
                               return (
-                                <div key={id} className="flex items-center gap-2 text-xs">
+                                <div key={`preview-${index}-${id}`} className="flex items-center gap-2 text-xs">
                                   <span className="px-2 py-0.5 bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-400 rounded font-mono">
                                     {id}
                                   </span>

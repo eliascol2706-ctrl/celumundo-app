@@ -17,18 +17,27 @@ import {
   CheckCircle,
   ChevronRight,
   PackageX,
+  Loader2,
+  FileText,
 } from "lucide-react";
+import { useTaskQueue } from "../contexts/TaskQueueContext";
 import {
   getMovements,
+  searchMovements,
   getAllProducts,
   addMovement,
   getCurrentUser,
   updateProduct,
   searchProductsForInvoice,
   supabase,
+  addMovementReceipt,
   type Movement,
   type Product,
+  type MovementReceipt,
 } from "../lib/supabase";
+import { MovementReceiptsModal } from "../components/MovementReceiptsModal";
+import { MovementCompletionModal } from "../components/MovementCompletionModal";
+import { MovementReceiptDetailsModal } from "../components/MovementReceiptDetailsModal";
 import { 
   extractIds, 
   generateMultipleUnitIds, 
@@ -85,6 +94,7 @@ interface MovementItem {
 }
 
 export default function Movements() {
+  const { addTask, updateTask } = useTaskQueue();
   const [movements, setMovements] = useState<Movement[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<"all" | "entry" | "exit">("all");
@@ -96,6 +106,13 @@ export default function Movements() {
   const printRef = useRef<HTMLDivElement>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 10;
+  const [isLoadingMovements, setIsLoadingMovements] = useState(false);
+
+  // Estados para modales de comprobantes
+  const [showReceiptsModal, setShowReceiptsModal] = useState(false);
+  const [showCompletionModal, setShowCompletionModal] = useState(false);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [currentReceipt, setCurrentReceipt] = useState<MovementReceipt | null>(null);
 
   // Estados para impresión de etiquetas
   const [labelDialogOpen, setLabelDialogOpen] = useState(false);
@@ -149,6 +166,22 @@ export default function Movements() {
     loadMovements();
   }, []);
 
+  // Efecto para búsqueda dinámica en base de datos con debounce
+  useEffect(() => {
+    // Debounce: esperar 500ms después de que el usuario deje de escribir
+    const timeoutId = setTimeout(async () => {
+      setIsLoadingMovements(true);
+      try {
+        const data = await searchMovements(searchTerm, filterType);
+        setMovements(data);
+      } finally {
+        setIsLoadingMovements(false);
+      }
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [searchTerm, filterType]);
+
   const openResetDialog = async () => {
     setResetStep("select");
     setResetExclusions(new Set());
@@ -176,13 +209,13 @@ export default function Movements() {
   };
 
   const loadMovements = async () => {
-    const data = await getMovements();
-    setMovements(
-      data.sort(
-        (a, b) =>
-          new Date(b.date).getTime() - new Date(a.date).getTime(),
-      ),
-    );
+    setIsLoadingMovements(true);
+    try {
+      const data = await searchMovements(searchTerm, filterType);
+      setMovements(data);
+    } finally {
+      setIsLoadingMovements(false);
+    }
   };
 
   const loadProducts = async (searchTerm: string) => {
@@ -236,21 +269,8 @@ export default function Movements() {
     toast.success(`Producto seleccionado: ${product.name}`);
   };
 
-  const filteredMovements = movements.filter((movement) => {
-    const matchesSearch =
-      movement.product_name
-        .toLowerCase()
-        .includes(searchTerm.toLowerCase()) ||
-      movement.reference
-        .toLowerCase()
-        .includes(searchTerm.toLowerCase()) ||
-      movement.reason.toLowerCase().includes(searchTerm.toLowerCase());
-
-    const matchesType =
-      filterType === "all" || movement.type === filterType;
-
-    return matchesSearch && matchesType;
-  });
+  // Los movimientos ya vienen filtrados desde la base de datos
+  const filteredMovements = movements;
 
   // Paginación
   const totalPages = Math.ceil(filteredMovements.length / itemsPerPage);
@@ -296,19 +316,33 @@ export default function Movements() {
     const product = selectedProduct;
     const quantity = parseInt(formData.quantity) || 1;
 
-    // Verificar que no se agregue el mismo producto dos veces
-    if (movementItems.some((item) => item.productId === formData.productId)) {
-      toast.error("Este producto ya está agregado");
-      return;
-    }
-
     // Si es salida y el producto usa IDs, verificar que hay suficientes IDs disponibles
     if (formData.type === "exit" && product.use_unit_ids) {
       const availableIds = product.registered_ids || [];
-      if (availableIds.length < quantity) {
-        toast.error(`Solo hay ${availableIds.length} unidades con ID registradas disponibles`);
+      // Calcular cuántas IDs ya están siendo usadas en otros items del mismo producto
+      const usedIds = movementItems
+        .filter(item => item.productId === formData.productId)
+        .reduce((total, item) => total + item.unitIds.length, 0);
+
+      const remainingIds = availableIds.length - usedIds;
+
+      if (remainingIds < quantity) {
+        toast.error(`Solo hay ${remainingIds} unidades con ID disponibles (${usedIds} ya seleccionadas en este movimiento)`);
         return;
       }
+    }
+
+    // Para salidas con IDs, calcular IDs disponibles excluyendo las ya seleccionadas
+    let availableIdsForThisItem = product.use_unit_ids ? extractIds(product.registered_ids || []) : undefined;
+
+    if (formData.type === "exit" && product.use_unit_ids) {
+      // Obtener todas las IDs ya seleccionadas en items anteriores del mismo producto
+      const usedIdsInOtherItems = movementItems
+        .filter(item => item.productId === formData.productId)
+        .flatMap(item => item.unitIds);
+
+      // Filtrar para mostrar solo IDs disponibles
+      availableIdsForThisItem = availableIdsForThisItem!.filter(id => !usedIdsInOtherItems.includes(id));
     }
 
     const newItem: MovementItem = {
@@ -321,7 +355,7 @@ export default function Movements() {
       useUnitIds: product.use_unit_ids,
       unitIds: [],
       unitIdNotes: {},
-      availableIds: product.use_unit_ids ? extractIds(product.registered_ids || []) : undefined,
+      availableIds: availableIdsForThisItem,
     };
 
     // Si es entrada y usa IDs, generar IDs automáticamente
@@ -469,6 +503,7 @@ export default function Movements() {
     try {
       if (movementItems.length === 0) {
         toast.error("Agrega al menos un producto");
+        setIsSubmitting(false);
         return;
       }
 
@@ -476,109 +511,36 @@ export default function Movements() {
       for (const item of movementItems) {
         if (formData.type === "exit" && item.useUnitIds && item.unitIds.length === 0) {
           toast.error(`Debes seleccionar las IDs para ${item.productName}`);
+          setIsSubmitting(false);
           return;
         }
       }
+
       const user = getCurrentUser();
       const reference =
         formData.reference || `${formData.type.toUpperCase()}-${Date.now()}`;
-      const processedItems: any[] = [];
 
-      for (const item of movementItems) {
-        // Obtener el producto actualizado directamente de la base de datos
-        const { data: productData, error: productError } = await supabase
-          .from('products')
-          .select('*')
-          .eq('id', item.productId)
-          .single();
+      // Cerrar modal inmediatamente
+      setIsDialogOpen(false);
 
-        if (productError || !productData) {
-          toast.error(`Error al obtener el producto ${item.productName}`);
-          continue;
-        }
+      // Crear tarea en cola
+      const taskId = addTask({
+        type: 'movement',
+        message: `Procesando ${formData.type === 'entry' ? 'entrada' : 'salida'} ${reference}...`,
+        data: { reference, type: formData.type }
+      });
 
-        const product = productData as Product;
-
-        const newStock =
-          formData.type === "entry"
-            ? product.stock + item.quantity
-            : product.stock - item.quantity;
-
-        if (formData.type !== "entry" && newStock < 0) {
-          toast.error(`Stock insuficiente para ${product.name}`);
-          return;
-        }
-
-        // Preparar actualizaciones del producto
-        const updates: any = { stock: newStock };
-
-        // Actualizar IDs registradas
-        if (item.useUnitIds) {
-          let updatedIds = [...(product.registered_ids || [])];
-
-          if (formData.type === "entry") {
-            // Agregar nuevas IDs con sus notas
-            const newIdsWithNotes = item.unitIds.map(id => ({
-              id,
-              note: item.unitIdNotes?.[id] || ''
-            }));
-            updatedIds = [...updatedIds, ...newIdsWithNotes];
-          } else {
-            // Remover IDs vendidas/salidas
-            updatedIds = updatedIds.filter(idObj => !item.unitIds.includes(idObj.id));
-          }
-
-          updates.registered_ids = updatedIds;
-        }
-
-        // Si hay nuevo costo, actualizarlo (solo en entradas)
-        if (formData.type === "entry" && item.newCost !== undefined) {
-          updates.old_cost = product.current_cost;
-          updates.current_cost = item.newCost;
-        }
-
-        await updateProduct(product.id, updates);
-
-        // Registrar movimiento con IDs
-        await addMovement({
-          type: formData.type,
-          product_id: item.productId,
-          product_name: item.productName,
-          quantity: item.quantity,
-          reason: formData.reason,
-          reference: reference,
-          user_name: user?.username || "Usuario",
-          unit_ids: item.unitIds
-        });
-
-        processedItems.push({
-          ...item,
-          finalCost:
-            formData.type === "entry" && item.newCost !== undefined
-              ? item.newCost
-              : item.currentCost,
-        });
-      }
-
-      // Preparar datos para el recibo
-      const receipt = {
-        type: formData.type,
-        reference: reference,
-        reason: formData.reason,
-        items: processedItems,
-        date: new Date().toLocaleString("es-ES"),
-        user: user?.username || "Usuario",
-      };
-
-      setCompletedMovement(receipt);
-      setReceiptDialogOpen(true);
-
-      toast.success(
-        `${formData.type === "entry" ? "Entrada" : "Salida"} registrada correctamente`,
+      // Procesar en segundo plano
+      processMovementInBackground(
+        taskId,
+        movementItems,
+        formData.type,
+        formData.reason,
+        reference,
+        user?.username || "Usuario"
       );
 
       // Resetear formulario
-      setIsDialogOpen(false);
       setMovementItems([]);
       setFormData({
         type: "entry",
@@ -591,17 +553,474 @@ export default function Movements() {
       setProductSearchTerm("");
       setProductSortFilter("price-desc");
       setSelectedProduct(null);
+      setIsSubmitting(false);
 
-      loadMovements();
     } catch (error) {
+      toast.error("Error al iniciar el procesamiento del movimiento");
+      setIsSubmitting(false);
+    }
+  };
+
+  // Procesar movimiento en segundo plano
+  const processMovementInBackground = async (
+    taskId: string,
+    items: MovementItem[],
+    type: "entry" | "exit",
+    reason: string,
+    reference: string,
+    userName: string
+  ) => {
+    try {
+      updateTask(taskId, { status: 'processing', progress: 10 });
+
+      const processedItems: any[] = [];
+
+      // Agrupar items por producto para procesar correctamente las cantidades
+      const itemsByProduct = new Map<string, typeof items>();
+      items.forEach(item => {
+        const existing = itemsByProduct.get(item.productId) || [];
+        itemsByProduct.set(item.productId, [...existing, item]);
+      });
+
+      updateTask(taskId, { progress: 30 });
+
+      // Procesar cada grupo de productos
+      for (const [productId, groupItems] of itemsByProduct.entries()) {
+        // Obtener el producto actualizado directamente de la base de datos
+        const { data: productData, error: productError } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', productId)
+          .single();
+
+        if (productError || !productData) {
+          throw new Error(`Error al obtener el producto ${groupItems[0].productName}`);
+        }
+
+        const product = productData as Product;
+
+        // Sumar todas las cantidades de este producto
+        const totalQuantity = groupItems.reduce((sum, item) => sum + item.quantity, 0);
+
+        const newStock =
+          type === "entry"
+            ? product.stock + totalQuantity
+            : product.stock - totalQuantity;
+
+        if (type !== "entry" && newStock < 0) {
+          throw new Error(`Stock insuficiente para ${product.name}`);
+        }
+
+        // Preparar actualizaciones del producto
+        const updates: any = { stock: newStock };
+
+        // Actualizar IDs registradas (combinar todas las IDs de todos los items)
+        const firstItem = groupItems[0];
+        if (firstItem.useUnitIds) {
+          let updatedIds = [...(product.registered_ids || [])];
+
+          if (type === "entry") {
+            // Agregar todas las nuevas IDs con sus notas de todos los items
+            groupItems.forEach(item => {
+              const newIdsWithNotes = item.unitIds.map(id => ({
+                id,
+                note: item.unitIdNotes?.[id] || ''
+              }));
+              updatedIds = [...updatedIds, ...newIdsWithNotes];
+            });
+          } else {
+            // Remover todas las IDs vendidas/salidas de todos los items
+            const allIdsToRemove = groupItems.flatMap(item => item.unitIds);
+            updatedIds = updatedIds.filter(idObj => !allIdsToRemove.includes(idObj.id));
+          }
+
+          updates.registered_ids = updatedIds;
+        }
+
+        // Si hay nuevo costo, usar el del primer item (solo en entradas)
+        if (type === "entry" && firstItem.newCost !== undefined) {
+          updates.old_cost = product.current_cost;
+          updates.current_cost = firstItem.newCost;
+        }
+
+        await updateProduct(product.id, updates);
+
+        // Registrar cada movimiento individualmente (para mantener historial detallado)
+        for (const item of groupItems) {
+          await addMovement({
+            type: type,
+            product_id: item.productId,
+            product_name: item.productName,
+            quantity: item.quantity,
+            reason: reason,
+            reference: reference,
+            user_name: userName,
+            unit_ids: item.unitIds
+          });
+
+          processedItems.push({
+            productId: item.productId,
+            productCode: item.productCode,
+            productName: item.productName,
+            quantity: item.quantity,
+            currentCost: item.currentCost,
+            newCost: item.newCost,
+            finalCost: type === "entry" && item.newCost !== undefined
+                ? item.newCost
+                : item.currentCost,
+            unitIds: item.unitIds,
+            unitIdNotes: item.unitIdNotes
+          });
+        }
+      }
+
+      updateTask(taskId, { progress: 70 });
+
+      // Calcular totales
+      const totalUnits = processedItems.reduce((sum, item) => sum + item.quantity, 0);
+      const totalProducts = processedItems.length;
+      const totalCost = processedItems.reduce((sum, item) => sum + (item.finalCost * item.quantity), 0);
+
+      // Guardar comprobante en la base de datos
+      const receiptData: Omit<MovementReceipt, 'id' | 'company' | 'created_at' | 'updated_at'> = {
+        type: type,
+        reference: reference,
+        reason: reason,
+        date: new Date().toISOString(),
+        user_name: userName,
+        items: processedItems,
+        total_units: totalUnits,
+        total_products: totalProducts,
+        total_cost: totalCost
+      };
+
+      const savedReceipt = await addMovementReceipt(receiptData);
+
+      if (!savedReceipt) {
+        throw new Error('Error al guardar el comprobante');
+      }
+
+      updateTask(taskId, { progress: 90 });
+
+      // Actualizar lista de movimientos
+      loadMovements();
+
+      updateTask(taskId, {
+        status: 'completed',
+        progress: 100,
+        message: `${type === 'entry' ? 'Entrada' : 'Salida'} ${reference} procesada exitosamente`
+      });
+
+      // Mostrar modal de finalización
+      setCurrentReceipt(savedReceipt);
+      setShowCompletionModal(true);
+
+      toast.success(
+        `${type === "entry" ? "Entrada" : "Salida"} registrada correctamente`,
+      );
+
+    } catch (error) {
+      console.error('Error processing movement:', error);
+      updateTask(taskId, {
+        status: 'error',
+        progress: 0,
+        message: `Error procesando ${type === 'entry' ? 'entrada' : 'salida'} ${reference}`,
+        error: error instanceof Error ? error.message : 'Error desconocido'
+      });
       toast.error(
         error instanceof Error
           ? error.message
           : "Error al registrar movimiento",
       );
-    } finally {
-      setIsSubmitting(false);
     }
+  };
+
+  // Funciones para imprimir y descargar PDFs de comprobantes
+  const handlePrintReceiptPDF = async (receipt: MovementReceipt) => {
+    if (!isPrintingAvailable()) {
+      toast.error('La impresión solo está disponible en la aplicación de escritorio');
+      return;
+    }
+
+    try {
+      const config = await getPrinterConfig();
+
+      if (!config.pdf) {
+        toast.error('No se ha configurado una impresora PDF. Ve a Configuración para configurarla.');
+        return;
+      }
+
+      const html = generateReceiptHTML(receipt);
+      const success = await printDirect(config.pdf, html, 'pdf');
+
+      if (!success) {
+        throw new Error('Error al enviar el documento a la impresora');
+      }
+
+      toast.success('Comprobante enviado a la impresora');
+    } catch (error: any) {
+      console.error('Error al imprimir:', error);
+      toast.error(error.message || 'Error al imprimir el comprobante');
+    }
+  };
+
+  const handleDownloadReceiptPDF = (receipt: MovementReceipt) => {
+    try {
+      const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+      const pageW = doc.internal.pageSize.getWidth();
+      const isEntry = receipt.type === "entry";
+      const tipoLabel = isEntry ? "ENTRADA" : "SALIDA";
+
+      // Encabezado
+      doc.setFillColor(15, 15, 15);
+      doc.rect(0, 0, pageW, 30, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text("CELUMUNDO VIP", pageW / 2, 11, { align: "center" });
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "normal");
+      doc.text(`COMPROBANTE DE ${tipoLabel}`, pageW / 2, 18, { align: "center" });
+      doc.setFontSize(7.5);
+      doc.text(`Generado: ${new Date().toLocaleString("es-CO")}`, pageW / 2, 25, { align: "center" });
+
+      // Información del movimiento
+      doc.setTextColor(0, 0, 0);
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.text("DATOS DEL MOVIMIENTO", 14, 40);
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.3);
+      doc.line(14, 41.5, pageW - 14, 41.5);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor(60, 60, 60);
+      const infoItems = [
+        ["Referencia", receipt.reference],
+        ["Fecha", new Date(receipt.date).toLocaleString("es-ES")],
+        ["Usuario", receipt.user_name],
+        ["Motivo", receipt.reason],
+      ];
+      infoItems.forEach(([label, value], i) => {
+        const x = i % 2 === 0 ? 14 : pageW / 2 + 4;
+        const y = 49 + Math.floor(i / 2) * 7;
+        doc.setFont("helvetica", "bold");
+        doc.setTextColor(0, 0, 0);
+        doc.text(`${label}:`, x, y);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(60, 60, 60);
+        doc.text(String(value ?? "—"), x + 22, y);
+      });
+
+      // Tabla de productos
+      const rows = receipt.items.map((item: any) => {
+        const ids = item.unitIds && item.unitIds.length > 0
+          ? item.unitIds.join(", ")
+          : "";
+        return [
+          item.productCode || "—",
+          item.productName + (ids ? `\nIDs: ${ids}` : ""),
+          item.quantity.toString(),
+          formatCOP(item.finalCost),
+          formatCOP(item.finalCost * item.quantity),
+        ];
+      });
+
+      autoTable(doc, {
+        startY: 67,
+        head: [[
+          "Código",
+          "Nombre del Producto",
+          isEntry ? "Cant. Ingresada" : "Cant. Descargada",
+          "Costo Unitario",
+          "Costo Total",
+        ]],
+        body: rows,
+        styles: {
+          fontSize: 8,
+          cellPadding: 3,
+          textColor: [0, 0, 0],
+          lineColor: [200, 200, 200],
+          lineWidth: 0.15,
+        },
+        headStyles: {
+          fillColor: [15, 15, 15],
+          textColor: [255, 255, 255],
+          fontStyle: "bold",
+          fontSize: 8.5,
+          halign: "center",
+        },
+        alternateRowStyles: { fillColor: [247, 247, 247] },
+        columnStyles: {
+          0: { cellWidth: 28, halign: "center" },
+          1: { cellWidth: "auto" },
+          2: { cellWidth: 26, halign: "center" },
+          3: { cellWidth: 32, halign: "right" },
+          4: { cellWidth: 32, halign: "right" },
+        },
+        margin: { left: 14, right: 14 },
+      });
+
+      // Totales
+      const finalY: number = (doc as any).lastAutoTable.finalY + 6;
+      doc.setDrawColor(0, 0, 0);
+      doc.setLineWidth(0.4);
+      doc.line(14, finalY, pageW - 14, finalY);
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.setTextColor(0, 0, 0);
+      doc.text(`Total de productos distintos: ${receipt.total_products}`, 14, finalY + 7);
+      doc.text(`Total de unidades ${isEntry ? "ingresadas" : "descargadas"}: ${receipt.total_units}`, 14, finalY + 14);
+      doc.text(`Costo total del inventario movido: ${formatCOP(receipt.total_cost)}`, 14, finalY + 21);
+
+      doc.save(`Comprobante-${tipoLabel}-${receipt.reference}.pdf`);
+      toast.success("Comprobante descargado como PDF");
+    } catch (error) {
+      console.error('Error downloading PDF:', error);
+      toast.error('Error al descargar el PDF');
+    }
+  };
+
+  const generateReceiptHTML = (receipt: MovementReceipt): string => {
+    const itemsHTML = receipt.items.map((item: any) => {
+      const idsHTML = item.unitIds && item.unitIds.length > 0
+        ? `<div style="margin-top: 8px;">
+            <p style="font-size: 9pt; font-weight: bold; color: #2563eb; margin-bottom: 4px;">
+              IDs de las Unidades:
+            </p>
+            <div style="display: flex; flex-wrap: wrap; gap: 4px;">
+              ${item.unitIds.map((id: string) => `
+                <span style="display: inline-block; padding: 2px 8px; background-color: #dbeafe; color: #1e40af; border-radius: 4px; font-size: 8pt; font-family: monospace;">
+                  ${id}
+                </span>
+              `).join('')}
+            </div>
+          </div>`
+        : '';
+
+      return `
+        <div style="background-color: #f3f4f6; padding: 12px; border-radius: 4px; margin-bottom: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+            <div style="flex: 1;">
+              <p style="font-weight: 500; margin-bottom: 4px;">
+                ${item.productCode} - ${item.productName}
+              </p>
+              <p style="font-size: 10pt; color: #6b7280;">
+                Cantidad: ${item.quantity} | Costo: COP ${formatCOP(item.finalCost)}
+              </p>
+              ${idsHTML}
+            </div>
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    return `
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            @page {
+              size: A4;
+              margin: 20mm;
+            }
+            * {
+              -webkit-print-color-adjust: exact;
+              print-color-adjust: exact;
+            }
+            body {
+              font-family: 'Arial', 'Helvetica', sans-serif;
+              margin: 0;
+              padding: 0;
+              color: #333;
+            }
+            .container {
+              max-width: 700px;
+              margin: 0 auto;
+              border: 1px solid #ddd;
+              border-radius: 8px;
+              padding: 30px;
+            }
+            .header {
+              text-align: center;
+              margin-bottom: 30px;
+            }
+            .title {
+              font-size: 24pt;
+              font-weight: bold;
+              margin-bottom: 10px;
+            }
+            .subtitle {
+              font-size: 16pt;
+              font-weight: 600;
+              color: #666;
+            }
+            .info-section {
+              margin-bottom: 24px;
+            }
+            .info-row {
+              display: flex;
+              justify-content: space-between;
+              margin-bottom: 8px;
+              padding-bottom: 8px;
+              border-bottom: 1px solid #e5e7eb;
+            }
+            .info-label {
+              font-weight: 500;
+            }
+            .info-value {
+              font-family: monospace;
+            }
+            .products-section {
+              border-top: 2px solid #ddd;
+              padding-top: 20px;
+            }
+            .products-title {
+              font-weight: 600;
+              font-size: 14pt;
+              margin-bottom: 16px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <div class="title">CELUMUNDO VIP</div>
+              <div class="subtitle">
+                COMPROBANTE DE ${receipt.type === "entry" ? "ENTRADA" : "SALIDA"}
+              </div>
+            </div>
+
+            <div class="info-section">
+              <div class="info-row">
+                <span class="info-label">Referencia:</span>
+                <span class="info-value">${receipt.reference}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Fecha:</span>
+                <span>${new Date(receipt.date).toLocaleString("es-ES")}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Usuario:</span>
+                <span>${receipt.user_name}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">Motivo:</span>
+                <span>${receipt.reason}</span>
+              </div>
+            </div>
+
+            <div class="products-section">
+              <div class="products-title">Productos</div>
+              ${itemsHTML}
+            </div>
+          </div>
+        </body>
+      </html>
+    `;
   };
 
   const handlePrint = async () => {
@@ -1751,15 +2170,24 @@ export default function Movements() {
             Control de entradas y salidas con IDs únicas
           </p>
         </div>
-        <Button onClick={() => {
-          setIsDialogOpen(true);
-          setProductSearchTerm("");
-          setProductSortFilter("price-desc");
-          setSelectedProduct(null);
-        }}>
-          <Plus className="h-4 w-4 mr-2" />
-          Nuevo Movimiento
-        </Button>
+        <div className="flex gap-2">
+          <Button
+            variant="outline"
+            onClick={() => setShowReceiptsModal(true)}
+          >
+            <FileText className="h-4 w-4 mr-2" />
+            Registro de Ingresos y Salidas
+          </Button>
+          <Button onClick={() => {
+            setIsDialogOpen(true);
+            setProductSearchTerm("");
+            setProductSortFilter("price-desc");
+            setSelectedProduct(null);
+          }}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nuevo Movimiento
+          </Button>
+        </div>
       </div>
 
       {/* Estadísticas */}
@@ -1830,11 +2258,14 @@ export default function Movements() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
                 type="text"
-                placeholder="Buscar por producto, referencia o motivo..."
+                placeholder="Buscar en toda la base de datos por producto, fecha, referencia o motivo..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                className="pl-10 pr-10"
               />
+              {isLoadingMovements && (
+                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 animate-spin" />
+              )}
             </div>
             <div className="flex items-center gap-2">
               <Filter className="h-4 w-4 text-gray-400" />
@@ -1859,8 +2290,11 @@ export default function Movements() {
       {/* Lista de movimientos */}
       <Card>
         <CardHeader>
-          <CardTitle>
+          <CardTitle className="flex items-center gap-2">
             Historial de Movimientos ({filteredMovements.length})
+            {isLoadingMovements && (
+              <Loader2 className="h-4 w-4 animate-spin text-gray-400" />
+            )}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -3400,6 +3834,40 @@ export default function Movements() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Modal de registro de ingresos y salidas */}
+      <MovementReceiptsModal
+        open={showReceiptsModal}
+        onOpenChange={setShowReceiptsModal}
+        onViewReceipt={(receipt) => {
+          setCurrentReceipt(receipt);
+          setShowDetailsModal(true);
+        }}
+        onPrintReceipt={handlePrintReceiptPDF}
+        onDownloadReceipt={handleDownloadReceiptPDF}
+      />
+
+      {/* Modal de finalización de movimiento */}
+      <MovementCompletionModal
+        open={showCompletionModal}
+        onOpenChange={setShowCompletionModal}
+        receipt={currentReceipt}
+        onPrint={() => currentReceipt && handlePrintReceiptPDF(currentReceipt)}
+        onDownload={() => currentReceipt && handleDownloadReceiptPDF(currentReceipt)}
+        onViewDetails={() => {
+          setShowCompletionModal(false);
+          setShowDetailsModal(true);
+        }}
+      />
+
+      {/* Modal de detalles del comprobante */}
+      <MovementReceiptDetailsModal
+        open={showDetailsModal}
+        onOpenChange={setShowDetailsModal}
+        receipt={currentReceipt}
+        onPrint={() => currentReceipt && handlePrintReceiptPDF(currentReceipt)}
+        onDownload={() => currentReceipt && handleDownloadReceiptPDF(currentReceipt)}
+      />
     </div>
   );
 }

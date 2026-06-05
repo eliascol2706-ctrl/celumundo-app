@@ -13,11 +13,13 @@ import {
   getCustomers,
   getWarranties,
   getCreditNotes,
+  getDailyClosures,
   type CreditPayment,
   type Return,
   type Exchange,
   type Warranty,
-  type CreditNote
+  type CreditNote,
+  type DailyClosure
 } from '../lib/supabase';
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
@@ -138,6 +140,7 @@ export function FinancialManagement() {
   const [creditPayments, setCreditPayments] = useState<CreditPayment[]>([]);
   const [allCreditPayments, setAllCreditPayments] = useState<CreditPayment[]>([]); // Todos los abonos
   const [creditNotes, setCreditNotes] = useState<CreditNote[]>([]);
+  const [dailyClosures, setDailyClosures] = useState<DailyClosure[]>([]);
 
   // Estado para tabs y collapsibles
   const [activeTab, setActiveTab] = useState('tendencias');
@@ -257,7 +260,7 @@ export function FinancialManagement() {
 
   const loadData = async () => {
     setIsLoading(true);
-    const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData, warrantiesData, paymentsData, creditNotesData] = await Promise.all([
+    const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData, warrantiesData, paymentsData, creditNotesData, dailyClosuresData] = await Promise.all([
       getInvoices(),
       getReturns(),
       getExchanges(),
@@ -266,7 +269,8 @@ export function FinancialManagement() {
       getCustomers(),
       getWarranties(),
       getCreditPayments(),
-      getCreditNotes()
+      getCreditNotes(),
+      getDailyClosures()
     ]);
     setInvoices(invoicesData);
     setReturns(returnsData);
@@ -277,6 +281,7 @@ export function FinancialManagement() {
     setWarranties(warrantiesData);
     setAllCreditPayments(paymentsData);
     setCreditNotes(creditNotesData);
+    setDailyClosures(dailyClosuresData);
     setIsLoading(false);
   };
 
@@ -358,6 +363,17 @@ export function FinancialManagement() {
 
       const totalDevoluciones = monthReturns.reduce((sum, ret) => sum + ret.total, 0);
 
+      // Calcular costo de productos devueltos
+      let costoDevoluciones = 0;
+      monthReturns.forEach((ret) => {
+        ret.items.forEach((item) => {
+          const product = products.find((p) => p.id === item.productId);
+          if (product && product.current_cost) {
+            costoDevoluciones += product.current_cost * item.quantity;
+          }
+        });
+      });
+
       // Calcular impacto de cambios (suma de todos los price_difference, sean positivos o negativos)
       const impactoCambios = monthExchanges.reduce((sum, exchange) => {
         const diff = Number(exchange.price_difference) || 0;
@@ -379,14 +395,21 @@ export function FinancialManagement() {
       // Ajuste por notas crédito del mes
       const totalNotasCredito = monthCreditNotes.reduce((s, cn) => s + cn.total, 0);
 
-      // Ingresos del mes: regulares pagadas + créditos pagados − notas crédito
-      const ingresoNeto = facturasPagas + creditosPagados - totalNotasCredito;
+      // Ingresos del mes: regulares pagadas + créditos pagados − notas crédito − devoluciones
+      const ingresoNeto = facturasPagas + creditosPagados - totalNotasCredito - totalDevoluciones;
 
       // Ingresos por factura (referencia, no se usa en ganancias)
+      // Incluye: facturas en confirmación + crédito pendiente (considerando abonos)
       const totalFacturasEnConfirmacion = monthInvoices
-        .filter((inv) => inv.status === 'pending' || inv.status === 'pending_confirmation')
+        .filter((inv) => inv.status === 'pending_confirmation')
         .reduce((sum, inv) => sum + inv.total, 0);
-      const ingresosPorFactura = totalFacturasEnConfirmacion;
+
+      // Crédito pendiente del mes (usando credit_balance que ya considera abonos)
+      const creditoPendienteDelMes = monthInvoices
+        .filter((inv) => inv.status === 'pending' && inv.is_credit && inv.credit_balance > 0)
+        .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+
+      const ingresosPorFactura = totalFacturasEnConfirmacion + creditoPendienteDelMes;
 
       // Costos de Productos: mismas facturas que ingresoNeto (regulares + créditos pagados)
       const facturasParaCostos = monthInvoices.filter((inv) => {
@@ -427,7 +450,8 @@ export function FinancialManagement() {
           }
         });
       });
-      costosDeProductos = Math.max(0, costosDeProductos - costosNotasCredito);
+      // Restar también el costo de devoluciones
+      costosDeProductos = Math.max(0, costosDeProductos - costosNotasCredito - costoDevoluciones);
 
       const totalGastos = monthExpenses.reduce((sum, expense) => sum + expense.amount, 0);
 
@@ -449,6 +473,7 @@ export function FinancialManagement() {
         margen,
         totalCostos,
         totalDevoluciones,
+        costoDevoluciones,
         impactoCambios,
         facturasPagas,
         creditosPagados,
@@ -713,10 +738,27 @@ export function FinancialManagement() {
 
   // Calcular estadísticas de un día específico
   const getDailyStats = (date: string) => {
-    // Filtrar facturas REGULARES del día (excluir crédito para evitar doble contabilidad)
-    const dayInvoices = invoices.filter(inv => {
+    // Filtrar facturas del día (todas las pagas)
+    const dayInvoicesRegular = invoices.filter(inv => {
       const invDate = extractColombiaDate(inv.date);
       return invDate === date && (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit;
+    });
+
+    const dayInvoicesCredit = invoices.filter(inv => {
+      const invDate = extractColombiaDate(inv.date);
+      return invDate === date && (inv.status === 'paid' || inv.status === 'partial_return') && inv.is_credit;
+    });
+
+    // Filtrar devoluciones del día
+    const dayReturns = returns.filter(ret => {
+      const retDate = extractColombiaDate(ret.date);
+      return retDate === date;
+    });
+
+    // Filtrar notas crédito del día
+    const dayCreditNotes = creditNotes.filter(cn => {
+      const cnDate = extractColombiaDate(cn.date);
+      return cnDate === date && cn.status === 'issued';
     });
 
     // Filtrar gastos del día
@@ -733,11 +775,16 @@ export function FinancialManagement() {
     });
 
     // Calcular ingresos
-    const facturasPagas = dayInvoices.reduce((sum, inv) => sum + inv.total, 0);
+    const facturasPagas = dayInvoicesRegular.reduce((sum, inv) => sum + inv.total, 0);
+    const creditosPagados = dayInvoicesCredit.reduce((sum, inv) => sum + inv.total, 0);
     const impactoCambios = dayExchanges.reduce((sum, exchange) => {
       const diff = Number(exchange.price_difference) || 0;
       return sum + diff;
     }, 0);
+
+    // Calcular devoluciones y notas crédito
+    const totalDevoluciones = dayReturns.reduce((sum, ret) => sum + ret.total, 0);
+    const totalNotasCredito = dayCreditNotes.reduce((sum, cn) => sum + cn.total, 0);
 
     // NUEVO: Abonos a crédito del día - calcular ganancia proporcional
     const paymentsDelDia = allCreditPayments.filter((payment) => {
@@ -753,13 +800,13 @@ export function FinancialManagement() {
     // Mantener el total de abonos para referencia
     const abonosDelDia = paymentsDelDia.reduce((sum, payment) => sum + payment.amount, 0);
 
-    // MODIFICADO: Incluir MONTO COMPLETO de abonos
-    // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
-    const ingresosNetos = facturasPagas + abonosDelDia;
+    // INGRESOS NETOS: facturas pagas + créditos pagados - notas crédito - devoluciones
+    const ingresosNetos = facturasPagas + creditosPagados - totalNotasCredito - totalDevoluciones;
 
-    // Calcular costos de productos
+    // Calcular costos de productos (todas las facturas pagas)
     let costos = 0;
-    dayInvoices.forEach(invoice => {
+    const allDayInvoices = [...dayInvoicesRegular, ...dayInvoicesCredit];
+    allDayInvoices.forEach(invoice => {
       invoice.items.forEach(item => {
         const product = products.find(p => p.id === item.productId);
         if (product && product.current_cost) {
@@ -767,6 +814,32 @@ export function FinancialManagement() {
         }
       });
     });
+
+    // Restar costos de productos devueltos
+    let costoDevoluciones = 0;
+    dayReturns.forEach(ret => {
+      ret.items.forEach(item => {
+        const product = products.find(p => p.id === item.productId);
+        if (product && product.current_cost) {
+          costoDevoluciones += product.current_cost * item.quantity;
+        }
+      });
+    });
+
+    // Restar costos de productos en notas crédito
+    let costosNotasCredito = 0;
+    dayCreditNotes.forEach(cn => {
+      cn.items.forEach(item => {
+        if (item.productId.startsWith('common-')) return;
+        const product = products.find(p => p.id === item.productId);
+        if (product && product.current_cost) {
+          costosNotasCredito += product.current_cost * item.quantity;
+        }
+      });
+    });
+
+    // Aplicar las restas a los costos
+    costos = Math.max(0, costos - costoDevoluciones - costosNotasCredito);
 
     // Impacto de utilidad por cambios del día (profit_difference)
     const exchangeProfitImpact = dayExchanges.reduce((sum, ex) => sum + (Number(ex.profit_difference) || 0), 0);
@@ -778,7 +851,7 @@ export function FinancialManagement() {
     const ganancias = ingresosNetos - costos - gastos + exchangeProfitImpact;
 
     return {
-      invoices: dayInvoices,
+      invoices: allDayInvoices,
       ingresosNetos,
       gastos,
       costos,
@@ -786,7 +859,9 @@ export function FinancialManagement() {
       facturasPagas,
       impactoCambios,
       abonosDelDia,
-      gananciasDeAbonos
+      gananciasDeAbonos,
+      totalDevoluciones,
+      totalNotasCredito
     };
   };
 
@@ -958,59 +1033,102 @@ export function FinancialManagement() {
   const getChartData = () => {
     const stats = getStats();
 
-    // Data for tendencias (last 6 months)
+    // Data for tendencias (last 6 months) - basado en cierres diarios
     const last6Months = [];
     const today = new Date();
     for (let i = 5; i >= 0; i--) {
       const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
       const monthStr = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 
-      const monthInvoices = invoices.filter(inv => extractColombiaDate(inv.date).startsWith(monthStr));
-      const monthExpenses = expenses.filter(exp => extractColombiaDate(exp.date).startsWith(monthStr));
-      const monthExchanges = exchanges.filter(ex => ex.status !== 'pending' && extractColombiaDate(ex.date).startsWith(monthStr));
-
-      // IMPORTANTE: Solo contar facturas REGULARES pagadas (excluir crédito para evitar doble contabilidad)
-      const paidInvoices = monthInvoices.filter(inv => (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit);
-      const facturasPagas = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
-
-      // Calcular impacto de cambios del mes (suma de todos los price_difference)
-      const impactoCambios = monthExchanges.reduce((sum, exchange) => {
-        const diff = Number(exchange.price_difference) || 0;
-        return sum + diff;
-      }, 0);
-
-      // Calcular abonos del mes para el gráfico - usar monto completo
-      const paymentsDelMes = allCreditPayments.filter((payment) =>
-        extractColombiaDate(payment.date).startsWith(monthStr)
-      );
-
-      const abonosDelMes = paymentsDelMes.reduce((sum, payment) => sum + payment.amount, 0);
-
-      // NOTA: Ya NO sumamos impactoCambios porque está incluido en facturasPagas (invoice.total)
-      // Usamos monto completo de abonos
-      const ingresos = facturasPagas + abonosDelMes;
-
-      const gastos = monthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
-
-      // Calcular costos de productos vendidos en el mes
-      let costos = 0;
-      paidInvoices.forEach(invoice => {
-        invoice.items.forEach(item => {
-          const product = products.find(p => p.id === item.productId);
-          if (product && product.current_cost) {
-            costos += product.current_cost * item.quantity;
-          }
-        });
+      // Filtrar cierres diarios de este mes
+      const monthClosures = dailyClosures.filter(closure => {
+        const closureDate = extractColombiaDate(closure.date);
+        return closureDate.startsWith(monthStr);
       });
 
-      const monthExchangeProfitImpact = monthExchanges.reduce((sum, ex) => sum + (Number(ex.profit_difference) || 0), 0);
+      let ingresos = 0;
+      let gastos = 0;
+      let ganancias = 0;
+
+      if (monthClosures.length > 0) {
+        // Si existen cierres diarios para este mes, sumar sus valores
+        ingresos = monthClosures.reduce((sum, c) => sum + (c.total || 0), 0);
+        gastos = monthClosures.reduce((sum, c) => sum + (c.total_expenses || 0), 0);
+        // Usar profit_collected si existe, sino profit_generated
+        ganancias = monthClosures.reduce((sum, c) => sum + (c.profit_collected || c.profit_generated || 0), 0);
+      } else {
+        // Si no existe cierre, calcular desde las facturas (fallback)
+        const monthInvoices = invoices.filter(inv => extractColombiaDate(inv.date).startsWith(monthStr));
+        const monthExpenses = expenses.filter(exp => extractColombiaDate(exp.date).startsWith(monthStr));
+        const monthExchanges = exchanges.filter(ex => ex.status !== 'pending' && extractColombiaDate(ex.date).startsWith(monthStr));
+        const monthReturns = returns.filter(ret => extractColombiaDate(ret.date).startsWith(monthStr));
+        const monthCreditNotes = creditNotes.filter(cn => extractColombiaDate(cn.date).startsWith(monthStr) && cn.status === 'issued');
+
+        // IMPORTANTE: Solo contar facturas REGULARES pagadas (excluir crédito para evitar doble contabilidad)
+        const paidInvoices = monthInvoices.filter(inv => (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit);
+        const creditInvoices = monthInvoices.filter(inv => (inv.status === 'paid' || inv.status === 'partial_return') && inv.is_credit);
+
+        const facturasPagas = paidInvoices.reduce((sum, inv) => sum + inv.total, 0);
+        const creditosPagados = creditInvoices.reduce((sum, inv) => sum + inv.total, 0);
+
+        // Calcular devoluciones y notas crédito
+        const totalDevoluciones = monthReturns.reduce((sum, ret) => sum + ret.total, 0);
+        const totalNotasCredito = monthCreditNotes.reduce((sum, cn) => sum + cn.total, 0);
+
+        // INGRESOS: facturas pagas + créditos pagados - notas crédito - devoluciones
+        ingresos = facturasPagas + creditosPagados - totalNotasCredito - totalDevoluciones;
+
+        gastos = monthExpenses.reduce((sum, exp) => sum + exp.amount, 0);
+
+        // Calcular costos de productos vendidos en el mes (todas las facturas pagas, regulares y crédito)
+        let costos = 0;
+        const allPaidInvoices = [...paidInvoices, ...creditInvoices];
+        allPaidInvoices.forEach(invoice => {
+          invoice.items.forEach(item => {
+            const product = products.find(p => p.id === item.productId);
+            if (product && product.current_cost) {
+              costos += product.current_cost * item.quantity;
+            }
+          });
+        });
+
+        // Restar costos de productos devueltos
+        let costoDevoluciones = 0;
+        monthReturns.forEach(ret => {
+          ret.items.forEach(item => {
+            const product = products.find(p => p.id === item.productId);
+            if (product && product.current_cost) {
+              costoDevoluciones += product.current_cost * item.quantity;
+            }
+          });
+        });
+
+        // Restar costos de productos en notas crédito
+        let costosNotasCredito = 0;
+        monthCreditNotes.forEach(cn => {
+          cn.items.forEach(item => {
+            if (item.productId.startsWith('common-')) return;
+            const product = products.find(p => p.id === item.productId);
+            if (product && product.current_cost) {
+              costosNotasCredito += product.current_cost * item.quantity;
+            }
+          });
+        });
+
+        // Aplicar las restas a los costos
+        costos = Math.max(0, costos - costoDevoluciones - costosNotasCredito);
+
+        const monthExchangeProfitImpact = monthExchanges.reduce((sum, ex) => sum + (Number(ex.profit_difference) || 0), 0);
+
+        ganancias = ingresos - gastos - costos + monthExchangeProfitImpact;
+      }
 
       last6Months.push({
         month: date.toLocaleDateString('es-CO', { month: 'short' }),
-        monthKey: monthStr, // Añadir key única con año-mes
+        monthKey: monthStr,
         ingresos,
         gastos,
-        ganancias: ingresos - gastos - costos + monthExchangeProfitImpact
+        ganancias
       });
     }
 
@@ -1311,6 +1429,14 @@ export function FinancialManagement() {
                 Finalizar Finanzas
               </Button>
               <Button
+                variant="outline"
+                className="border-orange-600 text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-950"
+                onClick={() => navigate('/sistema/facturacion/deudas')}
+              >
+                <Wallet className="w-4 h-4 mr-2" />
+                Gestión de Deudas
+              </Button>
+              <Button
                 className="bg-emerald-600 hover:bg-emerald-700"
                 onClick={handleExportReport}
                 disabled={isExporting}
@@ -1345,12 +1471,12 @@ export function FinancialManagement() {
                 <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800 space-y-1">
                   <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
                     <span>Facturas pagas</span>
-                    <span className="font-medium">{formatCOP(stats.currentMonth.facturasPagas)}</span>
+                    <span className="font-medium">+{formatCOP(stats.currentMonth.facturasPagas)}</span>
                   </div>
                   {stats.currentMonth.creditosPagados > 0 && (
                     <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
                       <span>Créditos pagados</span>
-                      <span className="font-medium">{formatCOP(stats.currentMonth.creditosPagados)}</span>
+                      <span className="font-medium">+{formatCOP(stats.currentMonth.creditosPagados)}</span>
                     </div>
                   )}
                   {stats.currentMonth.impactoCambios !== 0 && (
@@ -1359,6 +1485,18 @@ export function FinancialManagement() {
                       <span className={`font-medium ${stats.currentMonth.impactoCambios > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                         {stats.currentMonth.impactoCambios > 0 ? '+' : ''}{formatCOP(stats.currentMonth.impactoCambios)}
                       </span>
+                    </div>
+                  )}
+                  {stats.currentMonth.totalNotasCredito > 0 && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-zinc-600 dark:text-zinc-400">Notas Crédito</span>
+                      <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.totalNotasCredito)}</span>
+                    </div>
+                  )}
+                  {stats.currentMonth.totalDevoluciones > 0 && (
+                    <div className="flex justify-between text-xs">
+                      <span className="text-zinc-600 dark:text-zinc-400">Devoluciones</span>
+                      <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.totalDevoluciones)}</span>
                     </div>
                   )}
                 </div>
@@ -1445,9 +1583,15 @@ export function FinancialManagement() {
 
                 {/* Desglose */}
                 <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Costos de productos en las mismas facturas contadas en ingresos del mes (excluye crédito)
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-2">
+                    Costos netos considerando devoluciones
                   </div>
+                  {stats.currentMonth.costoDevoluciones > 0 && (
+                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>Costos recuperados por devoluciones</span>
+                      <span className="font-medium text-emerald-600">-{formatCOP(stats.currentMonth.costoDevoluciones)}</span>
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex items-center gap-1 mt-3">
@@ -1721,12 +1865,12 @@ export function FinancialManagement() {
                   <CardContent className="pt-0 space-y-2">
                     <div className="flex justify-between py-2 border-b border-zinc-100">
                       <span className="text-sm text-zinc-600 dark:text-zinc-400">Facturas Pagas y Parciales</span>
-                      <span className="text-sm font-medium">{formatCOP(stats.currentMonth.facturasPagas)}</span>
+                      <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">+{formatCOP(stats.currentMonth.facturasPagas)}</span>
                     </div>
-                    {stats.currentMonth.abonosDelMes > 0 && (
+                    {stats.currentMonth.creditosPagados > 0 && (
                       <div className="flex justify-between py-2 border-b border-zinc-100">
-                        <span className="text-sm text-zinc-600 dark:text-zinc-400">Abonos a Crédito</span>
-                        <span className="text-sm font-medium">{formatCOP(stats.currentMonth.abonosDelMes)}</span>
+                        <span className="text-sm text-zinc-600 dark:text-zinc-400">Créditos Pagados</span>
+                        <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">+{formatCOP(stats.currentMonth.creditosPagados)}</span>
                       </div>
                     )}
                     {stats.currentMonth.impactoCambios !== 0 && (
@@ -1745,16 +1889,18 @@ export function FinancialManagement() {
                         </span>
                       </div>
                     )}
-                    <div className="flex justify-between py-2 font-semibold">
+                    {stats.currentMonth.totalDevoluciones > 0 && (
+                      <div className="flex justify-between py-2 border-b border-zinc-100">
+                        <span className="text-sm text-zinc-600 dark:text-zinc-400">Devoluciones</span>
+                        <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                          -{formatCOP(stats.currentMonth.totalDevoluciones)}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between py-2 font-semibold border-t border-zinc-200 dark:border-zinc-800">
                       <span className="text-sm">Total Neto</span>
                       <span className="text-sm">{formatCOP(stats.currentMonth.ingresoNeto)}</span>
                     </div>
-                    {stats.currentMonth.totalDevoluciones > 0 && (
-                      <div className="flex justify-between py-2 pt-3 border-t border-zinc-200 dark:border-zinc-800">
-                        <span className="text-xs text-zinc-500 dark:text-zinc-400">Devoluciones registradas (ref.)</span>
-                        <span className="text-xs text-zinc-500 dark:text-zinc-400">{formatCOP(stats.currentMonth.totalDevoluciones)}</span>
-                      </div>
-                    )}
                   </CardContent>
                 </CollapsibleContent>
               </Card>

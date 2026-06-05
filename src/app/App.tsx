@@ -7,6 +7,8 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { SupabaseConnectionError } from './components/SupabaseConnectionError';
 import { OfflineScreen } from './components/OfflineScreen';
 import { supabase } from './lib/supabase';
+import { TaskQueueProvider } from './contexts/TaskQueueContext';
+import { TaskProgressBar } from './components/TaskProgressBar';
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(false);
@@ -67,9 +69,12 @@ export default function App() {
 
   return (
     <ErrorBoundary>
-      <RouterProvider router={router} />
-      <Toaster />
-      <OfflineScreen />
+      <TaskQueueProvider>
+        <RouterProvider router={router} />
+        <Toaster />
+        <OfflineScreen />
+        <TaskProgressBar />
+      </TaskQueueProvider>
     </ErrorBoundary>
   );
 }

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
-import { Package, DollarSign, TrendingDown, AlertCircle, Eye, TrendingUp, BarChart3, ShoppingCart, Sparkles, ClipboardList, Download, CheckCircle } from 'lucide-react';
-import { getAllProducts, getInvoices, getExpenses, type Product, type Invoice, type Expense } from '../lib/supabase';
+import { Package, DollarSign, TrendingDown, AlertCircle, Eye, TrendingUp, BarChart3, ShoppingCart, Sparkles, ClipboardList, Download, CheckCircle, CreditCard, FileText, Printer } from 'lucide-react';
+import { getAllProducts, getInvoices, getExpenses, getCustomers, type Product, type Invoice, type Expense, type Customer } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
@@ -37,6 +37,14 @@ export default function Reports() {
   const [inventoryReady, setInventoryReady] = useState(false);
   const inventoryPdfRef = useRef<Blob | null>(null);
 
+  // Estados para reporte de crédito
+  const [showCreditReport, setShowCreditReport] = useState(false);
+  const [creditProgress, setCreditProgress] = useState(0);
+  const [creditReady, setCreditReady] = useState(false);
+  const creditPdfRef = useRef<Blob | null>(null);
+  const [creditReportData, setCreditReportData] = useState<any>(null);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+
   useEffect(() => {
     loadData();
   }, []);
@@ -44,14 +52,16 @@ export default function Reports() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [productsData, invoicesData, expensesData] = await Promise.all([
+      const [productsData, invoicesData, expensesData, customersData] = await Promise.all([
         getAllProducts(),
         getInvoices(),
         getExpenses(),
+        getCustomers(),
       ]);
       setProducts(productsData);
       setInvoices(invoicesData);
       setExpenses(expensesData);
+      setCustomers(customersData);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -208,6 +218,241 @@ export default function Reports() {
     a.download = `inventario-celumundo-${new Date().toISOString().slice(0, 10)}.pdf`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const openCreditReport = async () => {
+    setCreditProgress(0);
+    setCreditReady(false);
+    creditPdfRef.current = null;
+    setCreditReportData(null);
+    setShowCreditReport(true);
+
+    // Simular progreso mientras se genera el reporte
+    const steps = [10, 25, 40, 60, 75, 88, 95];
+    for (const step of steps) {
+      await new Promise(r => setTimeout(r, 180));
+      setCreditProgress(step);
+    }
+
+    // Obtener facturas de crédito pendientes
+    const creditInvoices = invoices.filter(inv => inv.status === 'pending' && inv.type === 'credit');
+
+    // Agrupar por cliente
+    const clientsWithDebt: Map<string, {
+      customer: Customer | null;
+      customerName: string;
+      customerId: string;
+      invoices: Invoice[];
+      totalDebt: number;
+    }> = new Map();
+
+    creditInvoices.forEach(invoice => {
+      // Usar customer_id si existe, sino usar customer_name como clave única
+      const customerId = invoice.customer_id || `name-${invoice.customer_name || 'sin-nombre'}`;
+      const customer = invoice.customer_id ? customers.find(c => c.id === invoice.customer_id) : null;
+      const customerName = invoice.customer_name || customer?.name || 'Cliente no registrado';
+      const pendingBalance = invoice.credit_balance || 0;
+
+      if (clientsWithDebt.has(customerId)) {
+        const existing = clientsWithDebt.get(customerId)!;
+        existing.invoices.push(invoice);
+        existing.totalDebt += pendingBalance;
+      } else {
+        clientsWithDebt.set(customerId, {
+          customer,
+          customerName,
+          customerId,
+          invoices: [invoice],
+          totalDebt: pendingBalance
+        });
+      }
+    });
+
+    // Convertir a array y ordenar por deuda descendente
+    const clientsArray = Array.from(clientsWithDebt.values()).sort((a, b) => b.totalDebt - a.totalDebt);
+
+    // Calcular totales
+    const totalPendingCredit = creditInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+    const totalPendingInvoices = creditInvoices.length;
+    const customersWithDebt = clientsArray.length;
+
+    const reportData = {
+      clients: clientsArray,
+      totalPendingCredit,
+      totalPendingInvoices,
+      customersWithDebt
+    };
+
+    setCreditReportData(reportData);
+
+    // Generar PDF
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const now = new Date().toLocaleString('es-CO', { timeZone: 'America/Bogota', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    // ── Encabezado ──
+    doc.setFillColor(37, 99, 235); // Blue-600
+    doc.rect(0, 0, pageW, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('CELUMUNDO VIP', 14, 11);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Reporte de Crédito', 14, 18);
+    doc.setFontSize(8);
+    doc.text(`Generado: ${now}`, 14, 24);
+
+    // ── Resumen ──
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text('RESUMEN GENERAL', 14, 36);
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.3);
+    doc.line(14, 37.5, pageW - 14, 37.5);
+
+    const summaryY = 43;
+    const col = (pageW - 28) / 3;
+    const summaryItems = [
+      { label: 'Total Crédito Pendiente', value: formatCOP(totalPendingCredit) },
+      { label: 'Clientes con Deuda', value: customersWithDebt.toString() },
+      { label: 'Facturas Pendientes', value: totalPendingInvoices.toString() },
+    ];
+    summaryItems.forEach((item, i) => {
+      const x = 14 + col * i;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(80, 80, 80);
+      doc.text(item.label, x, summaryY);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(0, 0, 0);
+      doc.text(item.value, x, summaryY + 6);
+    });
+
+    // ── Detalles por cliente ──
+    let currentY = summaryY + 20;
+
+    clientsArray.forEach((client, clientIndex) => {
+      // Verificar si necesitamos nueva página
+      if (currentY > 250) {
+        doc.addPage();
+        currentY = 20;
+      }
+
+      // Nombre del cliente y total
+      doc.setFillColor(240, 240, 240);
+      doc.rect(14, currentY - 4, pageW - 28, 10, 'F');
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(10);
+      doc.setTextColor(0, 0, 0);
+      doc.text(client.customerName, 16, currentY + 2);
+      doc.setTextColor(220, 38, 38); // Red-600
+      doc.text(`Deuda: ${formatCOP(client.totalDebt)}`, pageW - 16, currentY + 2, { align: 'right' });
+
+      currentY += 12;
+
+      // Tabla de facturas del cliente
+      const invoiceRows = client.invoices.map(inv => {
+        const total = inv.total || 0;
+        const pendingBalance = inv.credit_balance || 0;
+        const paid = total - pendingBalance;
+
+        return [
+          inv.number || '-',
+          new Date(inv.date).toLocaleDateString('es-CO'),
+          formatCOP(total),
+          formatCOP(paid),
+          formatCOP(pendingBalance)
+        ];
+      });
+
+      autoTable(doc, {
+        startY: currentY,
+        head: [['Factura', 'Fecha', 'Total', 'Abonado', 'Saldo']],
+        body: invoiceRows,
+        styles: {
+          fontSize: 7.5,
+          cellPadding: 2,
+          textColor: [0, 0, 0],
+          lineColor: [200, 200, 200],
+          lineWidth: 0.1,
+        },
+        headStyles: {
+          fillColor: [37, 99, 235],
+          textColor: [255, 255, 255],
+          fontStyle: 'bold',
+          fontSize: 8,
+        },
+        alternateRowStyles: { fillColor: [250, 250, 250] },
+        columnStyles: {
+          0: { cellWidth: 35 },
+          1: { cellWidth: 30 },
+          2: { cellWidth: 30, halign: 'right' },
+          3: { cellWidth: 30, halign: 'right' },
+          4: { cellWidth: 30, halign: 'right' },
+        },
+        margin: { left: 14, right: 14 },
+        theme: 'grid',
+      });
+
+      currentY = (doc as any).lastAutoTable.finalY + 8;
+    });
+
+    // ── Totales finales ──
+    if (currentY > 250) {
+      doc.addPage();
+      currentY = 20;
+    }
+
+    doc.setDrawColor(0, 0, 0);
+    doc.setLineWidth(0.4);
+    doc.line(14, currentY, pageW - 14, currentY);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(0, 0, 0);
+    doc.text(`TOTAL CRÉDITO PENDIENTE: ${formatCOP(totalPendingCredit)}`, 14, currentY + 6);
+    doc.text(`Total de clientes con deuda: ${customersWithDebt}`, 14, currentY + 12);
+    doc.text(`Total de facturas pendientes: ${totalPendingInvoices}`, 14, currentY + 18);
+
+    creditPdfRef.current = doc.output('blob');
+
+    setCreditProgress(100);
+    await new Promise(r => setTimeout(r, 350));
+    setCreditReady(true);
+  };
+
+  const downloadCreditPdf = () => {
+    if (!creditPdfRef.current) return;
+    const url = URL.createObjectURL(creditPdfRef.current);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `reporte-credito-${new Date().toISOString().slice(0, 10)}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const printCreditPdf = () => {
+    if (!creditPdfRef.current) return;
+    const url = URL.createObjectURL(creditPdfRef.current);
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    iframe.src = url;
+    document.body.appendChild(iframe);
+    iframe.onload = () => {
+      iframe.contentWindow?.print();
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+        URL.revokeObjectURL(url);
+      }, 100);
+    };
+  };
+
+  const viewCreditReport = () => {
+    if (!creditPdfRef.current) return;
+    const url = URL.createObjectURL(creditPdfRef.current);
+    window.open(url, '_blank');
   };
 
   // Analizar ventas del mes
@@ -409,6 +654,14 @@ export default function Reports() {
           >
             <ClipboardList className="h-4 w-4 mr-2" />
             Reporte de Inventario
+          </Button>
+          <Button
+            onClick={openCreditReport}
+            variant="outline"
+            className="border-blue-400 dark:border-blue-600 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-950"
+          >
+            <CreditCard className="h-4 w-4 mr-2" />
+            Reporte Crédito
           </Button>
           <Button
             onClick={analyzeMonthlySales}
@@ -1051,6 +1304,118 @@ export default function Reports() {
                   variant="outline"
                   onClick={() => setShowInventoryReport(false)}
                   className="w-full border-zinc-300 dark:border-zinc-700"
+                >
+                  Cerrar
+                </Button>
+              </div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Reporte de Crédito */}
+      <Dialog open={showCreditReport} onOpenChange={(open) => { if (!open && creditReady) { setShowCreditReport(false); } else if (!open && creditProgress === 0) { setShowCreditReport(false); } }}>
+        <DialogContent className="max-w-2xl w-[95vw] bg-white dark:bg-blue-950">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-blue-900 dark:text-blue-100">
+              <CreditCard className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              Reporte de Crédito
+            </DialogTitle>
+            <DialogDescription className="text-blue-700 dark:text-blue-300 text-sm">
+              Estado de cuentas por cobrar y clientes con deuda pendiente
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-4 space-y-6">
+            {!creditReady ? (
+              <div className="space-y-4">
+                <div className="text-center space-y-1">
+                  <p className="text-sm font-medium text-blue-700 dark:text-blue-300">
+                    {creditProgress < 100 ? 'Generando reporte...' : 'Finalizando...'}
+                  </p>
+                  <p className="text-xs text-blue-500 dark:text-blue-400">
+                    Analizando facturas de crédito
+                  </p>
+                </div>
+
+                {/* Barra de progreso */}
+                <div className="space-y-2">
+                  <div className="w-full bg-blue-200 dark:bg-blue-900 rounded-full h-3 overflow-hidden">
+                    <div
+                      className="h-3 rounded-full bg-blue-600 dark:bg-blue-400 transition-all duration-300 ease-out"
+                      style={{ width: `${creditProgress}%` }}
+                    />
+                  </div>
+                  <div className="flex justify-between text-xs text-blue-500 dark:text-blue-400">
+                    <span>Progreso</span>
+                    <span className="font-mono font-medium text-blue-700 dark:text-blue-300">{creditProgress}%</span>
+                  </div>
+                </div>
+
+                <div className="text-xs text-blue-500 dark:text-blue-400 space-y-0.5 pl-1">
+                  {creditProgress >= 10 && <p>✓ Cargando facturas de crédito...</p>}
+                  {creditProgress >= 40 && <p>✓ Agrupando por clientes...</p>}
+                  {creditProgress >= 75 && <p>✓ Calculando totales...</p>}
+                  {creditProgress >= 95 && <p>✓ Generando documento PDF...</p>}
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-5">
+                {/* Resumen visible en el modal */}
+                {creditReportData && (
+                  <div className="grid grid-cols-3 gap-3 bg-blue-50 dark:bg-blue-900/30 p-4 rounded-lg border border-blue-200 dark:border-blue-800">
+                    <div className="text-center">
+                      <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">Total Pendiente</p>
+                      <p className="text-lg font-bold text-blue-900 dark:text-blue-100">{formatCOP(creditReportData.totalPendingCredit)}</p>
+                    </div>
+                    <div className="text-center border-l border-r border-blue-200 dark:border-blue-800">
+                      <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">Clientes</p>
+                      <p className="text-lg font-bold text-blue-900 dark:text-blue-100">{creditReportData.customersWithDebt}</p>
+                    </div>
+                    <div className="text-center">
+                      <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">Facturas</p>
+                      <p className="text-lg font-bold text-blue-900 dark:text-blue-100">{creditReportData.totalPendingInvoices}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex flex-col items-center gap-2 py-2">
+                  <div className="w-14 h-14 rounded-full bg-blue-100 dark:bg-blue-800 flex items-center justify-center">
+                    <CheckCircle className="w-8 h-8 text-blue-700 dark:text-blue-300" />
+                  </div>
+                  <p className="font-semibold text-blue-900 dark:text-blue-100">¡Reporte listo!</p>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <Button
+                    onClick={viewCreditReport}
+                    variant="outline"
+                    className="border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900"
+                  >
+                    <Eye className="w-4 h-4 mr-2" />
+                    Ver
+                  </Button>
+                  <Button
+                    onClick={printCreditPdf}
+                    variant="outline"
+                    className="border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900"
+                  >
+                    <Printer className="w-4 h-4 mr-2" />
+                    Imprimir
+                  </Button>
+                  <Button
+                    onClick={downloadCreditPdf}
+                    className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white font-semibold"
+                  >
+                    <Download className="w-4 h-4 mr-2" />
+                    Descargar
+                  </Button>
+                </div>
+
+                <Button
+                  variant="outline"
+                  onClick={() => setShowCreditReport(false)}
+                  className="w-full border-blue-300 dark:border-blue-700"
                 >
                   Cerrar
                 </Button>

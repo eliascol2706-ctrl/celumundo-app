@@ -221,6 +221,33 @@ export interface MonthlyClosure {
   created_at?: string;
 }
 
+export interface FinancialClosure {
+  id: string;
+  company: 'celumundo' | 'repuestos';
+  closure_timestamp: string;
+  total_revenue: number;
+  paid_invoices_revenue: number;
+  credit_invoices_revenue: number;
+  partial_returns_adjustment: number;
+  service_revenue: number;
+  pending_credit: number;
+  credit_payments: number;
+  product_costs: number;
+  total_expenses: number;
+  gross_profit: number;
+  net_profit: number;
+  total_invoices: number;
+  paid_invoices: number;
+  credit_invoices: number;
+  partial_return_invoices: number;
+  period_start: string | null;
+  period_end: string;
+  notes?: string;
+  closed_by: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
 export interface User {
   id?: string;
   username: string;
@@ -1786,11 +1813,60 @@ export const getMovements = async (): Promise<Movement[]> => {
     .select('*')
     .eq('company', company)
     .order('date', { ascending: false });
-  
+
   if (error) {
     console.error('Error fetching movements:', error);
     return [];
   }
+  return data || [];
+};
+
+export const searchMovements = async (
+  searchTerm: string,
+  filterType: 'all' | 'entry' | 'exit',
+  startDate?: string,
+  endDate?: string
+): Promise<Movement[]> => {
+  const company = getCurrentCompany();
+
+  let query = supabase
+    .from('movements')
+    .select('*')
+    .eq('company', company);
+
+  // Filtro por tipo de movimiento
+  if (filterType !== 'all') {
+    query = query.eq('type', filterType);
+  }
+
+  // Filtro por búsqueda de texto (producto, motivo o referencia)
+  if (searchTerm && searchTerm.trim().length > 0) {
+    // Supabase no soporta OR con diferentes columnas directamente en una sola llamada,
+    // así que usaremos or() con la sintaxis correcta
+    const searchPattern = `%${searchTerm}%`;
+    query = query.or(
+      `product_name.ilike.${searchPattern},reason.ilike.${searchPattern},reference.ilike.${searchPattern}`
+    );
+  }
+
+  // Filtro por rango de fechas (opcional)
+  if (startDate) {
+    query = query.gte('date', startDate);
+  }
+  if (endDate) {
+    query = query.lte('date', endDate);
+  }
+
+  // Ordenar por fecha descendente
+  query = query.order('date', { ascending: false });
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error searching movements:', error);
+    return [];
+  }
+
   return data || [];
 };
 
@@ -1832,19 +1908,19 @@ export const createManualMovement = async (
     .select('*')
     .eq('id', productId)
     .single();
-  
+
   if (!product) return null;
-  
-  const newStock = type === 'entry' 
-    ? product.stock + quantity 
+
+  const newStock = type === 'entry'
+    ? product.stock + quantity
     : product.stock - quantity;
-  
+
   if (type !== 'entry' && newStock < 0) {
     throw new Error('Stock insuficiente');
   }
 
   await updateProduct(productId, { stock: newStock });
-  
+
   return addMovement({
     type,
     product_id: productId,
@@ -1855,6 +1931,118 @@ export const createManualMovement = async (
     user_name: getCurrentUser()?.username || 'Usuario',
     unit_ids: []
   });
+};
+
+// ============================================
+// COMPROBANTES DE MOVIMIENTOS
+// ============================================
+
+export interface MovementReceipt {
+  id: string;
+  company: string;
+  type: 'entry' | 'exit';
+  reference: string;
+  reason: string;
+  date: string;
+  user_name: string;
+  items: Array<{
+    productId: string;
+    productCode: string;
+    productName: string;
+    quantity: number;
+    currentCost: number;
+    newCost?: number;
+    finalCost: number;
+    unitIds?: string[];
+    unitIdNotes?: { [id: string]: string };
+  }>;
+  total_units: number;
+  total_products: number;
+  total_cost: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export const addMovementReceipt = async (receipt: Omit<MovementReceipt, 'id' | 'company' | 'created_at' | 'updated_at'>): Promise<MovementReceipt | null> => {
+  const company = getCurrentCompany();
+
+  const { data, error } = await supabase
+    .from('movement_receipts')
+    .insert([{
+      ...receipt,
+      company
+    }])
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error adding movement receipt:', error);
+    throw new Error('Error al guardar comprobante de movimiento');
+  }
+
+  return data;
+};
+
+export const searchMovementReceipts = async (
+  searchTerm: string,
+  filterType: 'all' | 'entry' | 'exit',
+  startDate?: string,
+  endDate?: string
+): Promise<MovementReceipt[]> => {
+  const company = getCurrentCompany();
+
+  let query = supabase
+    .from('movement_receipts')
+    .select('*')
+    .eq('company', company);
+
+  // Filtro por tipo
+  if (filterType !== 'all') {
+    query = query.eq('type', filterType);
+  }
+
+  // Búsqueda por referencia o motivo
+  if (searchTerm && searchTerm.trim().length > 0) {
+    const searchPattern = `%${searchTerm}%`;
+    query = query.or(
+      `reference.ilike.${searchPattern},reason.ilike.${searchPattern}`
+    );
+  }
+
+  // Filtro por rango de fechas
+  if (startDate) {
+    query = query.gte('date', startDate);
+  }
+  if (endDate) {
+    query = query.lte('date', endDate);
+  }
+
+  // Ordenar por fecha descendente
+  query = query.order('date', { ascending: false });
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('Error searching movement receipts:', error);
+    return [];
+  }
+
+  return data || [];
+};
+
+export const getMovementReceiptById = async (id: string): Promise<MovementReceipt | null> => {
+  const { data, error } = await supabase
+    .from('movement_receipts')
+    .select('*')
+    .eq('id', id)
+    .single();
+
+  if (error) {
+    console.error('Error getting movement receipt:', error);
+    return null;
+  }
+
+  return data;
 };
 
 // ============================================
@@ -2036,6 +2224,26 @@ export const addMonthlyClosure = async (closure: Omit<MonthlyClosure, 'id' | 'co
     return null;
   }
   return data;
+};
+
+// ============================================
+// CIERRES FINANCIEROS
+// ============================================
+
+export const getFinancialClosures = async (): Promise<FinancialClosure[]> => {
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('closures_finances')
+    .select('*')
+    .eq('company', company)
+    .order('period_end', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching financial closures:', error);
+    return [];
+  }
+
+  return data || [];
 };
 
 // ============================================

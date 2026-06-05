@@ -13,6 +13,7 @@ import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { ProductSalesReportDialog } from '../components/ProductSalesReportDialog';
 import { ProductSelectionModal } from '../components/ProductSelectionModal';
+import { ProductConfigModal } from '../components/ProductConfigModal';
 import { printThermalInvoice as printThermalDirect } from '../lib/thermal-printer';
 import { printPDFInvoice, generatePDFBlob } from '../lib/pdf-printer';
 import { isPrintingAvailable } from '../lib/platform-detector';
@@ -34,6 +35,8 @@ export function InvoicesMenu() {
     creditNotesToday: 0,
     returnsToday: 0,
     exchangesTotalToday: 0,
+    cashFromPayments: 0,
+    transferFromPayments: 0,
   });
   const [loading, setLoading] = useState(true);
   const [isValidating, setIsValidating] = useState(false);
@@ -91,8 +94,6 @@ export function InvoicesMenu() {
   // Modal intermedio: cantidad y precio para producto a agregar
   const [selectedProductToAdd, setSelectedProductToAdd] = useState<any | null>(null);
   const [showAddQtyPriceModal, setShowAddQtyPriceModal] = useState(false);
-  const [addQty, setAddQty] = useState(1);
-  const [addPrice, setAddPrice] = useState(0);
   // Modal selector de IDs únicas al agregar producto
   const [showUnitIdSelectorForEdit, setShowUnitIdSelectorForEdit] = useState(false);
   const [unitIdAvailableIds, setUnitIdAvailableIds] = useState<Array<{ id: string; note: string }>>([]);
@@ -282,6 +283,16 @@ export function InvoicesMenu() {
         return sum + (payment.amount || 0);
       }, 0);
 
+      // Calcular abonos en EFECTIVO del día (cash o efectivo)
+      const cashFromPayments = paymentsToday
+        .filter(payment => ['efectivo', 'cash'].includes(payment.payment_method || ''))
+        .reduce((sum, payment) => sum + (payment.amount || 0), 0);
+
+      // Calcular abonos por TRANSFERENCIA del día (transferencia + nequi + daviplata + transfer)
+      const transferFromPayments = paymentsToday
+        .filter(payment => ['transferencia', 'transfer', 'nequi', 'daviplata'].includes(payment.payment_method || ''))
+        .reduce((sum, payment) => sum + (payment.amount || 0), 0);
+
       // Calcular notas de crédito del día (egresos)
       const creditNotesToday = creditNotes
         .filter(cn => {
@@ -319,6 +330,8 @@ export function InvoicesMenu() {
         creditNotesToday,
         returnsToday,
         exchangesTotalToday,
+        cashFromPayments,
+        transferFromPayments,
       });
 
       // Cargar TODAS las facturas (no solo las de hoy) para los filtros
@@ -765,20 +778,50 @@ export function InvoicesMenu() {
     if (!editingInvoice) return;
 
     const productToRemove = editingInvoice.items[productIndex];
-    const product = products.find(p => p.id === productToRemove.productId);
-
-    if (!product) {
-      toast.error('Producto no encontrado en el inventario');
-      return;
-    }
 
     try {
       const user = getCurrentUser();
 
-      // 1. Restaurar stock
+      // 1. Restaurar stock y re-habilitar IDs en una sola operación
       if (!productToRemove.productId.startsWith('common-')) {
+        // Obtener el producto FRESCO desde la base de datos para tener el stock actualizado
+        const { data: product } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', productToRemove.productId)
+          .single();
+
+        if (!product) {
+          toast.error('Producto no encontrado en el inventario');
+          return;
+        }
+
+        console.log('🔍 ANTES - Stock FRESCO desde DB:', product.stock, 'Cantidad a restaurar:', productToRemove.quantity);
+
         const newStock = product.stock + productToRemove.quantity;
-        await updateProduct(product.id, { stock: newStock });
+
+        console.log('🔍 CALCULADO - Nuevo stock:', newStock);
+
+        // Preparar actualizaciones
+        const updates: any = { stock: newStock };
+
+        // Re-habilitar IDs únicas si las hay
+        if (productToRemove.unitIds && productToRemove.unitIds.length > 0 && product.registered_ids) {
+          const updatedRegisteredIds = product.registered_ids.map((idObj: any) => {
+            if (productToRemove.unitIds.includes(idObj.id)) {
+              return { ...idObj, disabled: false };
+            }
+            return idObj;
+          });
+          updates.registered_ids = updatedRegisteredIds;
+        }
+
+        console.log('🔍 ACTUALIZANDO - Updates:', updates);
+
+        // Actualizar producto UNA SOLA VEZ con ambos cambios
+        await updateProduct(product.id, updates);
+
+        console.log('🔍 DESPUÉS - Producto actualizado');
 
         // REGISTRAR MOVIMIENTO DE ENTRADA
         await addMovement({
@@ -791,17 +834,6 @@ export function InvoicesMenu() {
           user_name: user?.username || 'Usuario',
           unit_ids: productToRemove.unitIds || []
         });
-      }
-
-      // 2. Re-habilitar IDs únicas si las hay
-      if (productToRemove.unitIds && productToRemove.unitIds.length > 0 && product.registered_ids) {
-        const updatedRegisteredIds = product.registered_ids.map((idObj: any) => {
-          if (productToRemove.unitIds.includes(idObj.id)) {
-            return { ...idObj, disabled: false };
-          }
-          return idObj;
-        });
-        await updateProduct(product.id, { registered_ids: updatedRegisteredIds });
       }
 
       // 3. Actualizar la factura (remover el producto)
@@ -887,19 +919,47 @@ export function InvoicesMenu() {
     if (!editingInvoice) return;
 
     const item = editingInvoice.items[productIndex];
-    const product = products.find(p => p.id === item.productId);
-
-    if (!product) {
-      toast.error('Producto no encontrado en el inventario');
-      return;
-    }
 
     try {
       const user = getCurrentUser();
 
-      // 1. Restaurar 1 unidad de stock
+      // 1. Restaurar 1 unidad de stock y re-habilitar ID en una sola operación
       if (!item.productId.startsWith('common-')) {
-        await updateProduct(product.id, { stock: product.stock + 1 });
+        // Obtener el producto FRESCO desde la base de datos para tener el stock actualizado
+        const { data: product } = await supabase
+          .from('products')
+          .select('*')
+          .eq('id', item.productId)
+          .single();
+
+        if (!product) {
+          toast.error('Producto no encontrado en el inventario');
+          return;
+        }
+
+        console.log('🔍 RESTAR - ANTES - Stock FRESCO desde DB:', product.stock);
+
+        const newStock = product.stock + 1;
+
+        console.log('🔍 RESTAR - CALCULADO - Nuevo stock:', newStock);
+
+        // Preparar actualizaciones
+        const updates: any = { stock: newStock };
+
+        // Re-habilitar la ID seleccionada si aplica
+        if (idToRemove && product.registered_ids) {
+          const updatedRegisteredIds = product.registered_ids.map((idObj: any) =>
+            idObj.id === idToRemove ? { ...idObj, disabled: false } : idObj
+          );
+          updates.registered_ids = updatedRegisteredIds;
+        }
+
+        console.log('🔍 RESTAR - ACTUALIZANDO - Updates:', updates);
+
+        // Actualizar producto UNA SOLA VEZ con ambos cambios
+        await updateProduct(product.id, updates);
+
+        console.log('🔍 RESTAR - DESPUÉS - Producto actualizado');
 
         // REGISTRAR MOVIMIENTO DE ENTRADA
         await addMovement({
@@ -912,14 +972,6 @@ export function InvoicesMenu() {
           user_name: user?.username || 'Usuario',
           unit_ids: idToRemove ? [idToRemove] : []
         });
-      }
-
-      // 2. Re-habilitar la ID seleccionada si aplica
-      if (idToRemove && product.registered_ids) {
-        const updatedRegisteredIds = product.registered_ids.map((idObj: any) =>
-          idObj.id === idToRemove ? { ...idObj, disabled: false } : idObj
-        );
-        await updateProduct(product.id, { registered_ids: updatedRegisteredIds });
       }
 
       // 3. Actualizar el item en la factura
@@ -955,6 +1007,29 @@ export function InvoicesMenu() {
     }
   };
 
+  const handleProductConfigConfirm = async (quantity: number, price: number) => {
+    if (!selectedProductToAdd) return;
+    if (price <= 0) {
+      toast.error('El precio debe ser mayor a 0');
+      return;
+    }
+    setShowAddQtyPriceModal(false);
+    await handleAddProductToConfirmationInvoice(
+      selectedProductToAdd,
+      quantity,
+      price,
+      selectedProductToAdd.use_unit_ids ? unitIdSelectedIds : []
+    );
+    setSelectedProductToAdd(null);
+    setUnitIdSelectedIds([]);
+  };
+
+  const handleProductConfigCancel = () => {
+    setShowAddQtyPriceModal(false);
+    setSelectedProductToAdd(null);
+    setUnitIdSelectedIds([]);
+  };
+
   const handleAddProductToConfirmationInvoice = async (product: any, quantity: number, price: number, unitIds: string[] = []) => {
     if (!editingInvoice) return;
     const company = getCurrentCompany();
@@ -962,7 +1037,13 @@ export function InvoicesMenu() {
       // Descontar stock
       const { data: prod } = await supabase.from('products').select('*').eq('id', product.id).single();
       if (!prod) { toast.error('Producto no encontrado'); return; }
-      if (prod.stock < quantity) { toast.error(`Stock insuficiente. Disponible: ${prod.stock}`); return; }
+
+      // Permitir stock negativo - no validar si hay suficiente stock
+      // Solo mostrar advertencia si el stock quedará negativo
+      const newStock = prod.stock - quantity;
+      if (newStock < 0) {
+        toast.warning(`Stock quedará en negativo: ${newStock}`, { duration: 3000 });
+      }
 
       // Si tiene IDs únicas, marcarlas como vendidas
       let updatedRegisteredIds = prod.registered_ids;
@@ -972,7 +1053,7 @@ export function InvoicesMenu() {
       }
 
       await supabase.from('products').update({
-        stock: prod.stock - quantity,
+        stock: newStock,
         registered_ids: updatedRegisteredIds,
       }).eq('id', product.id).eq('company', company);
 
@@ -1380,6 +1461,9 @@ export function InvoicesMenu() {
               <CardContent>
                 <div className="text-2xl font-bold text-green-700 dark:text-green-400">{formatCOP(stats.cashToday)}</div>
                 <p className="text-xs text-green-600 dark:text-green-500 mt-1">Pagos en efectivo</p>
+                <div className="border-t border-green-200 dark:border-green-800 mt-2 pt-2">
+                  <p className="text-sm font-medium text-green-600 dark:text-green-500">💵 Abonos: {formatCOP(stats.cashFromPayments)}</p>
+                </div>
               </CardContent>
             </Card>
 
@@ -1393,6 +1477,9 @@ export function InvoicesMenu() {
               <CardContent>
                 <div className="text-2xl font-bold text-violet-700 dark:text-violet-400">{formatCOP(stats.transferToday)}</div>
                 <p className="text-xs text-violet-600 dark:text-violet-500 mt-1">Incluye Nequi, Daviplata</p>
+                <div className="border-t border-violet-200 dark:border-violet-800 mt-2 pt-2">
+                  <p className="text-sm font-medium text-violet-600 dark:text-violet-500">💳 Abonos: {formatCOP(stats.transferFromPayments)}</p>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -2922,11 +3009,8 @@ export function InvoicesMenu() {
             }
             setUnitIdAvailableIds(available);
             setUnitIdSelectedIds([]);
-            setAddPrice(product.final_price || 0);
             setShowUnitIdSelectorForEdit(true);
           } else {
-            setAddQty(1);
-            setAddPrice(product.final_price || 0);
             setShowAddQtyPriceModal(true);
           }
         }}
@@ -3003,7 +3087,6 @@ export function InvoicesMenu() {
                 if (unitIdSelectedIds.length === 0) { toast.error('Debes seleccionar al menos 1 ID'); return; }
                 setShowUnitIdSelectorForEdit(false);
                 setShowAddQtyPriceModal(true);
-                setAddQty(unitIdSelectedIds.length);
               }}
             >
               Confirmar Selección ({unitIdSelectedIds.length})
@@ -3013,68 +3096,14 @@ export function InvoicesMenu() {
       </Dialog>
 
       {/* Modal de cantidad y precio tras seleccionar producto */}
-      <Dialog open={showAddQtyPriceModal} onOpenChange={setShowAddQtyPriceModal}>
-        <DialogContent className="max-w-sm bg-white dark:bg-zinc-950">
-          <DialogHeader>
-            <DialogTitle className="text-zinc-900 dark:text-zinc-100">Configurar Producto</DialogTitle>
-            <DialogDescription className="text-zinc-600 dark:text-zinc-400">
-              {selectedProductToAdd?.name}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1">
-              <Label className="text-zinc-700 dark:text-zinc-300">Cantidad</Label>
-              <Input
-                type="number"
-                min={1}
-                value={addQty}
-                onChange={(e) => setAddQty(Math.max(1, parseInt(e.target.value) || 1))}
-                disabled={selectedProductToAdd?.use_unit_ids}
-                className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
-              />
-              {selectedProductToAdd?.use_unit_ids && (
-                <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Cantidad fijada por IDs seleccionadas: {unitIdSelectedIds.join(', ')}
-                </div>
-              )}
-            </div>
-            <div className="space-y-1">
-              <Label className="text-zinc-700 dark:text-zinc-300">Precio unitario</Label>
-              <Input
-                type="number"
-                min={0}
-                value={addPrice}
-                onChange={(e) => setAddPrice(parseFloat(e.target.value) || 0)}
-                className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
-              />
-              <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                Total: {formatCOP(addQty * addPrice)}
-              </div>
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAddQtyPriceModal(false)}>Cancelar</Button>
-            <Button
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
-              onClick={async () => {
-                if (selectedProductToAdd) {
-                  setShowAddQtyPriceModal(false);
-                  await handleAddProductToConfirmationInvoice(
-                    selectedProductToAdd,
-                    addQty,
-                    addPrice,
-                    selectedProductToAdd.use_unit_ids ? unitIdSelectedIds : []
-                  );
-                  setSelectedProductToAdd(null);
-                  setUnitIdSelectedIds([]);
-                }
-              }}
-            >
-              Agregar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ProductConfigModal
+        open={showAddQtyPriceModal}
+        onOpenChange={setShowAddQtyPriceModal}
+        product={selectedProductToAdd}
+        unitIdSelectedIds={unitIdSelectedIds}
+        onConfirm={handleProductConfigConfirm}
+        onCancel={handleProductConfigCancel}
+      />
 
       {/* Modal de editar precio unitario */}
       <Dialog open={showEditPriceModal} onOpenChange={setShowEditPriceModal}>

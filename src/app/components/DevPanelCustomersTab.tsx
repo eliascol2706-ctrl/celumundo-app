@@ -87,7 +87,7 @@ export function DevPanelCustomersTab() {
       dueDate.setDate(dueDate.getDate() + inv.paymentDays);
 
       await addInvoice({
-        type: 'regular',
+        type: 'credit',
         customer_name: customerName,
         customer_document: customerDocument,
         items: [],
