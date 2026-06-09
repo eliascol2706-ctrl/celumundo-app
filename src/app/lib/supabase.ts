@@ -96,11 +96,13 @@ export interface HistoryMovementProduct {
 
 export interface HistoryMovement {
   id: string;
-  type: 'DEVOLUCIÓN' | 'CAMBIO';
+  type: 'DEVOLUCIÓN' | 'CAMBIO' | 'NOTA_CRÉDITO';
   date: string;
   performed_by: string;
   affected_products: HistoryMovementProduct[];
   delivered_products?: HistoryMovementProduct[];
+  description?: string;
+  amount?: number;
 }
 
 export interface Customer {
@@ -140,7 +142,7 @@ export interface CreditHistory {
   id: string;
   company: 'celumundo' | 'repuestos';
   customer_document: string;
-  event_type: 'payment' | 'invoice' | 'status_change' | 'credit_limit_change' | 'note';
+  event_type: 'payment' | 'invoice' | 'status_change' | 'credit_limit_change' | 'note' | 'credit_note';
   description: string;
   amount?: number;
   reference_id?: string; // ID de factura o pago relacionado
@@ -198,7 +200,9 @@ export interface DailyClosure {
   pending_credit?: number; // Crédito pendiente
   credit_payments?: number; // Abonos a créditos del día
   exchange_impact?: number; // Impacto de cambios (diferencias de precio)
-  credit_notes_total?: number; // NUEVO: Total de notas de crédito emitidas (egresos)
+  credit_notes_total?: number; // Total de notas de crédito emitidas (monto reembolsado)
+  credit_notes_cash?: number; // Notas de crédito en efectivo (descuenta de caja)
+  credit_notes_transfer?: number; // Notas de crédito en transferencia (descuenta de transferencias)
   closed_by: string;
   closed_at: string;
   created_at?: string;
@@ -209,13 +213,18 @@ export interface MonthlyClosure {
   company: 'celumundo' | 'repuestos';
   month: string;
   year: number;
-  total_revenue: number; // Ingresos netos del mes (facturas pagadas y parcialmente devueltas)
+  total_revenue: number;
   total_invoices: number;
   daily_closures_count: number;
-  real_profit?: number; // Ganancias reales (ventas - costo productos - gastos) - DEPRECATED
-  profit_generated?: number; // Ganancia de todas las ventas del mes (regulares + crédito)
-  profit_collected?: number; // Ganancia de facturas pagadas al 100% en este mes
-  credit_notes_total?: number; // NUEVO: Total de notas de crédito emitidas en el mes (egresos)
+  real_profit?: number;
+  profit_generated?: number;
+  profit_collected?: number;
+  credit_notes_total?: number;
+  total_closures_income?: number; // Suma de total de cierres diarios (Ingresos del Mes)
+  cash_register_total?: number;   // Suma de cash_register_total de cierres diarios
+  final_profit?: number;          // Ganancias netas − gastos operativos
+  total_pending_credit?: number;  // Crédito pendiente al cierre
+  total_credit_payments?: number; // Abonos de créditos recibidos en el mes
   closed_by: string;
   closed_at: string;
   created_at?: string;
@@ -1260,43 +1269,121 @@ export const getInvoices = async (): Promise<Invoice[]> => {
   return data || [];
 };
 
-// NUEVA FUNCIÓN: Obtiene facturas de un cliente específico directamente de la base de datos
-export const getInvoicesByCustomer = async (customerDocument: string, customerName?: string): Promise<Invoice[]> => {
+// Obtiene facturas de los últimos N meses (para módulos de análisis)
+export const getInvoicesByMonthRange = async (monthsBack: number = 2): Promise<Invoice[]> => {
   const company = getCurrentCompany();
-
-  // Buscar por documento O por nombre del cliente (búsqueda flexible)
-  let query = supabase
+  const now = new Date();
+  // Inicio del mes hace N meses en Colombia (UTC-5) = 05:00 UTC
+  const startDate = new Date(Date.UTC(now.getFullYear(), now.getMonth() - monthsBack, 1) + 5 * 3600000);
+  const { data, error } = await supabase
     .from('invoices')
     .select('*')
     .eq('company', company)
-    .eq('is_credit', true);
+    .gte('date', startDate.toISOString())
+    .order('date', { ascending: false });
+  if (error) {
+    console.error('Error fetching invoices by month range:', error);
+    return [];
+  }
+  return data || [];
+};
 
-  // Intentar buscar por documento primero
-  const { data: byDocument, error: docError } = await query
-    .eq('customer_document', customerDocument)
+// Obtiene facturas de un día específico (Colombia date YYYY-MM-DD)
+export const getInvoicesByDate = async (dateStr: string): Promise<Invoice[]> => {
+  const company = getCurrentCompany();
+  // date column is stored as timestamptz — filter by Colombia day range
+  const startUTC = new Date(`${dateStr}T05:00:00Z`); // midnight Colombia = 05:00 UTC
+  const endUTC = new Date(`${dateStr}T05:00:00Z`);
+  endUTC.setDate(endUTC.getDate() + 1);
+  const { data, error } = await supabase
+    .from('invoices')
+    .select('*')
+    .eq('company', company)
+    .gte('date', startUTC.toISOString())
+    .lt('date', endUTC.toISOString())
+    .order('date', { ascending: false });
+  if (error) {
+    console.error('Error fetching invoices by date:', error);
+    return [];
+  }
+  return data || [];
+};
+
+// Obtiene facturas en estado pending_confirmation
+export const getPendingConfirmationInvoices = async (): Promise<Invoice[]> => {
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('invoices')
+    .select('*')
+    .eq('company', company)
+    .eq('status', 'pending_confirmation')
+    .order('date', { ascending: false });
+  if (error) {
+    console.error('Error fetching pending confirmation invoices:', error);
+    return [];
+  }
+  return data || [];
+};
+
+// Obtiene solo créditos con saldo pendiente (para cartera)
+export const getPendingCreditInvoices = async (): Promise<Invoice[]> => {
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('invoices')
+    .select('id, number, customer_name, customer_id, credit_balance, is_credit, status, date')
+    .eq('company', company)
+    .eq('is_credit', true)
+    .gt('credit_balance', 0);
+  if (error) {
+    console.error('Error fetching pending credit invoices:', error);
+    return [];
+  }
+  return (data || []) as any[];
+};
+
+// NUEVA FUNCIÓN: Obtiene facturas de un cliente específico directamente de la base de datos
+export const getInvoicesByCustomer = async (customerDocument: string, customerName?: string): Promise<Invoice[]> => {
+  const company = getCurrentCompany();
+  // Normalizar documento: eliminar espacios en blanco
+  const normalizedDocument = customerDocument.trim().replace(/\s+/g, '');
+
+  // Obtener todas las facturas a crédito de la empresa
+  const { data: allInvoices, error } = await supabase
+    .from('invoices')
+    .select('*')
+    .eq('company', company)
+    .eq('is_credit', true)
     .order('date', { ascending: false });
 
-  // Si no encuentra por documento y tenemos nombre, buscar por nombre
-  if ((!byDocument || byDocument.length === 0) && customerName) {
-    const { data: byName } = await supabase
-      .from('invoices')
-      .select('*')
-      .eq('company', company)
-      .eq('is_credit', true)
-      .ilike('customer_name', `%${customerName}%`)
-      .order('date', { ascending: false });
+  if (error) {
+    console.error('Error fetching customer invoices:', error);
+    return [];
+  }
 
-    if (byName && byName.length > 0) {
+  if (!allInvoices) return [];
+
+  // Filtrar en el cliente comparando documentos sin espacios
+  const byDocument = allInvoices.filter(invoice => {
+    const invoiceDocument = (invoice.customer_document || '').trim().replace(/\s+/g, '');
+    return invoiceDocument === normalizedDocument;
+  });
+
+  // Si encuentra por documento, retornar
+  if (byDocument.length > 0) {
+    return byDocument;
+  }
+
+  // Si no encuentra por documento y tenemos nombre, buscar por nombre
+  if (customerName) {
+    const byName = allInvoices.filter(invoice =>
+      invoice.customer_name?.toLowerCase().includes(customerName.toLowerCase())
+    );
+    if (byName.length > 0) {
       return byName;
     }
   }
 
-  if (docError) {
-    console.error('Error fetching customer invoices:', docError);
-    return [];
-  }
-
-  return byDocument || [];
+  return [];
 };
 
 // NUEVA FUNCIÓN: Obtiene TODAS las facturas sin límite (paginación automática)
@@ -3076,18 +3163,27 @@ export const deleteCreditPayment = async (id: string): Promise<boolean> => {
 
 export const getCreditHistory = async (customerDocument: string): Promise<CreditHistory[]> => {
   const company = getCurrentCompany();
+  // Normalizar documento: eliminar espacios en blanco
+  const normalizedDocument = customerDocument.trim().replace(/\s+/g, '');
+
   const { data, error } = await supabase
     .from('credit_history')
     .select('*')
     .eq('company', company)
-    .eq('customer_document', customerDocument)
     .order('created_at', { ascending: false });
-  
+
   if (error) {
     console.error('Error fetching credit history:', error);
     return [];
   }
-  return data || [];
+
+  // Filtrar en el cliente comparando documentos sin espacios
+  const filtered = (data || []).filter(record => {
+    const recordDocument = (record.customer_document || '').trim().replace(/\s+/g, '');
+    return recordDocument === normalizedDocument;
+  });
+
+  return filtered;
 };
 
 export const addCreditHistory = async (history: Omit<CreditHistory, 'id' | 'company' | 'created_at'>): Promise<CreditHistory | null> => {
@@ -3283,11 +3379,11 @@ export interface CreditNoteItem {
 
 export interface CreditNote {
   id: string;
-  company: 'celumundo' | 'repuestos';
+  company: 'celumondo' | 'repuestos';
   number: string;
   date: string;
-  invoice_id: string;
-  invoice_number: string;
+  invoice_id?: string;
+  invoice_number?: string;
   customer_name?: string;
   customer_document?: string;
   items: CreditNoteItem[];
@@ -3302,6 +3398,35 @@ export interface CreditNote {
   status: 'issued' | 'cancelled';
   created_at?: string;
   updated_at?: string;
+}
+
+export interface DebitNote {
+  id: string;
+  number: string;
+  company: 'celumondo' | 'repuestos';
+  customer_document: string;
+  customer_name: string;
+  amount: number;
+  balance_remaining: number;
+  reason: string;
+  notes?: string;
+  date: string;
+  due_date?: string;
+  registered_by: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface DebitNotePayment {
+  id: string;
+  debit_note_id: string;
+  amount: number;
+  payment_method: string;
+  notes?: string;
+  date: string;
+  registered_by: string;
+  company: 'celumondo' | 'repuestos';
+  created_at?: string;
 }
 
 export const getCreditNotes = async (): Promise<CreditNote[]> => {
@@ -3336,19 +3461,54 @@ export const getCreditNotesByInvoice = async (invoiceId: string): Promise<Credit
 
 export const getCreditNotesByCustomer = async (customerDocument: string): Promise<CreditNote[]> => {
   const company = getCurrentCompany();
+  // Normalizar documento: eliminar espacios en blanco
+  const normalizedDocument = customerDocument.trim().replace(/\s+/g, '');
+
   const { data, error } = await supabase
     .from('credit_notes')
     .select('*')
     .eq('company', company)
-    .eq('customer_document', customerDocument)
     .eq('status', 'issued')
     .gt('balance_remaining', 0)
     .order('date', { ascending: false });
+
   if (error) {
     console.error('Error fetching credit notes by customer:', error);
     return [];
   }
-  return data || [];
+
+  // Filtrar en el cliente comparando documentos sin espacios
+  const filtered = (data || []).filter(note => {
+    const noteDocument = (note.customer_document || '').trim().replace(/\s+/g, '');
+    return noteDocument === normalizedDocument;
+  });
+
+  return filtered;
+};
+
+export const getDebitNotesByCustomer = async (customerDocument: string): Promise<DebitNote[]> => {
+  const company = getCurrentCompany();
+  // Normalizar documento: eliminar espacios en blanco
+  const normalizedDocument = customerDocument.trim().replace(/\s+/g, '');
+
+  const { data, error } = await supabase
+    .from('debit_notes')
+    .select('*')
+    .eq('company', company)
+    .order('date', { ascending: false });
+
+  if (error) {
+    console.error('Error fetching debit notes by customer:', error);
+    return [];
+  }
+
+  // Filtrar en el cliente comparando documentos sin espacios
+  const filtered = (data || []).filter(note => {
+    const noteDocument = (note.customer_document || '').trim().replace(/\s+/g, '');
+    return noteDocument === normalizedDocument;
+  });
+
+  return filtered;
 };
 
 export const getCreditNotesByDate = async (dateStr: string): Promise<CreditNote[]> => {

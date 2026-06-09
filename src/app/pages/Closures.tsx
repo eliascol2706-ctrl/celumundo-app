@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { Calendar, FileText, TrendingUp, AlertTriangle, Eye } from 'lucide-react';
+import { Calendar, FileText, TrendingUp, AlertTriangle, Eye, Pencil } from 'lucide-react';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
 import {
   getInvoices,
   getDailyClosures,
@@ -44,6 +46,10 @@ export function Closures() {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null); // NUEVO: Mes seleccionado para cierre
   const [selectedClosure, setSelectedClosure] = useState<any | null>(null); // Cierre seleccionado para ver detalles
   const [isClosureDetailsOpen, setIsClosureDetailsOpen] = useState(false); // Modal de detalles de cierre
+  const [editingClosure, setEditingClosure] = useState<any | null>(null);
+  const [editTotal, setEditTotal] = useState('');
+  const [editCashRegister, setEditCashRegister] = useState('');
+  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const itemsPerPage = 10;
   const invoicesPerPage = 20;
 
@@ -125,6 +131,37 @@ export function Closures() {
       console.warn('⚠️ SOLUCIÓN: Elimina el cierre incorrecto ejecutando este comando en la consola:');
       console.warn(`   deleteDailyClosure("${todayClosures[0].id}")`);
       console.warn('⚠️ Luego recarga la página y vuelve a hacer el cierre.');
+    }
+  };
+
+  const handleOpenEditClosure = (closure: any) => {
+    setEditingClosure(closure);
+    setEditTotal(String(closure.total || 0));
+    setEditCashRegister(String(closure.cash_register_total || 0));
+  };
+
+  const handleSaveEditClosure = async () => {
+    if (!editingClosure) return;
+    setIsSavingEdit(true);
+    try {
+      const { supabase, getCurrentCompany } = await import('../lib/supabase');
+      const company = getCurrentCompany();
+      const { error } = await supabase
+        .from('daily_closures')
+        .update({
+          total: parseFloat(editTotal) || 0,
+          cash_register_total: parseFloat(editCashRegister) || 0,
+        })
+        .eq('id', editingClosure.id)
+        .eq('company', company);
+      if (error) throw error;
+      toast.success('Cierre actualizado correctamente');
+      setEditingClosure(null);
+      await loadData();
+    } catch (err) {
+      toast.error('Error al actualizar el cierre');
+    } finally {
+      setIsSavingEdit(false);
     }
   };
 
@@ -777,40 +814,7 @@ export function Closures() {
       {/* Alerta de cierre mensual requerido */}
       {needsMonthlyClose().needed && (
         <Card className="border-orange-300 dark:border-orange-700 bg-orange-50 dark:bg-orange-950/30">
-          <CardContent className="pt-6">
-            <div className="flex items-start gap-4">
-              <div className="flex-shrink-0">
-                <AlertTriangle className="h-8 w-8 text-orange-600 dark:text-orange-400" />
-              </div>
-              <div className="flex-1">
-                <h3 className="text-lg font-bold text-orange-900 dark:text-orange-100 mb-2">
-                  ⚠️ Cierre Mensual Requerido
-                </h3>
-                <p className="text-orange-800 dark:text-orange-200 mb-3">
-                  Es un nuevo mes y necesitas realizar el <strong>Cierre Mensual de {needsMonthlyClose().monthName}</strong> antes de continuar facturando.
-                </p>
-                <p className="text-sm text-orange-700 dark:text-orange-300 mb-4">
-                  El sistema bloqueará la creación de nuevas facturas hasta que se complete este cierre.
-                </p>
-                <Button
-                  onClick={() => {
-                    const pendingMonth = needsMonthlyClose();
-                    if (pendingMonth.needed && pendingMonth.month) {
-                      setSelectedMonth(pendingMonth.month);
-                    }
-                    setView('monthly');
-                    setTimeout(() => {
-                      window.scrollTo({ top: 0, behavior: 'smooth' });
-                    }, 100);
-                  }}
-                  className="bg-orange-600 hover:bg-orange-700 text-white"
-                >
-                  <FileText className="h-4 w-4 mr-2" />
-                  Realizar Cierre Mensual Ahora
-                </Button>
-              </div>
-            </div>
-          </CardContent>
+          
         </Card>
       )}
 
@@ -1025,8 +1029,10 @@ export function Closures() {
                       <th className="text-left py-2 px-3 text-sm font-medium">Fecha</th>
                       <th className="text-center py-2 px-3 text-sm font-medium">Facturas</th>
                       <th className="text-right py-2 px-3 text-sm font-medium">Total Ingresos</th>
+                      <th className="text-right py-2 px-3 text-sm font-medium">🏧 Por Caja</th>
                       <th className="text-right py-2 px-3 text-sm font-medium">💰 Del Día</th>
                       <th className="text-right py-2 px-3 text-sm font-medium">📊 Por Crédito</th>
+                      <th className="text-right py-2 px-3 text-sm font-medium">🏦 Cartera</th>
                       <th className="text-left py-2 px-3 text-sm font-medium">Cerrado por</th>
                       <th className="text-center py-2 px-3 text-sm font-medium">Acciones</th>
                     </tr>
@@ -1044,6 +1050,7 @@ export function Closures() {
                           {paginatedClosures.map((closure) => {
                             const profitGenerated = closure.profit_generated || 0;
                             const profitCollected = closure.profit_collected || 0;
+                            const carteraTotal = closure.cartera_total ?? null;
 
                             return (
                               <tr key={closure.id} className="border-b border-border hover:bg-muted/50">
@@ -1054,34 +1061,48 @@ export function Closures() {
                                 <td className="py-2 px-3 text-right text-sm font-bold text-emerald-600 dark:text-emerald-400">
                                   COP {formatCOP(closure.total)}
                                 </td>
+                                <td className="py-2 px-3 text-right text-sm font-bold text-teal-600 dark:text-teal-400">
+                                  {closure.cash_register_total != null ? `COP ${formatCOP(closure.cash_register_total)}` : <span className="text-muted-foreground text-xs">—</span>}
+                                </td>
                                 <td className="py-2 px-3 text-right text-sm font-bold text-green-600 dark:text-green-400">
                                   COP {formatCOP(profitCollected)}
                                 </td>
                                 <td className="py-2 px-3 text-right text-sm font-bold text-blue-600 dark:text-blue-400">
                                   COP {formatCOP(profitGenerated)}
                                 </td>
+                                <td className="py-2 px-3 text-right text-sm font-bold text-purple-600 dark:text-purple-400">
+                                  {closure.pending_credit ? `COP ${formatCOP(closure.pending_credit)}` : <span className="text-muted-foreground text-xs">—</span>}
+                                </td>
                                 <td className="py-2 px-3 text-sm">{closure.closed_by}</td>
                                 <td className="py-2 px-3 text-center">
-                                  <Button
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => {
-                                      console.log('=== CIERRE SELECCIONADO PARA VER DETALLES ===');
-                                      console.log(JSON.stringify(closure, null, 2));
-                                      setSelectedClosure(closure);
-                                      setIsClosureDetailsOpen(true);
-                                    }}
-                                    className="h-8 w-8 p-0"
-                                  >
-                                    <Eye className="h-4 w-4" />
-                                  </Button>
+                                  <div className="flex items-center justify-center gap-1">
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => {
+                                        setSelectedClosure(closure);
+                                        setIsClosureDetailsOpen(true);
+                                      }}
+                                      className="h-8 w-8 p-0"
+                                    >
+                                      <Eye className="h-4 w-4" />
+                                    </Button>
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => handleOpenEditClosure(closure)}
+                                      className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
+                                    >
+                                      <Pencil className="h-4 w-4" />
+                                    </Button>
+                                  </div>
                                 </td>
                               </tr>
                             );
                           })}
                           {paginatedClosures.length === 0 && (
                             <tr>
-                              <td colSpan={7} className="py-8 text-center text-muted-foreground">
+                              <td colSpan={9} className="py-8 text-center text-muted-foreground">
                                 No hay cierres registrados
                               </td>
                             </tr>
@@ -1517,6 +1538,44 @@ export function Closures() {
         }}
       />
 
+      {/* Modal de edición de cierre */}
+      <Dialog open={!!editingClosure} onOpenChange={(open) => { if (!open) setEditingClosure(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Editar Cierre</DialogTitle>
+            <DialogDescription>
+              {editingClosure && `Cierre del ${new Date(editingClosure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1">
+              <Label htmlFor="edit-total">Total Ingresos (COP)</Label>
+              <Input
+                id="edit-total"
+                type="number"
+                value={editTotal}
+                onChange={(e) => setEditTotal(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="edit-cash-register">Ingresos por Caja (COP)</Label>
+              <Input
+                id="edit-cash-register"
+                type="number"
+                value={editCashRegister}
+                onChange={(e) => setEditCashRegister(e.target.value)}
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setEditingClosure(null)}>Cancelar</Button>
+              <Button onClick={handleSaveEditClosure} disabled={isSavingEdit}>
+                {isSavingEdit ? 'Guardando...' : 'Guardar'}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {/* Dialog de detalles del cierre */}
       <Dialog open={isClosureDetailsOpen} onOpenChange={setIsClosureDetailsOpen}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
@@ -1551,7 +1610,9 @@ export function Closures() {
                     <div>
                       <p className="text-sm text-muted-foreground">Hora de Cierre</p>
                       <p className="font-medium">
-                        {new Date(selectedClosure.date).toLocaleTimeString('es-ES', { timeZone: 'UTC', hour: '2-digit', minute: '2-digit' })}
+                        {selectedClosure.closed_at
+                          ? new Date(selectedClosure.closed_at).toLocaleTimeString('es-ES', { timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit' })
+                          : '—'}
                       </p>
                     </div>
                   </div>
@@ -1569,6 +1630,12 @@ export function Closures() {
                       <p className="text-sm text-muted-foreground mb-1">Total Ingresos</p>
                       <p className="text-2xl font-bold text-green-600 dark:text-green-400">
                         COP {formatCOP(selectedClosure.total || 0)}
+                      </p>
+                    </div>
+                    <div className="p-4 bg-teal-50 dark:bg-teal-950/30 rounded-lg">
+                      <p className="text-sm text-muted-foreground mb-1">🏧 Ingresos por Caja</p>
+                      <p className="text-2xl font-bold text-teal-600 dark:text-teal-400">
+                        COP {formatCOP(selectedClosure.cash_register_total || 0)}
                       </p>
                     </div>
                     <div className="p-4 bg-blue-50 dark:bg-blue-950/30 rounded-lg">

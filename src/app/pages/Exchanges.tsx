@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Search, Plus, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight, Trash2, CheckCircle, XCircle, X, Loader2, ArrowRight, Package2 } from 'lucide-react';
+import { Search, Plus, ArrowRightLeft, DollarSign, ChevronLeft, ChevronRight, Trash2, CheckCircle, XCircle, X, Loader2, ArrowRight, Package2, Printer } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -235,30 +235,61 @@ export default function Exchanges() {
 
   const handleToggleReturnProduct = (item: any, checked: boolean) => {
     if (checked) {
-      // Los productos comunes no se pueden intercambiar
       if (item.productId.startsWith('common-')) {
         toast.error('Los productos comunes no se pueden intercambiar');
         return;
       }
-
-      // Agregar producto a la lista de devolución
       const product = products.find(p => p.id === item.productId);
       if (!product) return;
+
+      const initialUnitIds = item.unitIds && item.unitIds.length > 0
+        ? [item.unitIds[0]]
+        : undefined;
 
       const exchangeProduct: ExchangeProduct = {
         productId: item.productId,
         productName: item.productName,
-        quantity: item.quantity,
+        quantity: 1,
         price: item.price,
-        total: item.total,
-        unitIds: item.unitIds || undefined,
+        total: item.price * 1,
+        unitIds: initialUnitIds,
       };
-
       setProductsToReturn([...productsToReturn, exchangeProduct]);
     } else {
-      // Remover producto de la lista de devolución
       setProductsToReturn(productsToReturn.filter(p => p.productId !== item.productId));
     }
+  };
+
+  const handleUpdateReturnQuantity = (productId: string, newQty: number, maxQty: number, item: any) => {
+    const qty = Math.max(1, Math.min(newQty, maxQty));
+    setProductsToReturn(prev => prev.map(p => {
+      if (p.productId !== productId) return p;
+      // Ajustar unitIds si hay más seleccionados de los que caben
+      let unitIds = p.unitIds;
+      if (unitIds && unitIds.length > qty) {
+        unitIds = unitIds.slice(0, qty);
+      }
+      return { ...p, quantity: qty, total: p.price * qty, unitIds };
+    }));
+  };
+
+  const handleToggleReturnUnitId = (productId: string, unitId: string, maxQty: number) => {
+    setProductsToReturn(prev => prev.map(p => {
+      if (p.productId !== productId) return p;
+      const current = p.unitIds || [];
+      let updated: string[];
+      if (current.includes(unitId)) {
+        updated = current.filter(id => id !== unitId);
+        if (updated.length === 0) updated = current; // no deseleccionar el último
+      } else {
+        if (current.length >= maxQty) {
+          toast.error(`Solo puedes seleccionar hasta ${maxQty} unidad(es)`);
+          return p;
+        }
+        updated = [...current, unitId];
+      }
+      return { ...p, quantity: updated.length, total: p.price * updated.length, unitIds: updated };
+    }));
   };
 
   const handleAddNewProduct = () => {
@@ -381,6 +412,224 @@ export default function Exchanges() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handlePrintExchange = (exchange: Exchange) => {
+    const html = generateExchangeReceiptHTML(exchange);
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => {
+        printWindow.print();
+      }, 250);
+    }
+  };
+
+  const generateExchangeReceiptHTML = (exchange: Exchange): string => {
+    const companyName = 'CELUMUNDO VIP';
+    const exchangeDate = new Date(exchange.date).toLocaleString('es-ES', {
+      timeZone: 'America/Bogota',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+
+    // Productos devueltos
+    const returnedProductsHTML = (exchange.original_products || [])
+      .map((prod: ExchangeProduct) => {
+        let idsHTML = '';
+        if (prod.unitIds && prod.unitIds.length > 0) {
+          const idsText = prod.unitIds.join(', ');
+          idsHTML = `
+            <div style="font-size: 7px; margin-top: 1mm; padding: 1mm; background: #f5f5f5;">
+              <div>IDs: ${idsText}</div>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="product-item">
+            <div style="margin-bottom: 1mm;">${prod.productName}</div>
+            <div>${prod.quantity} x ${formatCOP(prod.price)} = ${formatCOP(prod.total)}</div>
+            ${idsHTML}
+          </div>
+        `;
+      })
+      .join('');
+
+    // Productos entregados
+    const deliveredProductsHTML = (exchange.new_products || [])
+      .map((prod: ExchangeProduct) => {
+        let idsHTML = '';
+        if (prod.unitIds && prod.unitIds.length > 0) {
+          const idsText = prod.unitIds.join(', ');
+          idsHTML = `
+            <div style="font-size: 7px; margin-top: 1mm; padding: 1mm; background: #f5f5f5;">
+              <div>IDs: ${idsText}</div>
+            </div>
+          `;
+        }
+
+        return `
+          <div class="product-item">
+            <div style="margin-bottom: 1mm;">${prod.productName}</div>
+            <div>${prod.quantity} x ${formatCOP(prod.price)} = ${formatCOP(prod.total)}</div>
+            ${idsHTML}
+          </div>
+        `;
+      })
+      .join('');
+
+    const difference = exchange.price_difference || 0;
+    const differenceLabel = difference > 0 ? 'CLIENTE DEBE PAGAR' : difference < 0 ? 'SE REEMBOLSO AL CLIENTE' : 'SIN DIFERENCIA';
+
+    // Método de pago si hay diferencia
+    let paymentHTML = '';
+    if (difference !== 0 && exchange.payment_method) {
+      const parts: string[] = [];
+      if (exchange.payment_cash && exchange.payment_cash > 0) parts.push(`• Efectivo: ${formatCOP(exchange.payment_cash)}`);
+      if (exchange.payment_transfer && exchange.payment_transfer > 0) parts.push(`• Transferencia: ${formatCOP(exchange.payment_transfer)}`);
+      if (exchange.payment_other && exchange.payment_other > 0) parts.push(`• Otros: ${formatCOP(exchange.payment_other)}`);
+
+      if (parts.length > 0) {
+        paymentHTML = `
+          <div style="margin-bottom: 3mm; font-size: 8px; border-bottom: 1px solid black; padding-bottom: 2mm;">
+            <div style="margin-bottom: 1mm; font-size: 9px;">METODO DE PAGO:</div>
+            ${parts.map(p => `<div style="margin-bottom: 1mm;">${p}</div>`).join('')}
+          </div>
+        `;
+      }
+    }
+
+    return `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <style>
+          @page {
+            size: 80mm auto;
+            margin: 0;
+            padding: 0;
+          }
+          * {
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+          }
+          body {
+            width: 70mm;
+            max-width: 70mm;
+            font-family: 'Arial', 'Helvetica Neue', Helvetica, sans-serif;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 2mm 3mm;
+            background: white;
+            color: #000;
+            margin: 0;
+            line-height: 1.5;
+          }
+          .header {
+            text-align: center;
+            margin-bottom: 3mm;
+            border-bottom: 2px solid black;
+            padding-bottom: 2mm;
+          }
+          .info {
+            margin-bottom: 3mm;
+            font-size: 10px;
+            border-bottom: 1px solid black;
+            padding-bottom: 2mm;
+          }
+          .products {
+            margin-bottom: 3mm;
+            border-bottom: 1px solid black;
+            padding-bottom: 2mm;
+          }
+          .product-item {
+            margin-bottom: 2mm;
+            font-size: 10px;
+          }
+          .total-section {
+            margin: 3mm 0;
+            border-top: 2px solid black;
+            border-bottom: 2px solid black;
+            padding: 3mm 0;
+            text-align: center;
+            background: #f0f0f0;
+          }
+          .total-label {
+            font-size: 11px;
+            font-weight: 800;
+            margin-bottom: 2mm;
+            color: #000;
+          }
+          .total-amount {
+            font-size: 16px;
+            font-weight: 800;
+            color: #000;
+          }
+          .footer {
+            text-align: center;
+            font-size: 10px;
+            margin-top: 3mm;
+            padding-top: 2mm;
+            color: #000;
+          }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div style="font-size: 15px; font-weight: 800; margin-bottom: 2mm; color: #000;">${companyName}</div>
+          <div style="font-size: 13px; font-weight: 700; margin-bottom: 1mm; color: #000;">COMPROBANTE DE CAMBIO</div>
+          <div style="font-size: 12px; font-weight: 500; color: #000;">No. ${exchange.exchange_number}</div>
+        </div>
+
+        <div class="info">
+          <div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Fecha: ${exchangeDate}</div>
+          <div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Factura: ${exchange.invoice_number || '-'}</div>
+          <div style="font-size: 11px; color: #000;">Cliente: ${exchange.customer_name || 'Sin nombre'}</div>
+        </div>
+
+        <div class="products">
+          <div style="text-align: center; font-size: 12px; font-weight: 800; margin-bottom: 2mm; color: #000; background: #000; color: #fff; padding: 2mm;">PRODUCTOS DEVUELTOS</div>
+          ${returnedProductsHTML}
+        </div>
+
+        <div class="products">
+          <div style="text-align: center; font-size: 12px; font-weight: 800; margin-bottom: 2mm; color: #000; background: #000; color: #fff; padding: 2mm;">PRODUCTOS ENTREGADOS</div>
+          ${deliveredProductsHTML}
+        </div>
+
+        <div class="total-section">
+          <div class="total-label">${differenceLabel}</div>
+          <div class="total-amount">${formatCOP(Math.abs(difference))}</div>
+        </div>
+
+        ${paymentHTML}
+
+        <div class="footer">
+          <div style="margin: 2mm 0; border-top: 1px solid black; padding-top: 2mm;"></div>
+          <div style="font-size: 12px; font-weight: 800; margin-bottom: 2mm; color: #000;">GRACIAS POR SU COMPRA</div>
+          <div style="font-size: 11px; font-weight: 500; margin-bottom: 1mm; color: #000;">${companyName}</div>
+          <div style="font-size: 11px; font-weight: 500; margin-bottom: 1mm; color: #000;">www.celumundovip.com</div>
+          <div style="font-size: 10px; color: #333;">${new Date().toLocaleString('es-ES')}</div>
+        </div>
+
+        <!-- Espacio adicional para que el comprobante salga completo -->
+        <div style="height: 30mm; width: 100%;"></div>
+
+        <!-- Comando de corte de papel (ESC/POS) -->
+        <div style="page-break-after: always;"></div>
+      </body>
+    </html>
+  `;
   };
 
   const handleSubmit = async () => {
@@ -646,6 +895,11 @@ export default function Exchanges() {
                                   <div className="text-xs text-muted-foreground">
                                     Cant: {prod.quantity} × COP {formatCOP(prod.price)}
                                   </div>
+                                  {prod.unitIds && prod.unitIds.length > 0 && (
+                                    <div className="text-xs text-blue-600 dark:text-blue-400 font-mono">
+                                      IDs: {prod.unitIds.join(', ')}
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -667,6 +921,11 @@ export default function Exchanges() {
                                   <div className="text-xs text-muted-foreground">
                                     Cant: {prod.quantity} × COP {formatCOP(prod.price)}
                                   </div>
+                                  {prod.unitIds && prod.unitIds.length > 0 && (
+                                    <div className="text-xs text-green-600 dark:text-green-400 font-mono">
+                                      IDs: {prod.unitIds.join(', ')}
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -757,16 +1016,28 @@ export default function Exchanges() {
                                 </Button>
                               </>
                             ) : exchange.status === 'completed' ? (
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleDelete(exchange.id, exchange.exchange_number)}
-                                disabled={isLoading}
-                                className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
-                                title="Eliminar cambio"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
+                              <>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handlePrintExchange(exchange)}
+                                  disabled={isLoading}
+                                  className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950/30"
+                                  title="Imprimir comprobante"
+                                >
+                                  <Printer className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  onClick={() => handleDelete(exchange.id, exchange.exchange_number)}
+                                  disabled={isLoading}
+                                  className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/30"
+                                  title="Eliminar cambio"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
                             ) : (
                               <span className="text-xs text-muted-foreground">-</span>
                             )}
@@ -987,39 +1258,105 @@ export default function Exchanges() {
                 {/* Lista de productos de la factura */}
                 <div className="space-y-2">
                   <Label>Selecciona los productos que el cliente devuelve</Label>
-                  <div className="border border-border rounded-lg divide-y divide-border max-h-[400px] overflow-y-auto">
+                  <div className="border border-border rounded-lg divide-y divide-border max-h-[500px] overflow-y-auto">
                     {selectedInvoice.items && selectedInvoice.items.length > 0 ? (
                       selectedInvoice.items.map((item: any, index: number) => {
-                        const isSelected = productsToReturn.some(p => p.productId === item.productId);
+                        const selected = productsToReturn.find(p => p.productId === item.productId);
+                        const isSelected = !!selected;
+                        const hasUnitIds = item.unitIds && item.unitIds.length > 0;
 
                         return (
-                          <label
+                          <div
                             key={index}
-                            className={`flex items-center gap-3 p-4 cursor-pointer hover:bg-muted/50 transition-colors ${
-                              isSelected ? 'bg-red-50 dark:bg-red-950/30 border-l-4 border-red-500' : ''
+                            className={`p-4 transition-colors ${
+                              isSelected ? 'bg-red-50 dark:bg-red-950/30 border-l-4 border-red-500' : 'hover:bg-muted/50'
                             }`}
                           >
-                            <input
-                              type="checkbox"
-                              checked={isSelected}
-                              onChange={(e) => handleToggleReturnProduct(item, e.target.checked)}
-                              className="w-5 h-5 rounded border-gray-300"
-                            />
-                            <div className="flex-1">
-                              <p className="font-medium">{item.productName}</p>
-                              <p className="text-sm text-muted-foreground">
-                                Cantidad: {item.quantity} × COP {formatCOP(item.price)} = COP {formatCOP(item.total)}
-                              </p>
-                              {item.unitIds && item.unitIds.length > 0 && (
-                                <p className="text-xs text-blue-600 dark:text-blue-400 mt-1">
-                                  IDs: {item.unitIds.join(', ')}
+                            {/* Fila principal: checkbox + nombre */}
+                            <label className="flex items-center gap-3 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={(e) => handleToggleReturnProduct(item, e.target.checked)}
+                                className="w-5 h-5 rounded border-gray-300 flex-shrink-0"
+                              />
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium">{item.productName}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  En factura: {item.quantity} × COP {formatCOP(item.price)} = COP {formatCOP(item.total)}
                                 </p>
-                              )}
-                            </div>
+                              </div>
+                              {isSelected && <CheckCircle className="h-5 w-5 text-red-600 dark:text-red-400 flex-shrink-0" />}
+                            </label>
+
+                            {/* Controles inline cuando está seleccionado */}
                             {isSelected && (
-                              <CheckCircle className="h-5 w-5 text-red-600 dark:text-red-400" />
+                              <div className="mt-3 ml-8 space-y-3">
+                                {/* Selector de cantidad (solo si qty > 1 en la factura) */}
+                                {item.quantity > 1 && !hasUnitIds && (
+                                  <div className="flex items-center gap-3">
+                                    <span className="text-sm text-muted-foreground">Cantidad a devolver:</span>
+                                    <div className="flex items-center gap-2">
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 w-7 p-0"
+                                        onClick={() => handleUpdateReturnQuantity(item.productId, (selected.quantity) - 1, item.quantity, item)}
+                                      >
+                                        −
+                                      </Button>
+                                      <span className="w-6 text-center font-semibold text-sm">{selected.quantity}</span>
+                                      <Button
+                                        type="button"
+                                        variant="outline"
+                                        size="sm"
+                                        className="h-7 w-7 p-0"
+                                        onClick={() => handleUpdateReturnQuantity(item.productId, (selected.quantity) + 1, item.quantity, item)}
+                                      >
+                                        +
+                                      </Button>
+                                      <span className="text-xs text-muted-foreground">/ {item.quantity}</span>
+                                    </div>
+                                    <span className="text-sm font-semibold text-red-600">
+                                      = COP {formatCOP(selected.total)}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Selector de IDs individuales */}
+                                {hasUnitIds && (
+                                  <div>
+                                    <p className="text-sm text-muted-foreground mb-2">
+                                      Selecciona la(s) unidad(es) devuelta(s):
+                                    </p>
+                                    <div className="flex flex-wrap gap-2">
+                                      {item.unitIds.map((uid: string) => {
+                                        const isUidSelected = selected.unitIds?.includes(uid) ?? false;
+                                        return (
+                                          <button
+                                            key={uid}
+                                            type="button"
+                                            onClick={() => handleToggleReturnUnitId(item.productId, uid, item.quantity)}
+                                            className={`px-3 py-1 rounded-full text-xs font-mono border transition-colors ${
+                                              isUidSelected
+                                                ? 'bg-red-500 text-white border-red-500'
+                                                : 'bg-muted text-muted-foreground border-border hover:border-red-400'
+                                            }`}
+                                          >
+                                            #{uid}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                      {selected.quantity} seleccionada(s) × COP {formatCOP(selected.price)} = <span className="font-semibold text-red-600">COP {formatCOP(selected.total)}</span>
+                                    </p>
+                                  </div>
+                                )}
+                              </div>
                             )}
-                          </label>
+                          </div>
                         );
                       })
                     ) : (

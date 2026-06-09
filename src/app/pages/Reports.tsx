@@ -1,8 +1,9 @@
 import { useState, useEffect, useRef } from 'react';
-import { Package, DollarSign, TrendingDown, AlertCircle, Eye, TrendingUp, BarChart3, ShoppingCart, Sparkles, ClipboardList, Download, CheckCircle, CreditCard, FileText, Printer } from 'lucide-react';
-import { getAllProducts, getInvoices, getExpenses, getCustomers, type Product, type Invoice, type Expense, type Customer } from '../lib/supabase';
+import { Package, DollarSign, TrendingDown, AlertCircle, Eye, TrendingUp, BarChart3, ShoppingCart, Sparkles, ClipboardList, Download, CheckCircle, CreditCard, FileText, Printer, Filter, X } from 'lucide-react';
+import { getAllProducts, getInvoices, getExpenses, getCustomers, getDepartments, type Product, type Invoice, type Expense, type Customer, type Department } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip, BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line } from 'recharts';
 import { formatCOP } from '../lib/currency';
@@ -37,6 +38,68 @@ export default function Reports() {
   const [inventoryReady, setInventoryReady] = useState(false);
   const inventoryPdfRef = useRef<Blob | null>(null);
 
+  // Estados para filtros del reporte de inventario
+  const [showInventoryFilters, setShowInventoryFilters] = useState(false);
+  const [departments, setDepartments] = useState<Department[]>([]);
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [hideZeroStock, setHideZeroStock] = useState(false);
+  const [inventoryPreviewData, setInventoryPreviewData] = useState<any[] | null>(null);
+  const [showInventoryPreview, setShowInventoryPreview] = useState(false);
+
+  // Estados para análisis por categoría
+  const [showCategoryAnalysisModal, setShowCategoryAnalysisModal] = useState(false);
+  const [selectedCategoryForAnalysis, setSelectedCategoryForAnalysis] = useState<string>('');
+  const [categoryAnalysisLoading, setCategoryAnalysisLoading] = useState(false);
+  const [categoryAnalysisResults, setCategoryAnalysisResults] = useState<Array<{
+    code: string; name: string; quantity: number; avgPrice: number; unitCost: number; avgProfit: number; totalRevenue: number;
+  }> | null>(null);
+
+  const runCategoryAnalysis = async (category: string) => {
+    setCategoryAnalysisLoading(true);
+    setCategoryAnalysisResults(null);
+    await new Promise(resolve => setTimeout(resolve, 800));
+    const currentMonth = new Date().getMonth();
+    const currentYear = new Date().getFullYear();
+    const monthInvoices = invoices.filter(inv => {
+      const d = new Date(inv.date);
+      return d.getMonth() === currentMonth && d.getFullYear() === currentYear &&
+        (inv.status === 'paid' || inv.status === 'partial_return' || inv.status === 'pending');
+    });
+    const map: Map<string, { code: string; name: string; quantity: number; totalRevenue: number; unitCost: number }> = new Map();
+    monthInvoices.forEach(inv => {
+      inv.items?.forEach((item: any) => {
+        const product = products.find(p => p.id === item.productId);
+        if (!product || (product.category || 'Sin categoría') !== category) return;
+        const key = item.productId;
+        const existing = map.get(key);
+        const revenue = (item.price || 0) * (item.quantity || 0);
+        if (existing) {
+          existing.quantity += item.quantity || 0;
+          existing.totalRevenue += revenue;
+        } else {
+          map.set(key, {
+            code: item.productCode || product?.code || '-',
+            name: item.productName || product?.name || 'Desconocido',
+            quantity: item.quantity || 0,
+            totalRevenue: revenue,
+            unitCost: product?.current_cost || 0,
+          });
+        }
+      });
+    });
+    const results = Array.from(map.values()).map(p => ({
+      code: p.code,
+      name: p.name,
+      quantity: p.quantity,
+      avgPrice: p.quantity > 0 ? p.totalRevenue / p.quantity : 0,
+      unitCost: p.unitCost,
+      avgProfit: p.quantity > 0 ? (p.totalRevenue / p.quantity) - p.unitCost : 0,
+      totalRevenue: p.totalRevenue,
+    })).sort((a, b) => b.quantity - a.quantity || b.totalRevenue - a.totalRevenue);
+    setCategoryAnalysisResults(results);
+    setCategoryAnalysisLoading(false);
+  };
+
   // Estados para reporte de crédito
   const [showCreditReport, setShowCreditReport] = useState(false);
   const [creditProgress, setCreditProgress] = useState(0);
@@ -52,16 +115,18 @@ export default function Reports() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [productsData, invoicesData, expensesData, customersData] = await Promise.all([
+      const [productsData, invoicesData, expensesData, customersData, departmentsData] = await Promise.all([
         getAllProducts(),
         getInvoices(),
         getExpenses(),
         getCustomers(),
+        getDepartments(),
       ]);
       setProducts(productsData);
       setInvoices(invoicesData);
       setExpenses(expensesData);
       setCustomers(customersData);
+      setDepartments(departmentsData);
     } catch (error) {
       console.error('Error loading data:', error);
     } finally {
@@ -69,7 +134,32 @@ export default function Reports() {
     }
   };
 
-  const openInventoryReport = async () => {
+  const getFilteredInventoryProducts = (cats: string[], noZero: boolean) => {
+    let filtered = [...products];
+    if (cats.length > 0) {
+      filtered = filtered.filter(p => cats.includes(p.category || ''));
+    }
+    if (noZero) {
+      filtered = filtered.filter(p => (p.stock ?? 0) > 0);
+    }
+    return filtered.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  };
+
+  const openInventoryFilters = () => {
+    setSelectedCategories([]);
+    setHideZeroStock(false);
+    setShowInventoryFilters(true);
+  };
+
+  const handleInventoryPreview = () => {
+    const sorted = getFilteredInventoryProducts(selectedCategories, hideZeroStock);
+    setInventoryPreviewData(sorted);
+    setShowInventoryFilters(false);
+    setShowInventoryPreview(true);
+  };
+
+  const openInventoryReport = async (cats: string[], noZero: boolean) => {
+    setShowInventoryFilters(false);
     setInventoryProgress(0);
     setInventoryReady(false);
     inventoryPdfRef.current = null;
@@ -83,7 +173,7 @@ export default function Reports() {
     }
 
     // Generar PDF
-    const sorted = [...products].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+    const sorted = getFilteredInventoryProducts(cats, noZero);
 
     const totalProducts = sorted.length;
     const totalCost = sorted.reduce((s, p) => s + ((p.current_cost || 0) * (p.stock || 0)), 0);
@@ -648,7 +738,7 @@ export default function Reports() {
         </div>
         <div className="flex gap-2">
           <Button
-            onClick={openInventoryReport}
+            onClick={openInventoryFilters}
             variant="outline"
             className="border-zinc-400 dark:border-zinc-600 text-zinc-800 dark:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
@@ -1224,11 +1314,134 @@ export default function Reports() {
                 </Card>
               </div>
 
-              <div className="flex justify-end pt-4">
+              <div className="flex justify-between pt-4">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowCategoryAnalysisModal(true);
+                    setSelectedCategoryForAnalysis('');
+                    setCategoryAnalysisResults(null);
+                    setCategoryAnalysisLoading(false);
+                  }}
+                >
+                  <BarChart3 className="w-4 h-4 mr-2" />
+                  Análisis de ventas por Categoría
+                </Button>
                 <Button variant="outline" onClick={() => setShowSalesAnalysis(false)}>
                   Cerrar
                 </Button>
               </div>
+
+              {/* Modal análisis por categoría */}
+              <Dialog open={showCategoryAnalysisModal} onOpenChange={setShowCategoryAnalysisModal}>
+                <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+                  <DialogHeader>
+                    <DialogTitle className="flex items-center gap-2">
+                      <BarChart3 className="w-5 h-5 text-blue-600" />
+                      Análisis de Ventas por Categoría
+                    </DialogTitle>
+                    <DialogDescription>
+                      Selecciona una categoría para analizar el desempeño de sus productos este mes.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  {/* Selección de categoría */}
+                  {!categoryAnalysisLoading && !categoryAnalysisResults && (
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 max-h-64 overflow-y-auto pr-1">
+                        {salesAnalysis?.salesByCategory.map(cat => (
+                          <button
+                            key={cat.category}
+                            onClick={() => setSelectedCategoryForAnalysis(cat.category)}
+                            className={`p-3 rounded-lg border text-left transition-colors text-sm ${
+                              selectedCategoryForAnalysis === cat.category
+                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
+                                : 'border-border hover:border-blue-300 hover:bg-muted/50'
+                            }`}
+                          >
+                            <p className="font-medium truncate">{cat.category}</p>
+                            <p className="text-xs text-muted-foreground mt-0.5">{cat.quantity} uds · {formatCOP(cat.revenue)}</p>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex justify-end gap-2 pt-2 border-t">
+                        <Button variant="outline" onClick={() => setShowCategoryAnalysisModal(false)}>Cancelar</Button>
+                        <Button
+                          disabled={!selectedCategoryForAnalysis}
+                          onClick={() => runCategoryAnalysis(selectedCategoryForAnalysis)}
+                        >
+                          Proceder
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Pantalla de carga */}
+                  {categoryAnalysisLoading && (
+                    <div className="py-16 flex flex-col items-center gap-4 text-center">
+                      <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+                      <p className="font-medium">Analizando categoría <span className="text-blue-600">"{selectedCategoryForAnalysis}"</span>...</p>
+                      <p className="text-sm text-muted-foreground">Calculando cantidades, precios y ganancias</p>
+                    </div>
+                  )}
+
+                  {/* Resultados */}
+                  {!categoryAnalysisLoading && categoryAnalysisResults && (
+                    <div className="space-y-4">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-semibold text-lg">{selectedCategoryForAnalysis}</h3>
+                        <span className="text-sm text-muted-foreground">{categoryAnalysisResults.length} producto(s)</span>
+                      </div>
+                      <div className="overflow-x-auto rounded-lg border">
+                        <table className="w-full text-sm">
+                          <thead className="bg-muted/50 sticky top-0">
+                            <tr>
+                              <th className="text-left p-3 font-semibold">Código</th>
+                              <th className="text-left p-3 font-semibold">Producto</th>
+                              <th className="text-right p-3 font-semibold">Cant. vendida</th>
+                              <th className="text-right p-3 font-semibold">Precio promedio</th>
+                              <th className="text-right p-3 font-semibold">Costo/unidad</th>
+                              <th className="text-right p-3 font-semibold">Ganancia prom.</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {categoryAnalysisResults.map((row, i) => (
+                              <tr key={row.code + i} className="border-t hover:bg-muted/30 transition-colors">
+                                <td className="p-3 font-mono text-xs text-muted-foreground">{row.code}</td>
+                                <td className="p-3 font-medium">{row.name}</td>
+                                <td className="p-3 text-right font-semibold text-green-600">{row.quantity}</td>
+                                <td className="p-3 text-right">{formatCOP(row.avgPrice)}</td>
+                                <td className="p-3 text-right text-orange-600">{formatCOP(row.unitCost)}</td>
+                                <td className={`p-3 text-right font-semibold ${row.avgProfit >= 0 ? 'text-blue-600' : 'text-red-600'}`}>
+                                  {formatCOP(row.avgProfit)}
+                                </td>
+                              </tr>
+                            ))}
+                            {categoryAnalysisResults.length === 0 && (
+                              <tr>
+                                <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                                  No hay ventas para esta categoría en el mes actual
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="flex justify-between pt-2 border-t">
+                        <Button
+                          variant="outline"
+                          onClick={() => { setCategoryAnalysisResults(null); setSelectedCategoryForAnalysis(''); }}
+                        >
+                          ← Volver
+                        </Button>
+                        <Button variant="outline" onClick={() => setShowCategoryAnalysisModal(false)}>
+                          Cerrar
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </DialogContent>
+              </Dialog>
             </div>
           ) : null}
         </DialogContent>
@@ -1309,6 +1522,201 @@ export default function Reports() {
                 </Button>
               </div>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de filtros del reporte de inventario */}
+      <Dialog open={showInventoryFilters} onOpenChange={setShowInventoryFilters}>
+        <DialogContent className="max-w-md w-[95vw] bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-zinc-900 dark:text-zinc-100">
+              <Filter className="w-5 h-5 text-zinc-600 dark:text-zinc-400" />
+              Filtros del Reporte de Inventario
+            </DialogTitle>
+            <DialogDescription className="text-zinc-500 dark:text-zinc-400 text-sm">
+              Personaliza qué productos incluir en el reporte
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5 py-2">
+            {/* Selector de categorías */}
+            <div>
+              <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-200 mb-2">
+                Categorías
+                {selectedCategories.length > 0 && (
+                  <span className="ml-2 text-xs font-normal text-zinc-500">({selectedCategories.length} seleccionadas)</span>
+                )}
+              </p>
+              <p className="text-xs text-zinc-400 dark:text-zinc-500 mb-3">
+                Deja vacío para incluir todos los productos
+              </p>
+              <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto">
+                {departments.map(dept => {
+                  const isSelected = selectedCategories.includes(dept.name);
+                  return (
+                    <button
+                      key={dept.id}
+                      onClick={() => {
+                        setSelectedCategories(prev =>
+                          isSelected ? prev.filter(c => c !== dept.name) : [...prev, dept.name]
+                        );
+                      }}
+                      className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
+                        isSelected
+                          ? 'bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-100'
+                          : 'bg-white text-zinc-700 border-zinc-300 hover:bg-zinc-50 dark:bg-zinc-900 dark:text-zinc-300 dark:border-zinc-700 dark:hover:bg-zinc-800'
+                      }`}
+                    >
+                      {dept.name}
+                    </button>
+                  );
+                })}
+                {departments.length === 0 && (
+                  <p className="text-xs text-zinc-400">No hay departamentos registrados</p>
+                )}
+              </div>
+              {selectedCategories.length > 0 && (
+                <button
+                  onClick={() => setSelectedCategories([])}
+                  className="mt-2 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 flex items-center gap-1"
+                >
+                  <X className="w-3 h-3" /> Limpiar selección
+                </button>
+              )}
+            </div>
+
+            {/* Toggle stock cero */}
+            <div className="flex items-center justify-between p-3 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900">
+              <div>
+                <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200">Ocultar stock en cero</p>
+                <p className="text-xs text-zinc-400 dark:text-zinc-500">Excluye productos sin existencias</p>
+              </div>
+              <button
+                onClick={() => setHideZeroStock(v => !v)}
+                className={`relative w-11 h-6 rounded-full transition-colors ${
+                  hideZeroStock ? 'bg-zinc-900 dark:bg-zinc-100' : 'bg-zinc-300 dark:bg-zinc-700'
+                }`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white dark:bg-zinc-900 shadow transition-transform ${
+                  hideZeroStock ? 'translate-x-5' : 'translate-x-0'
+                }`} />
+              </button>
+            </div>
+
+            {/* Preview info */}
+            <p className="text-xs text-zinc-400 dark:text-zinc-500 text-center">
+              {(() => {
+                const count = getFilteredInventoryProducts(selectedCategories, hideZeroStock).length;
+                return `${count} producto${count !== 1 ? 's' : ''} se incluirán en el reporte`;
+              })()}
+            </p>
+
+            {/* Botones */}
+            <div className="flex gap-2 pt-1">
+              <Button
+                variant="outline"
+                onClick={() => setShowInventoryFilters(false)}
+                className="flex-1 border-zinc-300 dark:border-zinc-700"
+              >
+                Cancelar
+              </Button>
+              <Button
+                variant="outline"
+                onClick={handleInventoryPreview}
+                className="flex-1 border-zinc-400 dark:border-zinc-600"
+              >
+                <Eye className="w-4 h-4 mr-1" />
+                Previsualizar
+              </Button>
+              <Button
+                onClick={() => openInventoryReport(selectedCategories, hideZeroStock)}
+                className="flex-1 bg-zinc-900 hover:bg-zinc-700 dark:bg-zinc-100 dark:hover:bg-zinc-300 dark:text-zinc-900 text-white"
+              >
+                Continuar
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de previsualización del inventario */}
+      <Dialog open={showInventoryPreview} onOpenChange={setShowInventoryPreview}>
+        <DialogContent className="max-w-4xl w-[98vw] max-h-[90vh] overflow-hidden flex flex-col bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-zinc-900 dark:text-zinc-100">
+              <Eye className="w-5 h-5 text-zinc-600 dark:text-zinc-400" />
+              Previsualización del Inventario
+              {inventoryPreviewData && (
+                <Badge variant="outline" className="ml-2 text-xs">{inventoryPreviewData.length} productos</Badge>
+              )}
+            </DialogTitle>
+            <DialogDescription className="text-zinc-500 dark:text-zinc-400 text-sm">
+              Vista previa del reporte — sin descargar PDF
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="overflow-y-auto flex-1 mt-2">
+            {inventoryPreviewData && inventoryPreviewData.length > 0 ? (
+              <table className="w-full text-xs">
+                <thead className="sticky top-0 bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900">
+                  <tr>
+                    <th className="text-left py-2 px-3">Producto</th>
+                    <th className="text-left py-2 px-3">Categoría</th>
+                    <th className="text-right py-2 px-3">Precio</th>
+                    <th className="text-right py-2 px-3">Costo</th>
+                    <th className="text-right py-2 px-3">Utilidad Est.</th>
+                    <th className="text-center py-2 px-3">Stock</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {inventoryPreviewData.map((p, i) => {
+                    const price = p.final_price || p.price1 || 0;
+                    const cost = p.current_cost || 0;
+                    const profit = (price - cost) * (p.stock || 0);
+                    return (
+                      <tr key={p.id} className={i % 2 === 0 ? 'bg-zinc-50 dark:bg-zinc-900' : 'bg-white dark:bg-zinc-950'}>
+                        <td className="py-2 px-3 font-medium text-zinc-900 dark:text-zinc-100">{p.name || '—'}</td>
+                        <td className="py-2 px-3 text-zinc-500 dark:text-zinc-400">{p.category || '—'}</td>
+                        <td className="py-2 px-3 text-right text-zinc-700 dark:text-zinc-300">{formatCOP(price)}</td>
+                        <td className="py-2 px-3 text-right text-zinc-500 dark:text-zinc-400">{formatCOP(cost)}</td>
+                        <td className={`py-2 px-3 text-right font-medium ${profit >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600'}`}>{formatCOP(profit)}</td>
+                        <td className={`py-2 px-3 text-center font-bold ${(p.stock ?? 0) === 0 ? 'text-red-500' : 'text-zinc-900 dark:text-zinc-100'}`}>{p.stock ?? 0}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="bg-zinc-100 dark:bg-zinc-800 sticky bottom-0">
+                  <tr>
+                    <td colSpan={2} className="py-2 px-3 font-bold text-zinc-800 dark:text-zinc-200 text-xs">TOTALES</td>
+                    <td colSpan={2} className="py-2 px-3 text-right text-xs text-zinc-600 dark:text-zinc-400">
+                      Costo total: <span className="font-bold">{formatCOP(inventoryPreviewData.reduce((s, p) => s + ((p.current_cost || 0) * (p.stock || 0)), 0))}</span>
+                    </td>
+                    <td className="py-2 px-3 text-right text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                      {formatCOP(inventoryPreviewData.reduce((s, p) => { const pr = p.final_price || p.price1 || 0; return s + ((pr - (p.current_cost || 0)) * (p.stock || 0)); }, 0))}
+                    </td>
+                    <td className="py-2 px-3 text-center text-xs font-bold text-zinc-900 dark:text-zinc-100">
+                      {inventoryPreviewData.reduce((s, p) => s + (p.stock || 0), 0)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            ) : (
+              <div className="text-center py-12 text-zinc-400">No hay productos para mostrar con los filtros seleccionados</div>
+            )}
+          </div>
+
+          <div className="flex gap-2 pt-3 border-t border-zinc-200 dark:border-zinc-800 mt-2">
+            <Button variant="outline" onClick={() => { setShowInventoryPreview(false); setShowInventoryFilters(true); }} className="flex-1 border-zinc-300 dark:border-zinc-700">
+              Volver a filtros
+            </Button>
+            <Button
+              onClick={() => { setShowInventoryPreview(false); openInventoryReport(selectedCategories, hideZeroStock); }}
+              className="flex-1 bg-zinc-900 hover:bg-zinc-700 dark:bg-zinc-100 dark:hover:bg-zinc-300 dark:text-zinc-900 text-white"
+            >
+              <Download className="w-4 h-4 mr-2" />
+              Generar PDF
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

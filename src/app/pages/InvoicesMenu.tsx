@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useEffect, useState } from 'react';
-import { getInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, type HistoryMovement, type HistoryMovementProduct, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, getCreditPayments, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges, getReturns, updateInvoice, updateProduct, addCreditNote, getCreditNotes, getCreditNotesByInvoice, type CreditNote, type CreditNoteItem, addCreditPayment, addMovement, addHistoryMovement, getDepartments, type Department } from '../lib/supabase';
+import { getInvoicesByDate, getPendingCreditInvoices, getPendingConfirmationInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, type HistoryMovement, type HistoryMovementProduct, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, getCreditPayments, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges, getReturns, updateInvoice, updateProduct, addCreditNote, getCreditNotes, getCreditNotesByInvoice, type CreditNote, type CreditNoteItem, addCreditPayment, addMovement, addHistoryMovement, getDepartments, type Department } from '../lib/supabase';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
@@ -31,9 +31,16 @@ export function InvoicesMenu() {
     cashToday: 0,
     transferToday: 0,
     exchangeImpactToday: 0,
+    exchangeCashImpact: 0,
+    exchangeTransferImpact: 0,
+    exchangeCountToday: 0,
     todayPayments: 0,
     creditNotesToday: 0,
+    creditNotesCash: 0,
+    creditNotesTransfer: 0,
     returnsToday: 0,
+    cashRefundsToday: 0,
+    transferRefundsToday: 0,
     exchangesTotalToday: 0,
     cashFromPayments: 0,
     transferFromPayments: 0,
@@ -45,6 +52,8 @@ export function InvoicesMenu() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingInvoices, setPendingInvoices] = useState<Invoice[]>([]);
+  const [pendingCosts, setPendingCosts] = useState<Record<string, number>>({});
+  const [loadingPendingCosts, setLoadingPendingCosts] = useState(false);
   const [selectedInvoice, setSelectedInvoice] = useState<Invoice | null>(null);
   const [showPaymentMethodModal, setShowPaymentMethodModal] = useState(false);
   const [showPreviewModal, setShowPreviewModal] = useState(false);
@@ -63,11 +72,15 @@ export function InvoicesMenu() {
 
   // Estados para filtros de facturas
   const [searchTerm, setSearchTerm] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [periodFilter, setPeriodFilter] = useState<'today' | 'yesterday' | 'currentMonth' | 'previousMonth' | 'all' | 'custom'>('today');
   const [customDate, setCustomDate] = useState<string>('');
   const [sortBy, setSortBy] = useState<'recent' | 'oldest' | 'highest' | 'lowest'>('recent');
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'efectivo' | 'transferencia' | 'nequi' | 'daviplata' | 'otros' | 'mixto'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'paid' | 'pending_confirmation' | 'pending' | 'partial_return' | 'anulada'>('all');
+  const [invoiceTypeFilter, setInvoiceTypeFilter] = useState<'all' | 'regular' | 'credit'>('all');
+  const [dbSearchResults, setDbSearchResults] = useState<Invoice[] | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
 
   // Estados para paginación
   const [currentPage, setCurrentPage] = useState(1);
@@ -120,6 +133,64 @@ export function InvoicesMenu() {
     loadStats();
   }, []);
 
+  // Cargar costos de productos cuando se abre el modal de confirmaciones
+  useEffect(() => {
+    if (!showPendingModal || pendingInvoices.length === 0) return;
+    const fetchCosts = async () => {
+      setLoadingPendingCosts(true);
+      try {
+        const company = getCurrentCompany();
+
+        // Normalizar items (pueden venir como string JSON desde Supabase)
+        const normalizeItems = (inv: any): any[] => {
+          const raw = inv.items;
+          if (!raw) return [];
+          if (typeof raw === 'string') {
+            try { return JSON.parse(raw); } catch { return []; }
+          }
+          return Array.isArray(raw) ? raw : [];
+        };
+
+        const productIds = [...new Set(
+          pendingInvoices.flatMap(inv =>
+            normalizeItems(inv)
+              .map((item: any) => item.productId || item.product_id)
+              .filter((id: string) => id && !id.startsWith('common-'))
+          )
+        )];
+
+        if (productIds.length === 0) { setLoadingPendingCosts(false); return; }
+
+        const { data: prods } = await supabase
+          .from('products')
+          .select('id, current_cost')
+          .in('id', productIds)
+          .eq('company', company);
+
+        const costMap: Record<string, number> = {};
+        (prods || []).forEach((p: any) => { costMap[p.id] = p.current_cost || 0; });
+
+        const invoiceCosts: Record<string, number> = {};
+        pendingInvoices.forEach(inv => {
+          const items = normalizeItems(inv);
+          const cost = items.reduce((sum: number, item: any) => {
+            const pid = item.productId || item.product_id || '';
+            if (!pid || pid.startsWith('common-')) return sum;
+            return sum + (costMap[pid] || 0) * (item.quantity || 1);
+          }, 0);
+          invoiceCosts[inv.id] = cost;
+        });
+
+        setPendingCosts(invoiceCosts);
+      } catch (e) {
+        console.error('Error cargando costos de confirmaciones:', e);
+      } finally {
+        setLoadingPendingCosts(false);
+      }
+    };
+    fetchCosts();
+  }, [showPendingModal, pendingInvoices]);
+
   // Detectar factura recién creada
   useEffect(() => {
     const checkNewInvoice = () => {
@@ -142,13 +213,121 @@ export function InvoicesMenu() {
   // Resetear página cuando cambian los filtros
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchTerm, periodFilter, sortBy, paymentFilter, statusFilter, customDate]);
+  }, [periodFilter, sortBy, paymentFilter, statusFilter, customDate, invoiceTypeFilter, searchTerm]);
+
+  const buildDateRange = (period: string, customDateVal: string) => {
+    const todayStr = getColombiaDate();
+    const [y, m, d] = todayStr.split('-').map(Number);
+    if (period === 'today') {
+      const start = new Date(Date.UTC(y, m - 1, d) + 5 * 3600000);
+      const end = new Date(Date.UTC(y, m - 1, d + 1) + 5 * 3600000);
+      return { start: start.toISOString(), end: end.toISOString() };
+    }
+    if (period === 'yesterday') {
+      const start = new Date(Date.UTC(y, m - 1, d - 1) + 5 * 3600000);
+      const end = new Date(Date.UTC(y, m - 1, d) + 5 * 3600000);
+      return { start: start.toISOString(), end: end.toISOString() };
+    }
+    if (period === 'currentMonth') {
+      const start = new Date(Date.UTC(y, m - 1, 1) + 5 * 3600000);
+      const end = new Date(Date.UTC(y, m, 1) + 5 * 3600000);
+      return { start: start.toISOString(), end: end.toISOString() };
+    }
+    if (period === 'previousMonth') {
+      const start = new Date(Date.UTC(y, m - 2, 1) + 5 * 3600000);
+      const end = new Date(Date.UTC(y, m - 1, 1) + 5 * 3600000);
+      return { start: start.toISOString(), end: end.toISOString() };
+    }
+    if (period === 'custom' && customDateVal) {
+      const [cy, cm, cd] = customDateVal.split('-').map(Number);
+      const start = new Date(Date.UTC(cy, cm - 1, cd) + 5 * 3600000);
+      const end = new Date(Date.UTC(cy, cm - 1, cd + 1) + 5 * 3600000);
+      return { start: start.toISOString(), end: end.toISOString() };
+    }
+    return null;
+  };
+
+  const applyClientPaymentFilter = (data: any[], filter: string) => {
+    if (filter === 'all') return data;
+    return data.filter(inv => {
+      const p = (inv.payment_method || '').toLowerCase();
+      if (filter === 'mixto') return p.includes(':') || p.includes(',');
+      if (filter === 'efectivo') return p.includes('efectivo') && !p.includes(':') && !p.includes(',');
+      if (filter === 'transferencia') return p.includes('transferencia') && !p.includes(':') && !p.includes(',');
+      if (filter === 'nequi') return p.includes('nequi') && !p.includes(':') && !p.includes(',');
+      if (filter === 'daviplata') return p.includes('daviplata') && !p.includes(':') && !p.includes(',');
+      if (filter === 'otros') return p.includes('otros') && !p.includes(':') && !p.includes(',');
+      return true;
+    });
+  };
+
+  const runDbFilter = async (overrides: {
+    period?: string; sort?: string; payment?: string;
+    status?: string; type?: string; custom?: string; term?: string;
+  } = {}) => {
+    const period = overrides.period ?? periodFilter;
+    const sort = overrides.sort ?? sortBy;
+    const payment = overrides.payment ?? paymentFilter;
+    const status = overrides.status ?? statusFilter;
+    const type = overrides.type ?? invoiceTypeFilter;
+    const custom = overrides.custom ?? customDate;
+    const term = overrides.term ?? searchTerm;
+
+    setIsSearching(true);
+    try {
+      const company = getCurrentCompany();
+      let query = supabase.from('invoices').select('*').eq('company', company);
+
+      if (term.trim()) {
+        query = query.or(`number.ilike.%${term}%,customer_name.ilike.%${term}%`);
+      }
+
+      const range = buildDateRange(period, custom);
+      if (range) query = query.gte('date', range.start).lt('date', range.end);
+
+      if (type === 'credit') query = query.eq('is_credit', true);
+      if (type === 'regular') query = query.eq('is_credit', false);
+
+      if (status !== 'all') {
+        if (status === 'paid') query = query.eq('status', 'paid');
+        else if (status === 'pending_confirmation') query = query.eq('status', 'pending_confirmation');
+        else if (status === 'pending') query = query.eq('is_credit', true).eq('status', 'pending');
+        else if (status === 'partial_return') query = query.eq('status', 'partial_return');
+        else if (status === 'anulada') query = query.eq('status', 'anulada');
+      }
+
+      const orderCol = (sort === 'highest' || sort === 'lowest') ? 'total' : 'date';
+      const ascending = sort === 'oldest' || sort === 'lowest';
+      query = query.order(orderCol, { ascending }).limit(500);
+
+      const { data } = await query;
+      setDbSearchResults(applyClientPaymentFilter(data || [], payment));
+    } catch (e) {
+      console.error('Error en filtrado:', e);
+      setDbSearchResults([]);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const runDbSearch = async (term: string) => {
+    if (!term.trim()) {
+      setSearchTerm('');
+      setDbSearchResults(null);
+      return;
+    }
+    setSearchTerm(term);
+    await runDbFilter({ term });
+  };
 
   const loadStats = async () => {
     setLoading(true);
     try {
-      const [invoices, products, exchanges, creditPayments, creditNotes, returns, depts] = await Promise.all([
-        getInvoices(),
+      const todayStr = getColombiaDate();
+      const [invoices, pendingCredits, pendingConfirmations, products, exchanges, creditPayments, creditNotes, returns, depts] = await Promise.all([
+        getInvoicesByDate(todayStr),
+        getPendingCreditInvoices(),
+        getPendingConfirmationInvoices(),
         getAllProducts(),
         getExchanges(),
         getCreditPayments(),
@@ -176,8 +355,6 @@ export function InvoicesMenu() {
         });
       }
 
-      // Obtener fecha actual en zona horaria de Colombia (GMT-5)
-      const todayStr = getColombiaDate(); // YYYY-MM-DD en zona Colombia
       const thisMonth = todayStr.slice(0, 7); // YYYY-MM para comparar mes
 
       console.log('[InvoicesMenu] Calculando stats para fecha Colombia:', todayStr);
@@ -198,8 +375,7 @@ export function InvoicesMenu() {
       const creditToday = invoicesToday.filter(inv => inv.is_credit).length;
 
       // Calcular cartera pendiente (créditos sin pagar completamente)
-      const totalCreditPending = invoices
-        .filter(inv => inv.is_credit && inv.credit_balance && inv.credit_balance > 0)
+      const totalCreditPending = pendingCredits
         .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
 
       // Calcular TOTAL FACTURADO del día (solo facturas pagadas)
@@ -260,6 +436,24 @@ export function InvoicesMenu() {
         return sum + (ex.price_difference || 0);
       }, 0);
 
+      // Excedente en efectivo de cambios
+      const exchangeCashImpact = exchangesToday.reduce((sum, ex) => {
+        const diff = ex.price_difference || 0;
+        if (diff > 0) return sum + (ex.payment_cash || 0);
+        if (diff < 0) return sum - (ex.payment_cash || 0);
+        return sum;
+      }, 0);
+
+      // Excedente en transferencia de cambios
+      const exchangeTransferImpact = exchangesToday.reduce((sum, ex) => {
+        const diff = ex.price_difference || 0;
+        if (diff > 0) return sum + (ex.payment_transfer || 0);
+        if (diff < 0) return sum - (ex.payment_transfer || 0);
+        return sum;
+      }, 0);
+
+      const exchangeCountToday = exchangesToday.length;
+
       const exchangesTotalToday = exchangesToday.reduce((sum, ex) => {
         return sum + (ex.original_total || 0);
       }, 0);
@@ -293,49 +487,49 @@ export function InvoicesMenu() {
         .filter(payment => ['transferencia', 'transfer', 'nequi', 'daviplata'].includes(payment.payment_method || ''))
         .reduce((sum, payment) => sum + (payment.amount || 0), 0);
 
-      // Calcular notas de crédito del día (egresos)
-      const creditNotesToday = creditNotes
-        .filter(cn => {
-          if (!cn.date || cn.status !== 'issued') return false;
-          const cnDate = extractColombiaDate(cn.date);
-          return cnDate === todayStr;
-        })
+      // Calcular notas de crédito del día (egresos) separadas por método de reembolso
+      const creditNotesOfToday = creditNotes.filter(cn => {
+        if (!cn.date || cn.status !== 'issued') return false;
+        const cnDate = extractColombiaDate(cn.date);
+        return cnDate === todayStr;
+      });
+
+      const creditNotesToday = creditNotesOfToday.reduce((sum, cn) => sum + (cn.total || 0), 0);
+
+      const creditNotesCash = creditNotesOfToday
+        .filter(cn => cn.refund_method === 'efectivo')
         .reduce((sum, cn) => sum + (cn.total || 0), 0);
 
-      console.log('[InvoicesMenu] Stats calculadas:', {
-        todayStr,
-        regularToday,
-        creditToday,
-        totalCreditPending,
-        totalSalesToday,
-        cashToday,
-        transferToday,
-        exchangeImpactToday,
-        todayPayments,
-        creditNotesToday,
-        invoicesToday: invoicesToday.length,
-        paidInvoicesToday: paidInvoicesToday.length
-      });
+      const creditNotesTransfer = creditNotesOfToday
+        .filter(cn => cn.refund_method === 'transferencia')
+        .reduce((sum, cn) => sum + (cn.total || 0), 0);
 
       setStats({
         regularToday,
         creditToday,
-        pendingConfirmation: invoices.filter(inv => inv.status === 'pending_confirmation').length,
+        pendingConfirmation: pendingConfirmations.length,
         totalCreditPending,
         totalSalesToday: totalSalesToday + todayPayments - creditNotesToday, // Incluir abonos y restar notas de crédito
         cashToday,
         transferToday,
         exchangeImpactToday,
+        exchangeCashImpact,
+        exchangeTransferImpact,
+        exchangeCountToday,
         todayPayments,
         creditNotesToday,
+        creditNotesCash,
+        creditNotesTransfer,
         returnsToday,
+        cashRefundsToday,
+        transferRefundsToday,
         exchangesTotalToday,
         cashFromPayments,
         transferFromPayments,
       });
 
-      // Cargar TODAS las facturas (no solo las de hoy) para los filtros
       setTodayInvoices(invoices);
+      setPendingInvoices(pendingConfirmations);
       setProducts(products);
     } catch (error) {
       console.error('Error loading stats:', error);
@@ -346,43 +540,39 @@ export function InvoicesMenu() {
 
   // Función para filtrar y ordenar facturas
   const getFilteredInvoices = () => {
-    let filtered = [...todayInvoices];
+    // Si hay resultados de DB (búsqueda o filtrado), usarlos; si no, usar facturas del día en memoria
+    let filtered = dbSearchResults !== null
+      ? [...dbSearchResults]
+      : [...todayInvoices];
 
-    // Filtrar por periodo de tiempo
-    if (periodFilter !== 'all') {
-      const todayStr = getColombiaDate(); // YYYY-MM-DD
+    // Filtrar por periodo (solo cuando no hay búsqueda DB activa)
+    if (!searchTerm.trim() && periodFilter !== 'all') {
+      const todayStr = getColombiaDate();
       const today = new Date(todayStr + 'T00:00:00-05:00');
 
       filtered = filtered.filter(inv => {
         const invDate = extractColombiaDate(inv.date);
-
-        if (periodFilter === 'today') {
-          return invDate === todayStr;
-        } else if (periodFilter === 'yesterday') {
+        if (periodFilter === 'today') return invDate === todayStr;
+        if (periodFilter === 'yesterday') {
           const yesterday = new Date(today);
           yesterday.setDate(yesterday.getDate() - 1);
-          const yesterdayStr = yesterday.toISOString().split('T')[0];
-          return invDate === yesterdayStr;
-        } else if (periodFilter === 'currentMonth') {
-          const currentMonth = todayStr.slice(0, 7); // YYYY-MM
-          return invDate.startsWith(currentMonth);
-        } else if (periodFilter === 'previousMonth') {
-          const currentDate = new Date(today);
-          currentDate.setMonth(currentDate.getMonth() - 1);
-          const previousMonth = currentDate.toISOString().slice(0, 7); // YYYY-MM
-          return invDate.startsWith(previousMonth);
-        } else if (periodFilter === 'custom') {
-          return customDate ? invDate === customDate : false;
+          return invDate === yesterday.toISOString().split('T')[0];
         }
+        if (periodFilter === 'currentMonth') return invDate.startsWith(todayStr.slice(0, 7));
+        if (periodFilter === 'previousMonth') {
+          const prev = new Date(today);
+          prev.setMonth(prev.getMonth() - 1);
+          return invDate.startsWith(prev.toISOString().slice(0, 7));
+        }
+        if (periodFilter === 'custom') return customDate ? invDate === customDate : false;
         return true;
       });
     }
 
-    // Filtrar por búsqueda (número de factura o nombre del cliente)
-    if (searchTerm) {
+    // Filtrar por tipo de factura
+    if (invoiceTypeFilter !== 'all') {
       filtered = filtered.filter(inv =>
-        inv.number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (inv.customer_name && inv.customer_name.toLowerCase().includes(searchTerm.toLowerCase()))
+        invoiceTypeFilter === 'credit' ? inv.is_credit : !inv.is_credit
       );
     }
 
@@ -390,21 +580,12 @@ export function InvoicesMenu() {
     if (paymentFilter !== 'all') {
       filtered = filtered.filter(inv => {
         const paymentStr = (inv.payment_method || '').toLowerCase();
-
-        if (paymentFilter === 'mixto') {
-          // Mixto: tiene ":" o "," (pago con múltiples métodos)
-          return paymentStr.includes(':') || paymentStr.includes(',');
-        } else if (paymentFilter === 'efectivo') {
-          return paymentStr.includes('efectivo') && !paymentStr.includes(':') && !paymentStr.includes(',');
-        } else if (paymentFilter === 'transferencia') {
-          return paymentStr.includes('transferencia') && !paymentStr.includes(':') && !paymentStr.includes(',');
-        } else if (paymentFilter === 'nequi') {
-          return paymentStr.includes('nequi') && !paymentStr.includes(':') && !paymentStr.includes(',');
-        } else if (paymentFilter === 'daviplata') {
-          return paymentStr.includes('daviplata') && !paymentStr.includes(':') && !paymentStr.includes(',');
-        } else if (paymentFilter === 'otros') {
-          return paymentStr.includes('otros') && !paymentStr.includes(':') && !paymentStr.includes(',');
-        }
+        if (paymentFilter === 'mixto') return paymentStr.includes(':') || paymentStr.includes(',');
+        if (paymentFilter === 'efectivo') return paymentStr.includes('efectivo') && !paymentStr.includes(':') && !paymentStr.includes(',');
+        if (paymentFilter === 'transferencia') return paymentStr.includes('transferencia') && !paymentStr.includes(':') && !paymentStr.includes(',');
+        if (paymentFilter === 'nequi') return paymentStr.includes('nequi') && !paymentStr.includes(':') && !paymentStr.includes(',');
+        if (paymentFilter === 'daviplata') return paymentStr.includes('daviplata') && !paymentStr.includes(':') && !paymentStr.includes(',');
+        if (paymentFilter === 'otros') return paymentStr.includes('otros') && !paymentStr.includes(':') && !paymentStr.includes(',');
         return true;
       });
     }
@@ -423,15 +604,10 @@ export function InvoicesMenu() {
 
     // Ordenar
     filtered.sort((a, b) => {
-      if (sortBy === 'recent') {
-        return new Date(b.date).getTime() - new Date(a.date).getTime();
-      } else if (sortBy === 'oldest') {
-        return new Date(a.date).getTime() - new Date(b.date).getTime();
-      } else if (sortBy === 'highest') {
-        return b.total - a.total;
-      } else if (sortBy === 'lowest') {
-        return a.total - b.total;
-      }
+      if (sortBy === 'recent') return new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (sortBy === 'oldest') return new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (sortBy === 'highest') return b.total - a.total;
+      if (sortBy === 'lowest') return a.total - b.total;
       return 0;
     });
 
@@ -1385,12 +1561,7 @@ export function InvoicesMenu() {
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={async () => {
-                    const invoices = await getInvoices();
-                    const pending = invoices.filter(inv => inv.status === 'pending_confirmation');
-                    setPendingInvoices(pending);
-                    setShowPendingModal(true);
-                  }}
+                  onClick={() => setShowPendingModal(true)}
                   className="w-full mt-3 text-xs border-amber-300 dark:border-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950"
                 >
                   <Clock className="w-3 h-3 mr-1" />
@@ -1405,8 +1576,27 @@ export function InvoicesMenu() {
               <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Cartera Pendiente</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">{formatCOP(stats.totalCreditPending)}</div>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">Por cobrar</p>
+              {/* Crédito pendiente */}
+              <div className="space-y-1 mb-3">
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">Crédito pendiente</p>
+                <div className="text-xl font-bold text-amber-600 dark:text-amber-400">{formatCOP(stats.totalCreditPending)}</div>
+              </div>
+
+              {/* En confirmaciones */}
+              <div className="space-y-1 mb-3">
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">En confirmación</p>
+                <div className="text-xl font-bold text-orange-500 dark:text-orange-400">
+                  {formatCOP(pendingInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0))}
+                </div>
+              </div>
+
+              {/* Total */}
+              <div className="pt-3 border-t border-zinc-200 dark:border-zinc-700">
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Total pendiente</p>
+                <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+                  {formatCOP(stats.totalCreditPending + pendingInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0))}
+                </div>
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -1459,10 +1649,26 @@ export function InvoicesMenu() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-green-700 dark:text-green-400">{formatCOP(stats.cashToday)}</div>
-                <p className="text-xs text-green-600 dark:text-green-500 mt-1">Pagos en efectivo</p>
-                <div className="border-t border-green-200 dark:border-green-800 mt-2 pt-2">
-                  <p className="text-sm font-medium text-green-600 dark:text-green-500">💵 Abonos: {formatCOP(stats.cashFromPayments)}</p>
+                <div className="text-2xl font-bold text-green-700 dark:text-green-400">{formatCOP(stats.cashToday + stats.cashFromPayments + stats.exchangeCashImpact)}</div>
+                <div className="border-t border-green-200 dark:border-green-800 mt-3 pt-2 space-y-1.5">
+                  <div className="flex justify-between text-xs text-green-600 dark:text-green-500">
+                    <span>📄 Facturas pagadas</span>
+                    <span className="font-medium">{formatCOP(stats.cashToday + stats.cashRefundsToday)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-orange-500 dark:text-orange-400">
+                    <span>↩️ Devoluciones</span>
+                    <span className="font-medium">-{formatCOP(stats.cashRefundsToday)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-green-600 dark:text-green-500">
+                    <span>💳 Abonos</span>
+                    <span className="font-medium">{formatCOP(stats.cashFromPayments)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-green-600 dark:text-green-500">
+                    <span>🔄 Dif. cambios</span>
+                    <span className={`font-medium ${stats.exchangeCashImpact < 0 ? 'text-orange-500' : ''}`}>
+                      {stats.exchangeCashImpact > 0 ? '+' : ''}{formatCOP(stats.exchangeCashImpact)}
+                    </span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -1475,10 +1681,26 @@ export function InvoicesMenu() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-violet-700 dark:text-violet-400">{formatCOP(stats.transferToday)}</div>
-                <p className="text-xs text-violet-600 dark:text-violet-500 mt-1">Incluye Nequi, Daviplata</p>
-                <div className="border-t border-violet-200 dark:border-violet-800 mt-2 pt-2">
-                  <p className="text-sm font-medium text-violet-600 dark:text-violet-500">💳 Abonos: {formatCOP(stats.transferFromPayments)}</p>
+                <div className="text-2xl font-bold text-violet-700 dark:text-violet-400">{formatCOP(stats.transferToday + stats.transferFromPayments + stats.exchangeTransferImpact)}</div>
+                <div className="border-t border-violet-200 dark:border-violet-800 mt-3 pt-2 space-y-1.5">
+                  <div className="flex justify-between text-xs text-violet-600 dark:text-violet-500">
+                    <span>📄 Facturas pagadas</span>
+                    <span className="font-medium">{formatCOP(stats.transferToday + stats.transferRefundsToday)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-orange-500 dark:text-orange-400">
+                    <span>↩️ Devoluciones</span>
+                    <span className="font-medium">-{formatCOP(stats.transferRefundsToday)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-violet-600 dark:text-violet-500">
+                    <span>💳 Abonos</span>
+                    <span className="font-medium">{formatCOP(stats.transferFromPayments)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-violet-600 dark:text-violet-500">
+                    <span>🔄 Dif. cambios</span>
+                    <span className={`font-medium ${stats.exchangeTransferImpact < 0 ? 'text-orange-500' : ''}`}>
+                      {stats.exchangeTransferImpact > 0 ? '+' : ''}{formatCOP(stats.exchangeTransferImpact)}
+                    </span>
+                  </div>
                 </div>
               </CardContent>
             </Card>
@@ -1509,6 +1731,22 @@ export function InvoicesMenu() {
               <CardContent>
                 <div className="text-2xl font-bold text-red-700 dark:text-red-400">-{formatCOP(stats.creditNotesToday)}</div>
                 <p className="text-xs text-red-600 dark:text-red-500 mt-1">Egresos por devoluciones</p>
+                {stats.creditNotesToday > 0 && (
+                  <div className="mt-3 pt-3 border-t border-red-200 dark:border-red-800 space-y-1.5">
+                    {stats.creditNotesCash > 0 && (
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-red-600 dark:text-red-400">💵 Efectivo:</span>
+                        <span className="font-semibold text-red-700 dark:text-red-300">-{formatCOP(stats.creditNotesCash)}</span>
+                      </div>
+                    )}
+                    {stats.creditNotesTransfer > 0 && (
+                      <div className="flex justify-between items-center text-xs">
+                        <span className="text-red-600 dark:text-red-400">🏦 Transferencia:</span>
+                        <span className="font-semibold text-red-700 dark:text-red-300">-{formatCOP(stats.creditNotesTransfer)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -1533,8 +1771,18 @@ export function InvoicesMenu() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-amber-700 dark:text-amber-400">{formatCOP(stats.exchangesTotalToday)}</div>
-                <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">Valor de productos cambiados</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <div className="text-2xl font-bold text-amber-700 dark:text-amber-400">{stats.exchangeCountToday}</div>
+                    <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">Cambios</p>
+                  </div>
+                  <div>
+                    <div className={`text-2xl font-bold ${stats.exchangeImpactToday >= 0 ? 'text-amber-700 dark:text-amber-400' : 'text-orange-600 dark:text-orange-400'}`}>
+                      {stats.exchangeImpactToday > 0 ? '+' : ''}{formatCOP(stats.exchangeImpactToday)}
+                    </div>
+                    <p className="text-xs text-amber-600 dark:text-amber-500 mt-1">Diferencia</p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -1555,26 +1803,47 @@ export function InvoicesMenu() {
               </div>
 
               {/* Buscador */}
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
-                <Input
-                  type="text"
-                  placeholder="Buscar factura o cliente..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10 text-sm h-9 sm:h-10"
-                />
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                  <Input
+                    type="text"
+                    placeholder="Buscar por # factura o cliente..."
+                    value={searchInput}
+                    onChange={(e) => setSearchInput(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') runDbSearch(searchInput); }}
+                    className="pl-10 pr-10 text-sm h-9 sm:h-10"
+                  />
+                  {searchInput && (
+                    <button
+                      onClick={() => { setSearchInput(''); setSearchTerm(''); setDbSearchResults(null); }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+                <Button
+                  size="sm"
+                  onClick={() => runDbSearch(searchInput)}
+                  disabled={isSearching}
+                  className="h-9 sm:h-10 px-4 bg-zinc-900 hover:bg-zinc-700 dark:bg-zinc-100 dark:hover:bg-zinc-300 dark:text-zinc-900 text-white shrink-0"
+                >
+                  {isSearching
+                    ? <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    : <Search className="w-4 h-4" />}
+                </Button>
               </div>
 
               {/* Filtros */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 sm:gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
                 {/* Filtro de Periodo */}
                 <div className="space-y-1.5">
                   <Label className="text-xs text-zinc-600 dark:text-zinc-400 flex items-center gap-1">
                     <Calendar className="w-3 h-3" />
                     Periodo
                   </Label>
-                  <Select value={periodFilter} onValueChange={(value: any) => setPeriodFilter(value)}>
+                  <Select value={periodFilter} onValueChange={(value: any) => { setPeriodFilter(value); runDbFilter({ period: value }); }}>
                     <SelectTrigger className="h-9 text-xs sm:text-sm">
                       <SelectValue />
                     </SelectTrigger>
@@ -1592,7 +1861,7 @@ export function InvoicesMenu() {
                       <Input
                         type="date"
                         value={customDate}
-                        onChange={e => setCustomDate(e.target.value)}
+                        onChange={e => { setCustomDate(e.target.value); if (e.target.value) runDbFilter({ custom: e.target.value }); }}
                         className="h-9 text-xs sm:text-sm"
                       />
                       {!customDate && (
@@ -1608,7 +1877,7 @@ export function InvoicesMenu() {
                     <Filter className="w-3 h-3" />
                     Ordenar por
                   </Label>
-                  <Select value={sortBy} onValueChange={(value: any) => setSortBy(value)}>
+                  <Select value={sortBy} onValueChange={(value: any) => { setSortBy(value); runDbFilter({ sort: value }); }}>
                     <SelectTrigger className="h-9 text-xs sm:text-sm">
                       <SelectValue />
                     </SelectTrigger>
@@ -1627,7 +1896,7 @@ export function InvoicesMenu() {
                     <Banknote className="w-3 h-3" />
                     Método de pago
                   </Label>
-                  <Select value={paymentFilter} onValueChange={(value: any) => setPaymentFilter(value)}>
+                  <Select value={paymentFilter} onValueChange={(value: any) => { setPaymentFilter(value); runDbFilter({ payment: value }); }}>
                     <SelectTrigger className="h-9 text-xs sm:text-sm">
                       <SelectValue />
                     </SelectTrigger>
@@ -1649,7 +1918,7 @@ export function InvoicesMenu() {
                     <CheckCircle className="w-3 h-3" />
                     Estado
                   </Label>
-                  <Select value={statusFilter} onValueChange={(value: any) => setStatusFilter(value)}>
+                  <Select value={statusFilter} onValueChange={(value: any) => { setStatusFilter(value); runDbFilter({ status: value }); }}>
                     <SelectTrigger className="h-9 text-xs sm:text-sm">
                       <SelectValue />
                     </SelectTrigger>
@@ -1663,20 +1932,44 @@ export function InvoicesMenu() {
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* Filtro de Tipo */}
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-zinc-600 dark:text-zinc-400 flex items-center gap-1">
+                    <FileText className="w-3 h-3" />
+                    Tipo
+                  </Label>
+                  <Select value={invoiceTypeFilter} onValueChange={(value: any) => { setInvoiceTypeFilter(value); runDbFilter({ type: value }); }}>
+                    <SelectTrigger className="h-9 text-xs sm:text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todos</SelectItem>
+                      <SelectItem value="regular">Regular</SelectItem>
+                      <SelectItem value="credit">A crédito</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
 
-              {/* Botón para limpiar filtros (opcional) */}
-              {(searchTerm || periodFilter !== 'today' || sortBy !== 'recent' || paymentFilter !== 'all' || statusFilter !== 'all') && (
+              {/* Botón para limpiar filtros */}
+              {(searchInput || periodFilter !== 'today' || sortBy !== 'recent' || paymentFilter !== 'all' || statusFilter !== 'all' || invoiceTypeFilter !== 'all') && (
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => {
+                    setSearchInput('');
                     setSearchTerm('');
+                    setDbSearchResults(null);
                     setPeriodFilter('today');
                     setCustomDate('');
                     setSortBy('recent');
                     setPaymentFilter('all');
                     setStatusFilter('all');
+                    setInvoiceTypeFilter('all');
+                    setCurrentPage(1);
+                    // Volver a las facturas del día en memoria (no relanzar query)
+
                   }}
                   className="text-xs h-8 w-full sm:w-auto"
                 >
@@ -1899,7 +2192,7 @@ export function InvoicesMenu() {
                                     <FileX className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
                                   </Button>
                                 )}
-                                {invoice.status !== 'pending_confirmation' && invoice.status !== 'anulada' && canRevertInvoice(invoice.created_at || '') && (
+                                {currentUser?.role === 'admin' && invoice.status !== 'pending_confirmation' && invoice.status !== 'anulada' && canRevertInvoice(invoice.created_at || '') && (
                                   <Button
                                     variant="ghost"
                                     size="sm"
@@ -2117,6 +2410,47 @@ export function InvoicesMenu() {
                   </CardContent>
                 </Card>
               ))}
+
+              {/* Resumen de ganancias en confirmación */}
+              {(() => {
+                const totalConfirmacion = filtered.reduce((sum, inv) => sum + (inv.total || 0), 0);
+                const totalEfectivo = filtered.reduce((sum, inv) => sum + (inv.payment_cash || 0), 0);
+                const totalTransferencia = filtered.reduce((sum, inv) => sum + (inv.payment_transfer || 0), 0);
+                const totalCostos = filtered.reduce((sum, inv) => sum + (pendingCosts[inv.id] || 0), 0);
+                const gananciaEstimada = totalConfirmacion - totalCostos;
+                return (
+                  <div className="mt-2 p-4 rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30">
+                    <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide mb-3">
+                      Resumen · {filtered.length} {filtered.length === 1 ? 'factura' : 'facturas'} en confirmación
+                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                      <div>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-0.5">Total acumulado</p>
+                        <p className="text-xl font-bold text-amber-700 dark:text-amber-300">{formatCOP(totalConfirmacion)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-0.5">💵 Efectivo</p>
+                        <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{formatCOP(totalEfectivo)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-0.5">💳 Transferencia</p>
+                        <p className="text-xl font-bold text-blue-600 dark:text-blue-400">{formatCOP(totalTransferencia)}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-0.5">
+                          📈 Ganancia estimada{loadingPendingCosts ? ' (cargando...)' : ''}
+                        </p>
+                        <p className={`text-xl font-bold ${gananciaEstimada >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                          {loadingPendingCosts ? '...' : formatCOP(gananciaEstimada)}
+                        </p>
+                        {!loadingPendingCosts && totalCostos > 0 && (
+                          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">Costo: {formatCOP(totalCostos)}</p>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </div>
           );
           })()}

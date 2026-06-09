@@ -513,8 +513,15 @@ export function Returns() {
                     <td className="py-3 px-3 text-center">
                       <div className="flex flex-col gap-1">
                         {ret.items.map((item, idx) => (
-                          <div key={idx} className="text-xs text-muted-foreground">
-                            {item.productName} x{item.quantity}
+                          <div key={idx} className="text-xs">
+                            <div className="text-muted-foreground">
+                              {item.productName} x{item.quantity}
+                            </div>
+                            {item.unitIds && item.unitIds.length > 0 && (
+                              <div className="text-blue-600 dark:text-blue-400 font-mono text-[10px] mt-0.5">
+                                IDs: {item.unitIds.join(', ')}
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>

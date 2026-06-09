@@ -1,5 +1,5 @@
 import {
-  getInvoices,
+  getInvoicesByMonthRange,
   getColombiaDate,
   extractColombiaDate,
   extractColombiaDateTime,
@@ -261,7 +261,7 @@ export function FinancialManagement() {
   const loadData = async () => {
     setIsLoading(true);
     const [invoicesData, returnsData, exchangesData, productsData, expensesData, customersData, warrantiesData, paymentsData, creditNotesData, dailyClosuresData] = await Promise.all([
-      getInvoices(),
+      getInvoicesByMonthRange(3),
       getReturns(),
       getExchanges(),
       getAllProducts(),
@@ -361,7 +361,52 @@ export function FinancialManagement() {
         .filter((inv) => (inv.status === 'paid' || inv.status === 'partial_return') && inv.is_credit)
         .reduce((sum, inv) => sum + inv.total, 0);
 
+      // Todas las facturas a crédito del mes (pagas o pendientes, excluyendo canceladas)
+      const creditosDelMes = monthInvoices
+        .filter((inv) => inv.is_credit && inv.status !== 'cancelled' && inv.status !== 'anulada')
+        .reduce((sum, inv) => sum + inv.total, 0);
+
       const totalDevoluciones = monthReturns.reduce((sum, ret) => sum + ret.total, 0);
+
+      // Devoluciones por método de pago del mes
+      const parseMixedRefundMonth = (method: string) => {
+        const result = { efectivo: 0, transfer: 0 };
+        if (!method.startsWith('mixto:')) return result;
+        method.slice(6).split(',').forEach(part => {
+          const [k, v] = part.split('=');
+          const val = parseFloat(v) || 0;
+          if (k === 'efectivo') result.efectivo += val;
+          if (['transferencia', 'nequi', 'daviplata'].includes(k)) result.transfer += val;
+        });
+        return result;
+      };
+      let cashReturnsDelMes = 0;
+      let transferReturnsDelMes = 0;
+      monthReturns.forEach((ret) => {
+        const method = (ret.refund_method || '').toLowerCase();
+        const amount = ret.total || 0;
+        if (method === 'efectivo') cashReturnsDelMes += amount;
+        else if (['transferencia', 'nequi', 'daviplata'].includes(method)) transferReturnsDelMes += amount;
+        else if (method.startsWith('mixto:')) {
+          const parsed = parseMixedRefundMonth(method);
+          cashReturnsDelMes += parsed.efectivo;
+          transferReturnsDelMes += parsed.transfer;
+        }
+      });
+
+      // Impacto de cambios por método de pago del mes
+      const cashExchangeDelMes = monthExchanges.reduce((sum, ex) => {
+        const diff = Number(ex.price_difference) || 0;
+        if (diff > 0) return sum + (ex.payment_cash || 0);
+        if (diff < 0) return sum - (ex.payment_cash || 0);
+        return sum;
+      }, 0);
+      const transferExchangeDelMes = monthExchanges.reduce((sum, ex) => {
+        const diff = Number(ex.price_difference) || 0;
+        if (diff > 0) return sum + (ex.payment_transfer || 0);
+        if (diff < 0) return sum - (ex.payment_transfer || 0);
+        return sum;
+      }, 0);
 
       // Calcular costo de productos devueltos
       let costoDevoluciones = 0;
@@ -395,8 +440,55 @@ export function FinancialManagement() {
       // Ajuste por notas crédito del mes
       const totalNotasCredito = monthCreditNotes.reduce((s, cn) => s + cn.total, 0);
 
-      // Ingresos del mes: regulares pagadas + créditos pagados − notas crédito − devoluciones
-      const ingresoNeto = facturasPagas + creditosPagados - totalNotasCredito - totalDevoluciones;
+      // Ingresos del mes: regulares pagadas + todos los créditos emitidos + impacto cambios − notas crédito − devoluciones
+      const ingresoNeto = facturasPagas + creditosDelMes + impactoCambios - totalNotasCredito - totalDevoluciones;
+
+      // Desglose por método de pago del mes (para Ingreso por Caja)
+      let cashDelMes = 0;
+      let transferDelMes = 0;
+      const paidMonthInvoices = monthInvoices.filter(
+        (inv) => (inv.status === 'paid' || inv.status === 'partial_return') && !inv.is_credit
+      );
+      paidMonthInvoices.forEach((inv) => {
+        const total = inv.total || 0;
+        const pm = (inv.payment_method || '').toLowerCase();
+        if (pm === 'efectivo' || pm.includes('efectivo') || pm.includes('cash')) {
+          cashDelMes += total;
+        } else if (
+          ['transferencia', 'nequi', 'daviplata', 'transfer'].includes(pm) ||
+          pm.includes('transferencia') || pm.includes('nequi') || pm.includes('daviplata')
+        ) {
+          transferDelMes += total;
+        } else if (inv.payment_details && typeof inv.payment_details === 'object') {
+          const detailCash = Number(inv.payment_details.cash || inv.payment_details.efectivo || 0);
+          const detailTransfer = Number(
+            (inv.payment_details.transfer || 0) +
+            (inv.payment_details.transferencia || 0) +
+            (inv.payment_details.nequi || 0) +
+            (inv.payment_details.daviplata || 0)
+          );
+          cashDelMes += detailCash;
+          transferDelMes += detailTransfer;
+          // any unclassified remainder goes to cash
+          const classified = detailCash + detailTransfer;
+          if (classified < total) {
+            cashDelMes += total - classified;
+          }
+        } else {
+          // fallback: unrecognized payment method counted as cash
+          cashDelMes += total;
+        }
+      });
+      // Abonos en efectivo y transferencia del mes
+      const abonosCashDelMes = paymentsDelMes
+        .filter((p) => ['efectivo', 'cash'].includes(p.payment_method || ''))
+        .reduce((sum, p) => sum + p.amount, 0);
+      const abonosTransferDelMes = paymentsDelMes
+        .filter((p) => ['transferencia', 'transfer', 'nequi', 'daviplata'].includes(p.payment_method || ''))
+        .reduce((sum, p) => sum + p.amount, 0);
+      const ingresoCajaDelMes = cashDelMes + transferDelMes + abonosDelMes
+        - cashReturnsDelMes - transferReturnsDelMes
+        + cashExchangeDelMes + transferExchangeDelMes;
 
       // Ingresos por factura (referencia, no se usa en ganancias)
       // Incluye: facturas en confirmación + crédito pendiente (considerando abonos)
@@ -411,9 +503,11 @@ export function FinancialManagement() {
 
       const ingresosPorFactura = totalFacturasEnConfirmacion + creditoPendienteDelMes;
 
-      // Costos de Productos: mismas facturas que ingresoNeto (regulares + créditos pagados)
+      // Costos de Productos: facturas pagas + facturas a crédito emitidas (excluyendo anuladas)
       const facturasParaCostos = monthInvoices.filter((inv) => {
-        return inv.status === 'paid' || inv.status === 'partial_return';
+        if (inv.status === 'anulada' || inv.status === 'cancelled') return false;
+        if (inv.is_credit) return true; // Todas las facturas a crédito no anuladas
+        return inv.status === 'paid' || inv.status === 'partial_return'; // Regulares solo si están pagas
       });
 
       let costosDeProductos = 0;
@@ -458,13 +552,17 @@ export function FinancialManagement() {
       // Impacto de utilidad por cambios del mes (profit_difference)
       const exchangeProfitImpact = monthExchanges.reduce((sum, ex) => sum + (Number(ex.profit_difference) || 0), 0);
 
-      // NUEVO: Ganancias Netas usando Ingresos del Mes (solo facturas pagas y parciales)
+      // Ganancias Netas: ingresos - costos - gastos operativos
       const gananciasNetas = ingresoNeto - costosDeProductos - totalGastos + exchangeProfitImpact;
+
+      // Ganancias Brutas: ingresos + notas de crédito (se suman de vuelta) - costos (sin gastos operativos)
+      const gananciasBrutas = ingresoNeto + totalNotasCredito - costosDeProductos + exchangeProfitImpact;
 
       // Mantener ganancias original para compatibilidad
       const ganancias = ingresoNeto - totalCostos - totalGastos + exchangeProfitImpact;
 
       const margen = ingresoNeto > 0 ? (gananciasNetas / ingresoNeto) * 100 : 0;
+      const margenBruto = ingresoNeto > 0 ? (gananciasBrutas / (ingresoNeto + totalNotasCredito)) * 100 : 0;
 
       return {
         ingresoNeto,
@@ -482,7 +580,19 @@ export function FinancialManagement() {
         ingresosPorFactura,
         costosDeProductos,
         gananciasNetas,
+        gananciasBrutas,
+        margenBruto,
         totalNotasCredito,
+        creditosDelMes,
+        cashDelMes,
+        transferDelMes,
+        abonosCashDelMes,
+        abonosTransferDelMes,
+        cashReturnsDelMes,
+        transferReturnsDelMes,
+        cashExchangeDelMes,
+        transferExchangeDelMes,
+        ingresoCajaDelMes,
         invoicesCount: monthInvoices.length,
         expenses: monthExpenses,
         creditNotes: monthCreditNotes
@@ -1453,7 +1563,9 @@ export function FinancialManagement() {
         {/* Section 1: Overview Financiero */}
         <div>
           <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-100 mb-4">Overview Financiero</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="space-y-4">
+          {/* Fila 1: Ingresos del Mes (ancho completo) */}
+          <div>
             {/* 1. Ingresos del Mes */}
             <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="pb-2">
@@ -1467,38 +1579,62 @@ export function FinancialManagement() {
               <CardContent>
                 <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{formatCOP(stats.currentMonth.ingresoNeto)}</div>
 
-                {/* Desglose */}
+                {/* Desglose ingresos totales */}
                 <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800 space-y-1">
                   <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
-                    <span>Facturas pagas</span>
+                    <span>📄 Facturas pagas</span>
                     <span className="font-medium">+{formatCOP(stats.currentMonth.facturasPagas)}</span>
                   </div>
-                  {stats.currentMonth.creditosPagados > 0 && (
-                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
-                      <span>Créditos pagados</span>
-                      <span className="font-medium">+{formatCOP(stats.currentMonth.creditosPagados)}</span>
-                    </div>
-                  )}
-                  {stats.currentMonth.impactoCambios !== 0 && (
+                  <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                    <span>📋 Créditos emitidos</span>
+                    <span className="font-medium">+{formatCOP(stats.currentMonth.creditosDelMes)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-zinc-600 dark:text-zinc-400">🔄 Impacto cambios</span>
+                    <span className={`font-medium ${stats.currentMonth.impactoCambios >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                      {stats.currentMonth.impactoCambios >= 0 ? '+' : ''}{formatCOP(stats.currentMonth.impactoCambios)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-zinc-600 dark:text-zinc-400">📝 Notas de crédito</span>
+                    <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.totalNotasCredito)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs">
+                    <span className="text-zinc-600 dark:text-zinc-400">↩️ Devoluciones</span>
+                    <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.totalDevoluciones)}</span>
+                  </div>
+                </div>
+
+                {/* Sección Ingreso por Caja del Mes */}
+                <div className="mt-4 pt-4 border-t-2 border-emerald-300 dark:border-emerald-600 rounded-lg bg-emerald-100/60 dark:bg-emerald-900/30 p-3 -mx-1">
+                  <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide mb-1">🏧 Ingreso por Caja del Mes</p>
+                  <div className="text-xl font-bold text-emerald-700 dark:text-emerald-300 mb-2">
+                    {formatCOP(stats.currentMonth.ingresoCajaDelMes)}
+                  </div>
+                  <div className="space-y-1.5">
                     <div className="flex justify-between text-xs">
-                      <span className="text-zinc-600 dark:text-zinc-400">Impacto cambios</span>
-                      <span className={`font-medium ${stats.currentMonth.impactoCambios > 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                        {stats.currentMonth.impactoCambios > 0 ? '+' : ''}{formatCOP(stats.currentMonth.impactoCambios)}
+                      <span className="text-emerald-700 dark:text-emerald-300">💵 Efectivo</span>
+                      <span className="font-semibold text-emerald-800 dark:text-emerald-200">{formatCOP(stats.currentMonth.cashDelMes)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-700 dark:text-emerald-300">🏦 Transferencias</span>
+                      <span className="font-semibold text-emerald-800 dark:text-emerald-200">{formatCOP(stats.currentMonth.transferDelMes)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-700 dark:text-emerald-300">💳 Abonos</span>
+                      <span className="font-semibold text-emerald-800 dark:text-emerald-200">{formatCOP(stats.currentMonth.abonosDelMes)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-emerald-600 dark:text-emerald-400">🔄 Dif. cambios</span>
+                      <span className={`font-semibold ${(stats.currentMonth.cashExchangeDelMes + stats.currentMonth.transferExchangeDelMes) >= 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-orange-600'}`}>
+                        {(stats.currentMonth.cashExchangeDelMes + stats.currentMonth.transferExchangeDelMes) >= 0 ? '+' : ''}{formatCOP(stats.currentMonth.cashExchangeDelMes + stats.currentMonth.transferExchangeDelMes)}
                       </span>
                     </div>
-                  )}
-                  {stats.currentMonth.totalNotasCredito > 0 && (
                     <div className="flex justify-between text-xs">
-                      <span className="text-zinc-600 dark:text-zinc-400">Notas Crédito</span>
-                      <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.totalNotasCredito)}</span>
+                      <span className="text-orange-600 dark:text-orange-400">↩️ Devoluciones</span>
+                      <span className="font-semibold text-orange-600 dark:text-orange-400">-{formatCOP(stats.currentMonth.cashReturnsDelMes + stats.currentMonth.transferReturnsDelMes)}</span>
                     </div>
-                  )}
-                  {stats.currentMonth.totalDevoluciones > 0 && (
-                    <div className="flex justify-between text-xs">
-                      <span className="text-zinc-600 dark:text-zinc-400">Devoluciones</span>
-                      <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.totalDevoluciones)}</span>
-                    </div>
-                  )}
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-1 mt-3">
@@ -1525,6 +1661,10 @@ export function FinancialManagement() {
               </CardContent>
             </Card>
 
+          </div>
+
+          {/* Fila 2: 2 cards */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* 2. Total de Facturas En Confirmación */}
             <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="pb-2">
@@ -1627,6 +1767,10 @@ export function FinancialManagement() {
               </CardContent>
             </Card>
 
+          </div>
+
+          {/* Fila 3: 3 cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {/* 4. Gastos del Mes */}
             <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm hover:shadow-md transition-shadow">
               <CardHeader className="pb-2">
@@ -1672,21 +1816,39 @@ export function FinancialManagement() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{formatCOP(stats.currentMonth.gananciasNetas)}</div>
+                {/* Ganancias Brutas */}
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">Ganancia Bruta</p>
+                  <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{formatCOP(stats.currentMonth.gananciasBrutas)}</div>
+                  <div className="mt-2 space-y-1">
+                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>Ingresos del mes</span>
+                      <span className="font-medium text-emerald-600">+{formatCOP(stats.currentMonth.ingresoNeto)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>Notas de crédito (+)</span>
+                      <span className="font-medium text-emerald-600">+{formatCOP(stats.currentMonth.totalNotasCredito)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>Costos productos</span>
+                      <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.costosDeProductos)}</span>
+                    </div>
+                  </div>
+                </div>
 
-                {/* Desglose */}
-                <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800 space-y-1">
-                  <div className="flex justify-between text-xs">
-                    <span className="text-zinc-600 dark:text-zinc-400">Ingresos del mes</span>
-                    <span className="font-medium text-emerald-600">+{formatCOP(stats.currentMonth.ingresoNeto)}</span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-zinc-600 dark:text-zinc-400">Costos productos</span>
-                    <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.costosDeProductos)}</span>
-                  </div>
-                  <div className="flex justify-between text-xs">
-                    <span className="text-zinc-600 dark:text-zinc-400">Gastos operativos</span>
-                    <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.totalGastos)}</span>
+                {/* Ganancias Netas */}
+                <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800">
+                  <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">Ganancia Neta</p>
+                  <div className="text-2xl font-bold text-blue-700 dark:text-blue-400">{formatCOP(stats.currentMonth.gananciasNetas)}</div>
+                  <div className="mt-2 space-y-1">
+                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>Ganancia bruta</span>
+                      <span className="font-medium text-emerald-600">+{formatCOP(stats.currentMonth.gananciasBrutas)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>Gastos operativos</span>
+                      <span className="font-medium text-red-600">-{formatCOP(stats.currentMonth.totalGastos)}</span>
+                    </div>
                   </div>
                 </div>
 
@@ -1697,11 +1859,7 @@ export function FinancialManagement() {
                       : 0;
                     return (
                       <>
-                        {change >= 0 ? (
-                          <ArrowUpRight className="w-4 h-4 text-emerald-600" />
-                        ) : (
-                          <ArrowDownRight className="w-4 h-4 text-red-600" />
-                        )}
+                        {change >= 0 ? <ArrowUpRight className="w-4 h-4 text-emerald-600" /> : <ArrowDownRight className="w-4 h-4 text-red-600" />}
                         <span className={`text-sm font-medium ${change >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                           {change >= 0 ? '+' : ''}{change.toFixed(1)}%
                         </span>
@@ -1711,12 +1869,7 @@ export function FinancialManagement() {
                   })()}
                 </div>
 
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full mt-3"
-                  onClick={() => setIsDailyBreakdownOpen(true)}
-                >
+                <Button variant="outline" size="sm" className="w-full mt-3" onClick={() => setIsDailyBreakdownOpen(true)}>
                   <Calendar className="w-4 h-4 mr-2" />
                   Desglosar ganancias
                 </Button>
@@ -1734,24 +1887,39 @@ export function FinancialManagement() {
                 </div>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{stats.currentMonth.margen.toFixed(1)}%</div>
-
-                {/* Desglose */}
-                <div className="mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800 space-y-1">
-                  <div className="text-xs text-zinc-500 dark:text-zinc-400">
-                    Fórmula: (Ganancias / Ingresos) × 100
-                  </div>
-                  <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
-                    <span>Ganancias netas</span>
-                    <span className="font-medium">{formatCOP(stats.currentMonth.gananciasNetas)}</span>
-                  </div>
-                  <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
-                    <span>Ingresos del mes</span>
-                    <span className="font-medium">{formatCOP(stats.currentMonth.ingresoNeto)}</span>
+                {/* Margen Bruto */}
+                <div className="mb-3">
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">% Ganancia Bruta</div>
+                  <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{stats.currentMonth.margenBruto.toFixed(1)}%</div>
+                  <div className="mt-1 space-y-1">
+                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>Ganancias brutas</span>
+                      <span className="font-medium">{formatCOP(stats.currentMonth.gananciasBrutas)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>Ingresos + notas crédito</span>
+                      <span className="font-medium">{formatCOP(stats.currentMonth.ingresoNeto + stats.currentMonth.totalNotasCredito)}</span>
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-1 mt-3">
+                {/* Margen Neto */}
+                <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800">
+                  <div className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">% Ganancia Neta</div>
+                  <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">{stats.currentMonth.margen.toFixed(1)}%</div>
+                  <div className="mt-1 space-y-1">
+                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>Ganancias netas</span>
+                      <span className="font-medium">{formatCOP(stats.currentMonth.gananciasNetas)}</span>
+                    </div>
+                    <div className="flex justify-between text-xs text-zinc-600 dark:text-zinc-400">
+                      <span>Ingresos del mes</span>
+                      <span className="font-medium">{formatCOP(stats.currentMonth.ingresoNeto)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1 mt-3 pt-3 border-t border-zinc-200 dark:border-zinc-800">
                   {stats.currentMonth.margen >= stats.previousMonth.margen ? (
                     <ArrowUpRight className="w-4 h-4 text-emerald-600" />
                   ) : (
@@ -1760,10 +1928,11 @@ export function FinancialManagement() {
                   <span className={`text-sm font-medium ${stats.currentMonth.margen >= stats.previousMonth.margen ? 'text-emerald-600' : 'text-red-600'}`}>
                     {(stats.currentMonth.margen - stats.previousMonth.margen).toFixed(1)}pts
                   </span>
-                  <span className="text-xs text-zinc-500 dark:text-zinc-400">vs mes anterior</span>
+                  <span className="text-xs text-zinc-500 dark:text-zinc-400">margen neto vs mes anterior</span>
                 </div>
               </CardContent>
             </Card>
+          </div>
           </div>
         </div>
 

@@ -7,22 +7,21 @@ interface RevertInvoiceResult {
   message: string;
 }
 
-// Verificar si una factura puede ser revertida (menos de 30 minutos de creación)
+// Obtener la fecha en zona horaria Colombia (GMT-5) en formato YYYY-MM-DD
+const getColombiaDateStr = (date: Date): string => {
+  return date.toLocaleDateString('en-CA', { timeZone: 'America/Bogota' });
+};
+
+// Verificar si una factura puede ser revertida (mismo día en zona horaria Colombia)
 export const canRevertInvoice = (invoiceCreatedAt: string): boolean => {
   const createdAt = new Date(invoiceCreatedAt);
   const now = new Date();
-  const diffInMinutes = (now.getTime() - createdAt.getTime()) / (1000 * 60);
-
-  return diffInMinutes <= 30;
+  return getColombiaDateStr(createdAt) === getColombiaDateStr(now);
 };
 
-// Obtener tiempo restante para revertir en minutos
+// Mantener compatibilidad — ya no aplica tiempo en minutos, retorna 0 si expiró
 export const getRevertTimeRemaining = (invoiceCreatedAt: string): number => {
-  const createdAt = new Date(invoiceCreatedAt);
-  const now = new Date();
-  const diffInMinutes = (now.getTime() - createdAt.getTime()) / (1000 * 60);
-
-  return Math.max(0, Math.ceil(30 - diffInMinutes));
+  return canRevertInvoice(invoiceCreatedAt) ? 1 : 0;
 };
 
 // Revertir factura: la marca como 'anulada' y restaura el inventario
@@ -52,9 +51,9 @@ export const revertInvoice = async (invoiceId: string): Promise<RevertInvoiceRes
       return { success: false, message: 'No se pueden revertir facturas en confirmación' };
     }
 
-    // 3. Verificar que no hayan pasado más de 30 minutos
+    // 3. Verificar que la factura sea del día actual (zona horaria Colombia)
     if (!canRevertInvoice(invoice.created_at)) {
-      return { success: false, message: 'Solo se pueden revertir facturas creadas hace menos de 30 minutos' };
+      return { success: false, message: 'Solo se pueden revertir facturas del día actual' };
     }
 
     // 4. Restaurar el stock de cada producto

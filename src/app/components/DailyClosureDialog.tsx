@@ -65,17 +65,20 @@ export function DailyClosureDialog({
   const currentUser = getCurrentUser();
 
   // Calcular el costo de los productos vendidos
+  // Base: mismas facturas que Ingresos Totales del Día
+  // (regulares pagadas + todos los créditos activos, excluyendo anuladas/canceladas)
   const calculateTotalCost = () => {
     let totalCost = 0;
 
     dailyStats.invoices.forEach(invoice => {
-      // Solo contar facturas pagadas o parcialmente devueltas
-      if (invoice.status === 'paid' || invoice.status === 'partial_return') {
+      const isRegularPaid = !invoice.is_credit && (invoice.status === 'paid' || invoice.status === 'partial_return');
+      const isActiveCredit = invoice.is_credit && invoice.status !== 'anulada' && invoice.status !== 'cancelled' && invoice.status !== 'pending_confirmation';
+
+      if (isRegularPaid || isActiveCredit) {
         invoice.items.forEach((item: any) => {
           const product = products.find(p => p.id === item.productId);
           if (product) {
-            const itemCost = product.current_cost * item.quantity;
-            totalCost += itemCost;
+            totalCost += product.current_cost * item.quantity;
           }
         });
       }
@@ -105,8 +108,8 @@ export function DailyClosureDialog({
     let totalCost = 0;
 
     dailyStats.invoices.forEach(invoice => {
-      // Solo facturas a crédito (excluir pending_confirmation y regulares)
-      if (invoice.is_credit && invoice.status !== 'pending_confirmation') {
+      // Solo facturas a crédito activas (excluir anuladas, canceladas y pending_confirmation)
+      if (invoice.is_credit && invoice.status !== 'pending_confirmation' && invoice.status !== 'anulada' && invoice.status !== 'cancelled') {
         totalRevenue += invoice.total || 0;
 
         invoice.items.forEach((item: any) => {
@@ -170,6 +173,10 @@ export function DailyClosureDialog({
   const calculatePaymentTotals = () => {
     let totalCash = 0;
     let totalTransfer = 0; // Solo de facturas
+    let cashExchangeImpact = 0;
+    let transferExchangeImpact = 0;
+    let cashReturns = 0;
+    let transferReturns = 0;
     let totalOthers = 0;
     let totalTransferRegular = 0; // Transferencias bancarias normales (solo facturas)
     let totalNequi = 0; // Solo de facturas
@@ -315,13 +322,15 @@ export function DailyClosureDialog({
         const priceDifference = exchange.price_difference || 0;
 
         if (priceDifference > 0) {
-          // Cliente paga diferencia (suma a ingresos)
           totalCash += cashAmount;
           totalTransfer += transferAmount;
+          cashExchangeImpact += cashAmount;
+          transferExchangeImpact += transferAmount;
         } else if (priceDifference < 0) {
-          // Se devuelve al cliente (resta de ingresos)
           totalCash -= cashAmount;
           totalTransfer -= transferAmount;
+          cashExchangeImpact -= cashAmount;
+          transferExchangeImpact -= transferAmount;
         }
       });
     }
@@ -329,7 +338,7 @@ export function DailyClosureDialog({
     // Sumar ingresos de servicio técnico
     const serviceRevenue = dailyStats.serviceRevenue || 0;
 
-    // RESTAR NOTAS DE CRÉDITO DEL DÍA según método de reembolso
+    // RESTAR NOTAS DE CRÉDITO DEL DÍA — se descuenta el total sin importar el método
     let creditNotesTotal = 0;
     let creditNotesCash = 0;
     let creditNotesTransfer = 0;
@@ -339,7 +348,7 @@ export function DailyClosureDialog({
         const cnTotal = cn.total || 0;
         creditNotesTotal += cnTotal;
 
-        // Restar según el método de reembolso
+        // Rastrear desglose por método para mostrar en UI
         if (cn.refund_method === 'efectivo') {
           totalCash -= cnTotal;
           creditNotesCash += cnTotal;
@@ -347,14 +356,9 @@ export function DailyClosureDialog({
           totalTransfer -= cnTotal;
           creditNotesTransfer += cnTotal;
         }
-        // 'saldo_a_favor' y 'descuento' no afectan efectivo/transferencia directamente,
-        // pero sí reducen el total general
+        // Para otros métodos (saldo_a_favor, descuento, etc.) se descuenta del total general abajo
       });
     }
-
-    // Calcular notas de crédito que NO son efectivo ni transferencia
-    // (saldo_a_favor y descuento) que aún no se han restado
-    const creditNotesOther = creditNotesTotal - creditNotesCash - creditNotesTransfer;
 
     // RESTAR DEVOLUCIONES DEL DÍA según método de reembolso
     const parseMixedRefund = (method: string) => {
@@ -374,20 +378,34 @@ export function DailyClosureDialog({
       const amount = ret.total || 0;
       if (method === 'efectivo') {
         totalCash -= amount;
+        cashReturns += amount;
       } else if (['transferencia', 'nequi', 'daviplata'].includes(method)) {
         totalTransfer -= amount;
+        transferReturns += amount;
       } else if (method.startsWith('mixto:')) {
         const parsed = parseMixedRefund(method);
         totalCash -= parsed.efectivo;
         totalTransfer -= parsed.transfer;
+        cashReturns += parsed.efectivo;
+        transferReturns += parsed.transfer;
       }
     });
+
+    // Total bruto de facturas a crédito emitidas hoy (excluye anuladas y canceladas)
+    const creditInvoicesTotal = dailyStats.invoices
+      .filter(inv => inv.type === 'credit' && inv.status !== 'cancelled' && inv.status !== 'anulada')
+      .reduce((sum, inv) => sum + (inv.total || 0), 0);
 
     return {
       totalCash,
       totalTransfer,
       totalOthers,
       totalAbonos,
+      creditInvoicesTotal,
+      cashExchangeImpact,
+      transferExchangeImpact,
+      cashReturns,
+      transferReturns,
       transferBreakdown: {
         transferencia: totalTransferRegular,
         nequi: totalNequi,
@@ -398,7 +416,7 @@ export function DailyClosureDialog({
       creditNotesTotal,
       creditNotesCash,
       creditNotesTransfer,
-      total: totalCash + totalTransfer + totalAbonos + serviceRevenue - creditNotesOther
+      total: totalCash + totalTransfer + serviceRevenue + creditInvoicesTotal - (creditNotesTotal - creditNotesCash - creditNotesTransfer)
     };
   };
 
@@ -459,6 +477,10 @@ export function DailyClosureDialog({
         // Calcular impacto de cambios
         const exchangeImpact = dailyStats.exchanges?.reduce((sum, ex) => sum + (ex.price_difference || 0), 0) || 0;
 
+        // Total de cartera generada hoy (bruto, sin restar notas de crédito)
+        const creditInvoicesTotal = paymentTotals.creditInvoicesTotal || 0;
+        const carteraTotal = creditInvoicesTotal;
+
         console.log('=== DATOS DEL CIERRE DIARIO ===');
         console.log('Total de productos vendidos:', totalProductsSold);
         console.log('Costo de productos:', totalCost);
@@ -489,10 +511,13 @@ export function DailyClosureDialog({
           total_expenses: totalExpenses,
           service_revenue: dailyStats.serviceRevenue || 0,
           total_returns: dailyStats.totalReturns || 0,
-          pending_credit: dailyStats.pendingCreditBalance || 0,
+          pending_credit: creditInvoicesTotal,
           credit_payments: creditPaymentsTotal,
           exchange_impact: exchangeImpact,
-          credit_notes_total: paymentTotals.creditNotesTotal || 0, // NUEVO: Notas de crédito del día
+          credit_notes_total: paymentTotals.creditNotesTotal || 0,
+          credit_notes_cash: paymentTotals.creditNotesCash || 0,
+          credit_notes_transfer: paymentTotals.creditNotesTransfer || 0,
+          cash_register_total: paymentTotals.totalCash + paymentTotals.totalTransfer + paymentTotals.totalAbonos,
           closed_by: closedByName.trim(),
           closed_at: new Date().toISOString(),
         });
@@ -602,33 +627,117 @@ export function DailyClosureDialog({
                       <div className="text-4xl font-bold text-emerald-600 dark:text-emerald-400 mb-2">
                         COP {formatCOP(paymentTotals.total)}
                       </div>
-                      <p className="text-sm text-emerald-700 dark:text-emerald-300">
-                        Incluye facturas pagadas y devoluciones parciales
-                      </p>
-                      <div className="mt-3 pt-3 border-t border-emerald-200 dark:border-emerald-700 space-y-1">
-                        {(dailyStats.serviceRevenue || 0) > 0 && (
-                          <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">
-                            + Servicio Técnico: COP {formatCOP(dailyStats.serviceRevenue || 0)}
-                          </p>
+                      <div className="mt-3 pt-3 border-t border-emerald-200 dark:border-emerald-700 space-y-1.5">
+                        <div className="flex justify-between text-xs">
+                          <span className="text-emerald-700 dark:text-emerald-300">💵 Ventas pagadas (efectivo):</span>
+                          <span className="font-medium text-emerald-800 dark:text-emerald-200">+{formatCOP(paymentTotals.totalCash)}</span>
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span className="text-emerald-700 dark:text-emerald-300">🏦 Ventas pagadas (transferencia):</span>
+                          <span className="font-medium text-emerald-800 dark:text-emerald-200">+{formatCOP(paymentTotals.totalTransfer)}</span>
+                        </div>
+                        {(paymentTotals.creditInvoicesTotal || 0) > 0 && (
+                          <div className="flex justify-between text-xs">
+                            <span className="text-blue-600 dark:text-blue-400">📋 Cartera generada hoy:</span>
+                            <span className="font-medium text-blue-700 dark:text-blue-300">+{formatCOP(paymentTotals.creditInvoicesTotal || 0)}</span>
+                          </div>
                         )}
-                        {dailyStats.exchanges && dailyStats.exchanges.length > 0 && (() => {
-                          const exchangeImpact = dailyStats.exchanges.reduce((sum, ex) => sum + (ex.price_difference || 0), 0);
-                          if (exchangeImpact !== 0) {
+                        {(paymentTotals.serviceRevenue || 0) > 0 && (
+                          <div className="flex justify-between text-xs">
+                            <span className="text-blue-600 dark:text-blue-400">🔧 Servicio técnico:</span>
+                            <span className="font-medium text-blue-700 dark:text-blue-300">+{formatCOP(paymentTotals.serviceRevenue || 0)}</span>
+                          </div>
+                        )}
+                        {(() => {
+                          const otherCreditNotes = (paymentTotals.creditNotesTotal || 0) - (paymentTotals.creditNotesCash || 0) - (paymentTotals.creditNotesTransfer || 0);
+                          if (otherCreditNotes > 0) {
                             return (
-                              <p className={`text-xs font-medium ${
-                                exchangeImpact > 0
-                                  ? 'text-emerald-600 dark:text-emerald-400'
-                                  : 'text-orange-600 dark:text-orange-400'
-                              }`}>
-                                Excedente Cambios: {exchangeImpact > 0 ? '+' : ''}COP {formatCOP(exchangeImpact)}
-                              </p>
+                              <div className="flex justify-between text-xs">
+                                <span className="text-red-600 dark:text-red-400">📝 Notas crédito (saldo/abono):</span>
+                                <span className="font-medium text-red-700 dark:text-red-300">-{formatCOP(otherCreditNotes)}</span>
+                              </div>
                             );
                           }
                           return null;
                         })()}
+                        {dailyStats.exchanges && dailyStats.exchanges.length > 0 && (() => {
+                          const exchangeImpact = dailyStats.exchanges.reduce((sum, ex) => sum + (ex.price_difference || 0), 0);
+                          if (exchangeImpact !== 0) {
+                            return (
+                              <div className="flex justify-between text-xs">
+                                <span className={exchangeImpact > 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-orange-600 dark:text-orange-400'}>
+                                  🔄 Excedente cambios:
+                                </span>
+                                <span className={`font-medium ${exchangeImpact > 0 ? 'text-emerald-700 dark:text-emerald-300' : 'text-orange-700 dark:text-orange-300'}`}>
+                                  {exchangeImpact > 0 ? '+' : ''}{formatCOP(exchangeImpact)}
+                                </span>
+                              </div>
+                            );
+                          }
+                          return null;
+                        })()}
+                        <div className="mt-4 pt-4 border-t-2 border-emerald-300 dark:border-emerald-600 rounded-lg bg-emerald-100/60 dark:bg-emerald-900/30 p-3 -mx-1">
+                          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300 uppercase tracking-wide mb-1">🏧 Ingreso por Caja</p>
+                          <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-300 mb-3">
+                            COP {formatCOP(paymentTotals.totalCash + paymentTotals.totalTransfer + paymentTotals.totalAbonos)}
+                          </div>
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between text-sm">
+                              <span className="text-emerald-700 dark:text-emerald-300">💵 Efectivo</span>
+                              <span className="font-semibold text-emerald-800 dark:text-emerald-200">{formatCOP(paymentTotals.totalCash)}</span>
+                            </div>
+                            <div className="flex justify-between text-sm">
+                              <span className="text-emerald-700 dark:text-emerald-300">🏦 Transferencias</span>
+                              <span className="font-semibold text-emerald-800 dark:text-emerald-200">{formatCOP(paymentTotals.totalTransfer)}</span>
+                            </div>
+                            {(paymentTotals.totalAbonos || 0) > 0 && (
+                              <div className="flex justify-between text-sm">
+                                <span className="text-emerald-700 dark:text-emerald-300">💳 Abonos a crédito</span>
+                                <span className="font-semibold text-emerald-800 dark:text-emerald-200">{formatCOP(paymentTotals.totalAbonos)}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
                       </div>
                     </CardContent>
                   </Card>
+
+                  {/* Card de Cartera del Día */}
+                  {((dailyStats.creditInvoices || 0) > 0 || (creditNotes && creditNotes.length > 0)) && (() => {
+                    const totalCreditInvoices = dailyStats.invoices
+                      .filter(inv => inv.type === 'credit' && inv.status !== 'cancelled' && inv.status !== 'anulada')
+                      .reduce((sum: number, inv: any) => sum + (inv.total || 0), 0);
+                    const totalCreditNotes = (creditNotes || []).reduce((sum: number, cn: any) => sum + (cn.total || 0), 0);
+                    const netCartera = totalCreditInvoices - totalCreditNotes;
+                    return (
+                      <Card className="border-blue-200 dark:border-blue-800 bg-blue-50/30 dark:bg-blue-950/20">
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm font-semibold text-blue-900 dark:text-blue-100 flex items-center gap-2">
+                            🏦 Cartera de Hoy
+                          </CardTitle>
+                        </CardHeader>
+                        <CardContent>
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <p className="text-xs text-blue-600 dark:text-blue-400 mb-1">Facturas a Crédito</p>
+                              <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
+                                {dailyStats.creditInvoices}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-blue-600 dark:text-blue-400 mb-1">Total en Cartera</p>
+                              <p className="text-xl font-bold text-blue-700 dark:text-blue-300">
+                                {formatCOP(totalCreditInvoices)}
+                              </p>
+                            </div>
+                          </div>
+                          <p className="text-xs text-blue-500 dark:text-blue-400 mt-2">
+                            Cartera generada hoy — no incluida en ingresos del día
+                          </p>
+                        </CardContent>
+                      </Card>
+                    );
+                  })()}
 
                   {/* Card de Devoluciones */}
                   {(dailyStats.returns || []).length > 0 && (
@@ -761,9 +870,26 @@ export function DailyClosureDialog({
                         <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
                           {formatCOP(paymentTotals.totalCash)}
                         </div>
-                        <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1">
-                          Caja física
-                        </p>
+                        <div className="mt-3 pt-2 border-t border-emerald-200 dark:border-emerald-700 space-y-1.5">
+                          <div className="flex justify-between text-xs text-emerald-700 dark:text-emerald-300">
+                            <span>📄 Facturas</span>
+                            <span className="font-medium">{formatCOP(paymentTotals.totalCash - paymentTotals.cashExchangeImpact + paymentTotals.cashReturns + paymentTotals.creditNotesCash)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs text-emerald-700 dark:text-emerald-300">
+                            <span>🔄 Dif. cambios</span>
+                            <span className={`font-medium ${paymentTotals.cashExchangeImpact < 0 ? 'text-orange-500' : ''}`}>
+                              {paymentTotals.cashExchangeImpact >= 0 ? '+' : ''}{formatCOP(paymentTotals.cashExchangeImpact)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-xs text-orange-600 dark:text-orange-400">
+                            <span>↩️ Devoluciones</span>
+                            <span className="font-medium">-{formatCOP(paymentTotals.cashReturns)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs text-red-600 dark:text-red-400">
+                            <span>📝 Notas crédito</span>
+                            <span className="font-medium">-{formatCOP(paymentTotals.creditNotesCash)}</span>
+                          </div>
+                        </div>
                       </CardContent>
                     </Card>
 
@@ -774,34 +900,54 @@ export function DailyClosureDialog({
                         </CardTitle>
                       </CardHeader>
                       <CardContent>
-                        <div className="text-2xl font-bold text-violet-600 dark:text-violet-400 mb-2">
+                        <div className="text-2xl font-bold text-violet-600 dark:text-violet-400">
                           {formatCOP(paymentTotals.totalTransfer)}
                         </div>
-                        <div className="text-xs text-violet-700 dark:text-violet-300 space-y-0.5">
-                          {paymentTotals.transferBreakdown.transferencia > 0 && (
-                            <div className="flex justify-between">
-                              <span>Transferencia:</span>
-                              <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.transferencia)}</span>
-                            </div>
-                          )}
-                          {paymentTotals.transferBreakdown.nequi > 0 && (
-                            <div className="flex justify-between">
-                              <span>💜 Nequi:</span>
-                              <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.nequi)}</span>
-                            </div>
-                          )}
-                          {paymentTotals.transferBreakdown.daviplata > 0 && (
-                            <div className="flex justify-between">
-                              <span>🔴 Daviplata:</span>
-                              <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.daviplata)}</span>
-                            </div>
-                          )}
-                          {paymentTotals.transferBreakdown.otros > 0 && (
-                            <div className="flex justify-between">
-                              <span>📱 Otros:</span>
-                              <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.otros)}</span>
-                            </div>
-                          )}
+                        <div className="mt-3 pt-2 border-t border-violet-200 dark:border-violet-700 space-y-1.5">
+                          <div className="flex justify-between text-xs text-violet-700 dark:text-violet-300">
+                            <span>📄 Facturas</span>
+                            <span className="font-medium">{formatCOP(paymentTotals.totalTransfer - paymentTotals.transferExchangeImpact + paymentTotals.transferReturns + paymentTotals.creditNotesTransfer)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs text-violet-700 dark:text-violet-300">
+                            <span>🔄 Dif. cambios</span>
+                            <span className={`font-medium ${paymentTotals.transferExchangeImpact < 0 ? 'text-orange-500' : ''}`}>
+                              {paymentTotals.transferExchangeImpact >= 0 ? '+' : ''}{formatCOP(paymentTotals.transferExchangeImpact)}
+                            </span>
+                          </div>
+                          <div className="flex justify-between text-xs text-orange-600 dark:text-orange-400">
+                            <span>↩️ Devoluciones</span>
+                            <span className="font-medium">-{formatCOP(paymentTotals.transferReturns)}</span>
+                          </div>
+                          <div className="flex justify-between text-xs text-red-600 dark:text-red-400">
+                            <span>📝 Notas crédito</span>
+                            <span className="font-medium">-{formatCOP(paymentTotals.creditNotesTransfer)}</span>
+                          </div>
+                          <div className="pt-1 border-t border-violet-200 dark:border-violet-700 space-y-0.5">
+                            {paymentTotals.transferBreakdown.transferencia > 0 && (
+                              <div className="flex justify-between text-xs text-violet-600 dark:text-violet-400">
+                                <span>Transferencia:</span>
+                                <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.transferencia)}</span>
+                              </div>
+                            )}
+                            {paymentTotals.transferBreakdown.nequi > 0 && (
+                              <div className="flex justify-between text-xs text-violet-600 dark:text-violet-400">
+                                <span>💜 Nequi:</span>
+                                <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.nequi)}</span>
+                              </div>
+                            )}
+                            {paymentTotals.transferBreakdown.daviplata > 0 && (
+                              <div className="flex justify-between text-xs text-violet-600 dark:text-violet-400">
+                                <span>🔴 Daviplata:</span>
+                                <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.daviplata)}</span>
+                              </div>
+                            )}
+                            {paymentTotals.transferBreakdown.otros > 0 && (
+                              <div className="flex justify-between text-xs text-violet-600 dark:text-violet-400">
+                                <span>📱 Otros:</span>
+                                <span className="font-medium">{formatCOP(paymentTotals.transferBreakdown.otros)}</span>
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </CardContent>
                     </Card>
@@ -823,38 +969,45 @@ export function DailyClosureDialog({
                     </Card>
                   </div>
 
-                  {/* Fila 4: Notas de Crédito (condicional) */}
-                  {(paymentTotals.creditNotesTotal || 0) > 0 && (
-                    <Card className="border-red-300 dark:border-red-700 bg-red-50/50 dark:bg-red-950/20">
-                      <CardHeader className="pb-3">
-                        <CardTitle className="text-sm font-semibold text-red-800 dark:text-red-200 flex items-center gap-2">
-                          📝 Notas de Crédito (Egresos)
-                        </CardTitle>
-                      </CardHeader>
-                      <CardContent>
-                        <div className="text-3xl font-bold text-red-600 dark:text-red-400 mb-2">
+                  {/* Notas de Crédito */}
+                  <Card className="border-red-200 dark:border-red-700 bg-red-50/30 dark:bg-red-950/20">
+                    <CardHeader className="pb-3">
+                      <CardTitle className="text-sm font-medium text-red-800 dark:text-red-200 flex items-center gap-2">
+                        📝 Notas de Crédito
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                      <div className="flex flex-col gap-1">
+                        <p className="text-xs text-red-600 dark:text-red-400 mb-1">Total Descontado de Ingresos</p>
+                        <div className="text-xl font-bold text-red-800 dark:text-red-200">
                           -{formatCOP(paymentTotals.creditNotesTotal || 0)}
                         </div>
-                        <p className="text-xs text-red-700 dark:text-red-300 mb-3">
-                          {creditNotes?.length || 0} nota(s) emitida(s) hoy
-                        </p>
-                        <div className="pt-3 border-t border-red-200 dark:border-red-800 space-y-1">
-                          {paymentTotals.creditNotesCash > 0 && (
+                      </div>
+                      {((paymentTotals.creditNotesCash || 0) > 0 || (paymentTotals.creditNotesTransfer || 0) > 0) && (
+                        <div className="pt-3 border-t border-red-200 dark:border-red-800 space-y-1 mt-3">
+                          {(paymentTotals.creditNotesCash || 0) > 0 && (
                             <div className="flex justify-between text-xs">
                               <span className="text-red-700 dark:text-red-300">💵 Efectivo:</span>
-                              <span className="font-semibold">-{formatCOP(paymentTotals.creditNotesCash)}</span>
+                              <span className="font-semibold text-red-800 dark:text-red-200">-{formatCOP(paymentTotals.creditNotesCash || 0)}</span>
                             </div>
                           )}
-                          {paymentTotals.creditNotesTransfer > 0 && (
+                          {(paymentTotals.creditNotesTransfer || 0) > 0 && (
                             <div className="flex justify-between text-xs">
                               <span className="text-red-700 dark:text-red-300">🏦 Transferencia:</span>
-                              <span className="font-semibold">-{formatCOP(paymentTotals.creditNotesTransfer)}</span>
+                              <span className="font-semibold text-red-800 dark:text-red-200">-{formatCOP(paymentTotals.creditNotesTransfer || 0)}</span>
+                            </div>
+                          )}
+                          {((paymentTotals.creditNotesTotal || 0) - (paymentTotals.creditNotesCash || 0) - (paymentTotals.creditNotesTransfer || 0)) > 0 && (
+                            <div className="flex justify-between text-xs">
+                              <span className="text-red-700 dark:text-red-300">🔄 Otros métodos:</span>
+                              <span className="font-semibold text-red-800 dark:text-red-200">-{formatCOP((paymentTotals.creditNotesTotal || 0) - (paymentTotals.creditNotesCash || 0) - (paymentTotals.creditNotesTransfer || 0))}</span>
                             </div>
                           )}
                         </div>
-                      </CardContent>
-                    </Card>
-                  )}
+                      )}
+                    </CardContent>
+                  </Card>
+
                 </div>
 
                 {/* Hourly Sales Chart */}
