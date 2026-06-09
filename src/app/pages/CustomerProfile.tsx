@@ -1053,6 +1053,7 @@ export function CustomerProfile() {
                           <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Número</th>
                           <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Emisión</th>
                           <th className="text-left px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Vencimiento</th>
+                          <th className="text-center px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Días restantes</th>
                           <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Total</th>
                           <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Pagado</th>
                           <th className="text-right px-6 py-3 text-xs font-medium text-zinc-600 dark:text-zinc-400 uppercase">Saldo</th>
@@ -1078,6 +1079,32 @@ export function CustomerProfile() {
                                 {invoice.due_date
                                   ? new Date(invoice.due_date).toLocaleDateString('es-CO')
                                   : 'Sin fecha'}
+                              </td>
+                              <td className="px-6 py-4 text-center">
+                                {invoice.due_date && invoice.status === 'pending' ? (() => {
+                                  const today = new Date();
+                                  today.setHours(0, 0, 0, 0);
+                                  const due = new Date(invoice.due_date);
+                                  due.setHours(0, 0, 0, 0);
+                                  const diff = Math.round((due.getTime() - today.getTime()) / 86400000);
+                                  const isOverdue = diff < 0;
+                                  const isDueSoon = diff >= 0 && diff <= 3;
+                                  return (
+                                    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                      isOverdue
+                                        ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                                        : isDueSoon
+                                        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
+                                        : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                                    }`}>
+                                      {isOverdue
+                                        ? `${Math.abs(diff)}d vencida`
+                                        : diff === 0
+                                        ? 'Vence hoy'
+                                        : `${diff}d restantes`}
+                                    </span>
+                                  );
+                                })() : <span className="text-zinc-400 text-xs">—</span>}
                               </td>
                               <td className="px-6 py-4 text-right font-medium text-zinc-900 dark:text-zinc-100">
                                 <span className={isAnulada ? 'line-through text-zinc-400' : ''}>{formatCOP(invoice.total)}</span>

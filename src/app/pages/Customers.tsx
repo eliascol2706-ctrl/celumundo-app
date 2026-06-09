@@ -331,6 +331,33 @@ export function Customers() {
                                   {new Date(invoice.date).toLocaleDateString('es-CO')}
                                 </p>
                               </div>
+                              {/* Días restantes / vencimiento */}
+                              {invoice.status === 'pending' && invoice.due_date && (() => {
+                                const today = new Date();
+                                today.setHours(0, 0, 0, 0);
+                                const due = new Date(invoice.due_date);
+                                due.setHours(0, 0, 0, 0);
+                                const diff = Math.round((due.getTime() - today.getTime()) / 86400000);
+                                const isOverdue = diff < 0;
+                                const isDueSoon = diff >= 0 && diff <= 3;
+                                return (
+                                  <div className="text-center min-w-[80px]">
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">Vence</p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                      {due.toLocaleDateString('es-CO')}
+                                    </p>
+                                    <span className={`mt-1 inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
+                                      isOverdue
+                                        ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                                        : isDueSoon
+                                        ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/40 dark:text-yellow-300'
+                                        : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'
+                                    }`}>
+                                      {isOverdue ? `${Math.abs(diff)}d vencida` : diff === 0 ? 'Vence hoy' : `${diff}d restantes`}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
                               <div className="text-right mr-4">
                                 <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">
                                   {formatCOP(invoice.total)}

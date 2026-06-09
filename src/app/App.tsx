@@ -9,6 +9,7 @@ import { OfflineScreen } from './components/OfflineScreen';
 import { supabase } from './lib/supabase';
 import { TaskQueueProvider } from './contexts/TaskQueueContext';
 import { TaskProgressBar } from './components/TaskProgressBar';
+import { NotificationCenter } from './components/NotificationCenter';
 
 export default function App() {
   const [showSplash, setShowSplash] = useState(false);
@@ -74,6 +75,7 @@ export default function App() {
         <Toaster />
         <OfflineScreen />
         <TaskProgressBar />
+        <NotificationCenter />
       </TaskQueueProvider>
     </ErrorBoundary>
   );

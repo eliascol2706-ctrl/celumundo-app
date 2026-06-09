@@ -5142,3 +5142,66 @@ export const deleteInvoiceSave = async (saveId: string): Promise<boolean> => {
     return false;
   }
 };
+
+// ─── NOTIFICATIONS ────────────────────────────────────────────────────────────
+
+export type NotificationType = 'invoice_due_soon' | 'invoice_overdue' | 'low_stock';
+
+export interface AppNotification {
+  id: string;
+  company: string;
+  type: NotificationType;
+  reference_id: string;
+  title: string;
+  message: string;
+  read: boolean;
+  read_at?: string;
+  created_at: string;
+}
+
+export const getUnreadNotifications = async (): Promise<AppNotification[]> => {
+  const company = getCurrentCompany();
+  const { data } = await supabase
+    .from('notifications')
+    .select('*')
+    .eq('company', company)
+    .eq('read', false)
+    .order('created_at', { ascending: false });
+  return data || [];
+};
+
+export const upsertNotification = async (
+  type: NotificationType,
+  referenceId: string,
+  title: string,
+  message: string
+): Promise<void> => {
+  const company = getCurrentCompany();
+  await supabase.from('notifications').upsert(
+    { company, type, reference_id: referenceId, title, message, read: false },
+    { onConflict: 'company,type,reference_id', ignoreDuplicates: true }
+  );
+};
+
+export const deleteNotification = async (type: NotificationType, referenceId: string): Promise<void> => {
+  const company = getCurrentCompany();
+  await supabase.from('notifications')
+    .delete()
+    .eq('company', company)
+    .eq('type', type)
+    .eq('reference_id', referenceId);
+};
+
+export const markNotificationRead = async (id: string): Promise<void> => {
+  await supabase.from('notifications')
+    .update({ read: true, read_at: new Date().toISOString() })
+    .eq('id', id);
+};
+
+export const markAllNotificationsRead = async (): Promise<void> => {
+  const company = getCurrentCompany();
+  await supabase.from('notifications')
+    .update({ read: true, read_at: new Date().toISOString() })
+    .eq('company', company)
+    .eq('read', false);
+};
