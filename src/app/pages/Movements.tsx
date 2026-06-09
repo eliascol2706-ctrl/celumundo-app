@@ -507,6 +507,20 @@ export default function Movements() {
         return;
       }
 
+      // Validar cantidad > 0 en todos los ítems
+      if (movementItems.some((item) => !item.quantity || item.quantity <= 0)) {
+        toast.error("Todos los productos deben tener una cantidad mayor a 0");
+        setIsSubmitting(false);
+        return;
+      }
+
+      // Validar nuevo costo > 0 en entradas (si se especificó)
+      if (formData.type === "entry" && movementItems.some((item) => item.newCost !== undefined && item.newCost <= 0)) {
+        toast.error("El nuevo costo debe ser mayor a 0");
+        setIsSubmitting(false);
+        return;
+      }
+
       // Validar que productos con IDs en salidas tengan IDs seleccionadas
       for (const item of movementItems) {
         if (formData.type === "exit" && item.useUnitIds && item.unitIds.length === 0) {
@@ -2726,11 +2740,13 @@ export default function Movements() {
                               id={`qty-${index}`}
                               type="number"
                               min="1"
-                              value={item.quantity}
+                              value={item.quantity === 0 ? '' : item.quantity}
+                              placeholder="0"
                               onChange={(e) =>
                                 handleUpdateItem(index, "quantity", e.target.value)
                               }
-                              className="h-8 text-sm"
+                              onWheel={(e) => e.currentTarget.blur()}
+                              className="h-8 text-sm [&::-webkit-inner-spin-button]:hidden [&::-webkit-outer-spin-button]:hidden"
                             />
                           </div>
 
@@ -2746,12 +2762,13 @@ export default function Movements() {
                                 id={`cost-${index}`}
                                 type="number"
                                 step="0.01"
-                                value={item.newCost || ""}
+                                value={item.newCost === 0 ? '' : (item.newCost || "")}
                                 onChange={(e) =>
                                   handleUpdateItem(index, "newCost", e.target.value)
                                 }
                                 placeholder={formatCOP(item.currentCost)}
-                                className="h-8 text-sm"
+                                onWheel={(e) => e.currentTarget.blur()}
+                                className="h-8 text-sm [&::-webkit-inner-spin-button]:hidden [&::-webkit-outer-spin-button]:hidden"
                               />
                             </div>
                           )}

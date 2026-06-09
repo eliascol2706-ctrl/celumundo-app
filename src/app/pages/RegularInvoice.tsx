@@ -317,6 +317,11 @@ export function RegularInvoice() {
       return;
     }
 
+    if (items.some((item) => !item.price || item.price <= 0)) {
+      toast.error('Todos los productos deben tener un precio mayor a 0');
+      return;
+    }
+
     // Validar que productos con IDs tengan IDs seleccionadas
     for (const item of items) {
       if (item.useUnitIds && (!item.unitIds || item.unitIds.length === 0)) {
@@ -1340,11 +1345,14 @@ export function RegularInvoice() {
                                 <Label>Precio *</Label>
                                 <Input
                                   type="number"
-                                  value={item.price}
+                                  value={item.price === 0 ? '' : item.price}
                                   onChange={(e) =>
-                                    updateItem(index, 'price', parseFloat(e.target.value) || 0)
+                                    updateItem(index, 'price', e.target.value === '' ? 0 : parseFloat(e.target.value) || 0)
                                   }
                                   min="0"
+                                  placeholder="0"
+                                  onWheel={(e) => e.currentTarget.blur()}
+                                  className="[&::-webkit-inner-spin-button]:hidden [&::-webkit-outer-spin-button]:hidden"
                                 />
                               </div>
                               <div>
