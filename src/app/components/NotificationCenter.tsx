@@ -144,27 +144,28 @@ export function NotificationCenter() {
   const unreadCount = notifications.length;
 
   return (
-    <div ref={panelRef} className="fixed top-4 right-4 z-50 flex flex-col items-end gap-3">
-      {/* Botón flotante */}
+    <div ref={panelRef} className="relative flex items-center">
+      {/* Botón */}
       <button
         onClick={() => setIsOpen(prev => !prev)}
-        className={`relative w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all duration-200 ${
+        className={`relative w-9 h-9 rounded-full flex items-center justify-center transition-all duration-200 ${
           isOpen
             ? 'bg-zinc-800 dark:bg-zinc-100 text-white dark:text-zinc-900'
-            : 'bg-white dark:bg-zinc-800 text-zinc-700 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-700'
-        } border border-zinc-200 dark:border-zinc-700`}
+            : 'text-zinc-600 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-700'
+        }`}
+        title="Notificaciones"
       >
         <Bell className={`w-5 h-5 ${syncing ? 'animate-pulse' : ''}`} />
         {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center px-1 shadow">
+          <span className="absolute -top-1 -right-1 min-w-[16px] h-4 bg-red-500 text-white text-[10px] font-bold rounded-full flex items-center justify-center px-0.5 shadow">
             {unreadCount > 99 ? '99+' : unreadCount}
           </span>
         )}
       </button>
 
-      {/* Panel */}
+      {/* Panel — se abre hacia abajo */}
       {isOpen && (
-        <div className="w-96 max-h-[70vh] flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-4 duration-200">
+        <div className="absolute top-full right-0 mt-2 w-96 max-h-[70vh] flex flex-col bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-top-2 duration-200 z-50">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-100 dark:border-zinc-800">
             <div className="flex items-center gap-2">

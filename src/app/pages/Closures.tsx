@@ -1,7 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Calendar, FileText, TrendingUp, AlertTriangle, Eye, Pencil } from 'lucide-react';
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
+import { Calendar, FileText, TrendingUp, AlertTriangle, Eye } from 'lucide-react';
 import {
   getInvoices,
   getDailyClosures,
@@ -46,10 +44,6 @@ export function Closures() {
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null); // NUEVO: Mes seleccionado para cierre
   const [selectedClosure, setSelectedClosure] = useState<any | null>(null); // Cierre seleccionado para ver detalles
   const [isClosureDetailsOpen, setIsClosureDetailsOpen] = useState(false); // Modal de detalles de cierre
-  const [editingClosure, setEditingClosure] = useState<any | null>(null);
-  const [editTotal, setEditTotal] = useState('');
-  const [editCashRegister, setEditCashRegister] = useState('');
-  const [isSavingEdit, setIsSavingEdit] = useState(false);
   const itemsPerPage = 10;
   const invoicesPerPage = 20;
 
@@ -134,36 +128,6 @@ export function Closures() {
     }
   };
 
-  const handleOpenEditClosure = (closure: any) => {
-    setEditingClosure(closure);
-    setEditTotal(String(closure.total || 0));
-    setEditCashRegister(String(closure.cash_register_total || 0));
-  };
-
-  const handleSaveEditClosure = async () => {
-    if (!editingClosure) return;
-    setIsSavingEdit(true);
-    try {
-      const { supabase, getCurrentCompany } = await import('../lib/supabase');
-      const company = getCurrentCompany();
-      const { error } = await supabase
-        .from('daily_closures')
-        .update({
-          total: parseFloat(editTotal) || 0,
-          cash_register_total: parseFloat(editCashRegister) || 0,
-        })
-        .eq('id', editingClosure.id)
-        .eq('company', company);
-      if (error) throw error;
-      toast.success('Cierre actualizado correctamente');
-      setEditingClosure(null);
-      await loadData();
-    } catch (err) {
-      toast.error('Error al actualizar el cierre');
-    } finally {
-      setIsSavingEdit(false);
-    }
-  };
 
   const getTodayInvoices = () => {
     const today = getColombiaDate();
@@ -1087,14 +1051,6 @@ export function Closures() {
                                     >
                                       <Eye className="h-4 w-4" />
                                     </Button>
-                                    <Button
-                                      variant="ghost"
-                                      size="sm"
-                                      onClick={() => handleOpenEditClosure(closure)}
-                                      className="h-8 w-8 p-0 text-muted-foreground hover:text-foreground"
-                                    >
-                                      <Pencil className="h-4 w-4" />
-                                    </Button>
                                   </div>
                                 </td>
                               </tr>
@@ -1537,44 +1493,6 @@ export function Closures() {
           loadData();
         }}
       />
-
-      {/* Modal de edición de cierre */}
-      <Dialog open={!!editingClosure} onOpenChange={(open) => { if (!open) setEditingClosure(null); }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Editar Cierre</DialogTitle>
-            <DialogDescription>
-              {editingClosure && `Cierre del ${new Date(editingClosure.date).toLocaleDateString('es-ES', { timeZone: 'UTC' })}`}
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            <div className="space-y-1">
-              <Label htmlFor="edit-total">Total Ingresos (COP)</Label>
-              <Input
-                id="edit-total"
-                type="number"
-                value={editTotal}
-                onChange={(e) => setEditTotal(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="edit-cash-register">Ingresos por Caja (COP)</Label>
-              <Input
-                id="edit-cash-register"
-                type="number"
-                value={editCashRegister}
-                onChange={(e) => setEditCashRegister(e.target.value)}
-              />
-            </div>
-            <div className="flex justify-end gap-2 pt-2">
-              <Button variant="outline" onClick={() => setEditingClosure(null)}>Cancelar</Button>
-              <Button onClick={handleSaveEditClosure} disabled={isSavingEdit}>
-                {isSavingEdit ? 'Guardando...' : 'Guardar'}
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* Dialog de detalles del cierre */}
       <Dialog open={isClosureDetailsOpen} onOpenChange={setIsClosureDetailsOpen}>

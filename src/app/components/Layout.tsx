@@ -46,6 +46,7 @@ import { formatCOP } from '../lib/currency';
 import { getPrinterConfig, savePrinterConfig, getAvailablePrinters, getLabelPrinterSettings, saveLabelPrinterSettings, type LabelPrinterSettings, defaultLabelSettings } from '../lib/printer-config';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { isPrintingAvailable } from '../lib/platform-detector';
+import { NotificationCenter } from './NotificationCenter';
 import { LabelPrinterConfigDialog } from './LabelPrinterConfigDialog';
 import { UnitIDManager } from './UnitIDManager';
 import { DevPanelCustomersTab } from './DevPanelCustomersTab';
@@ -760,7 +761,7 @@ export function Layout() {
           >
             <Menu className="h-6 w-6" />
           </button>
-          <div className="flex-1 flex items-center justify-end gap-4">
+          <div className="flex-1 flex items-center justify-center gap-4">
             <div className="text-sm">
               <span className="text-muted-foreground">Usuario: </span>
               <span className="font-medium text-green-600 dark:text-green-400">
@@ -775,6 +776,7 @@ export function Layout() {
                 day: 'numeric'
               })}
             </div>
+            <NotificationCenter />
             {currentUser?.role === 'admin' && (
               <button
                 onClick={() => setDevPanelTokenDialogOpen(true)}
