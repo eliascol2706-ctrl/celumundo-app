@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Plus, Package, Clock, Send, RotateCcw, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Barcode } from 'lucide-react';
+import { Search, Plus, Package, Clock, Send, RotateCcw, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Barcode, Printer } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -12,6 +12,7 @@ import { formatCOP } from '../lib/currency';
 import { getWarranties, searchProductsForInvoice, addWarranty, getCurrentUser, getWarrantiesStats, updateWarrantyStatus, type Warranty, type Product } from '../lib/supabase';
 import { toast } from 'sonner';
 import { useTaskQueue } from '../contexts/TaskQueueContext';
+import { isPrintingAvailable } from '../lib/platform-detector';
 
 export default function Warranties() {
   const [warranties, setWarranties] = useState<Warranty[]>([]);
@@ -53,6 +54,13 @@ export default function Warranties() {
   const [selectedWarranty, setSelectedWarranty] = useState<Warranty | null>(null);
   const [newStatus, setNewStatus] = useState<Warranty['status']>('pending');
   const [statusNotes, setStatusNotes] = useState('');
+
+  // Modal de impresión
+  const [isPrintModalOpen, setIsPrintModalOpen] = useState(false);
+  const [warrantyToPrint, setWarrantyToPrint] = useState<Warranty | null>(null);
+  const [printName, setPrintName] = useState('');
+  const [printCedula, setPrintCedula] = useState('');
+  const [printExtraNotes, setPrintExtraNotes] = useState('');
 
   const itemsPerPage = 10;
   const currentUser = getCurrentUser();
@@ -258,6 +266,119 @@ export default function Warranties() {
         toast.error('Error al procesar la garantía');
       }
     })();
+  };
+
+  const handleOpenPrintModal = (warranty: Warranty) => {
+    setWarrantyToPrint(warranty);
+    setPrintName('');
+    setPrintCedula('');
+    setPrintExtraNotes('');
+    setIsPrintModalOpen(true);
+  };
+
+  const handlePrintWarranty = () => {
+    if (!warrantyToPrint) return;
+    if (!printName.trim()) {
+      toast.error('Ingresa el nombre del cliente');
+      return;
+    }
+    if (!printCedula.trim()) {
+      toast.error('Ingresa la cédula del cliente');
+      return;
+    }
+
+    const w = warrantyToPrint;
+    const companyName = 'CELUMUNDO VIP';
+    const warrantyDate = new Date(w.date).toLocaleString('es-ES', {
+      timeZone: 'America/Bogota',
+      day: '2-digit', month: 'long', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+
+    const statusLabels: Record<string, string> = {
+      pending: 'Pendiente', sent: 'Enviada al proveedor',
+      returned: 'Devuelta por proveedor', resolved: 'Resuelta', cancelled: 'Cancelada',
+    };
+
+    const unitIdsHTML = w.unit_ids?.length
+      ? `<p><strong>IDs de unidades:</strong> ${w.unit_ids.join(', ')}</p>`
+      : '';
+
+    const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>Garantía ${w.warranty_number}</title>
+  <style>
+    @page { size: letter; margin: 12mm 15mm; }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 9pt; color: #000; line-height: 1.4; }
+    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #000; padding-bottom: 3mm; margin-bottom: 4mm; }
+    .company { font-size: 16pt; font-weight: 900; }
+    .doc-info { text-align: right; font-size: 8pt; }
+    .doc-info strong { font-size: 11pt; display: block; }
+    table.data { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    table.data td { padding: 1.5mm 2mm; vertical-align: top; font-size: 8.5pt; }
+    table.data td.lbl { font-weight: 700; width: 28%; white-space: nowrap; }
+    .sep { font-size: 8pt; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px; background: #000; color: #fff; padding: 1mm 2mm; margin-bottom: 2mm; }
+    .box { border: 1px solid #000; padding: 2mm 3mm; font-size: 8.5pt; white-space: pre-wrap; margin-bottom: 4mm; }
+    .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 8mm; margin-bottom: 4mm; }
+    .sig { margin-top: 12mm; border-top: 1px solid #000; padding-top: 1mm; text-align: center; font-size: 8pt; }
+    .foot { text-align: center; font-size: 7.5pt; margin-top: 5mm; border-top: 1px solid #000; padding-top: 2mm; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="company">${companyName}</div>
+    <div class="doc-info">
+      <strong>COMPROBANTE DE GARANTÍA</strong>
+      No. ${w.warranty_number} &nbsp;|&nbsp; ${warrantyDate}
+    </div>
+  </div>
+
+  <div class="sep">Datos del cliente</div>
+  <table class="data" style="margin-bottom:4mm;">
+    <tr><td class="lbl">Nombre:</td><td>${printName.trim()}</td><td class="lbl">Cédula:</td><td>${printCedula.trim()}</td></tr>
+  </table>
+
+  <div class="sep">Producto en garantía</div>
+  <table class="data" style="margin-bottom:4mm;">
+    <tr><td class="lbl">Producto:</td><td>${w.product_name}</td><td class="lbl">Código:</td><td>${w.product_code}</td></tr>
+    <tr><td class="lbl">Cantidad:</td><td>${w.quantity} unidad(es)</td><td class="lbl">Estado:</td><td>${statusLabels[w.status] || w.status}</td></tr>
+    <tr><td class="lbl">Registrado por:</td><td colspan="3">${w.registered_by || '—'}</td></tr>
+    ${w.unit_ids?.length ? `<tr><td class="lbl">IDs:</td><td colspan="3">${w.unit_ids.join(', ')}</td></tr>` : ''}
+  </table>
+
+  <div class="sep">Motivo de la garantía</div>
+  <div class="box">${w.notes || 'Sin descripción'}</div>
+
+  ${printExtraNotes.trim() ? `<div class="sep">Notas adicionales</div><div class="box">${printExtraNotes.trim()}</div>` : ''}
+
+  <div class="row2">
+    <div><div class="sig">Firma del cliente</div></div>
+    <div><div class="sig">Firma del asesor — ${companyName}</div></div>
+  </div>
+
+  <div class="foot">${companyName} &nbsp;•&nbsp; Garantía ${w.warranty_number} &nbsp;•&nbsp; ${new Date().toLocaleString('es-ES')}</div>
+</body>
+</html>`;
+
+    if (!isPrintingAvailable()) {
+      toast.error('La impresión directa solo está disponible en la aplicación de escritorio');
+      return;
+    }
+
+    const printWindow = window.open('', '_blank', 'width=900,height=700');
+    if (printWindow) {
+      printWindow.document.write(html);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(() => {
+        printWindow.print();
+      }, 400);
+    }
+
+    setIsPrintModalOpen(false);
   };
 
   const handleOpenStatusDialog = (warranty: Warranty) => {
@@ -517,14 +638,25 @@ export default function Warranties() {
                           </span>
                         </td>
                         <td className="py-3 px-3 text-center">
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => handleOpenStatusDialog(warranty)}
-                            disabled={warranty.status === 'resolved' || warranty.status === 'cancelled'}
-                          >
-                            Actualizar
-                          </Button>
+                          <div className="flex items-center justify-center gap-1">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleOpenStatusDialog(warranty)}
+                              disabled={warranty.status === 'resolved' || warranty.status === 'cancelled'}
+                            >
+                              Actualizar
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => handleOpenPrintModal(warranty)}
+                              title="Imprimir comprobante"
+                              className="h-8 w-8 p-0"
+                            >
+                              <Printer className="h-4 w-4" />
+                            </Button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -980,6 +1112,61 @@ export default function Warranties() {
                 </Button>
                 <Button onClick={handleUpdateStatus} disabled={isLoading}>
                   {isLoading ? 'Actualizando...' : 'Actualizar'}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de impresión */}
+      <Dialog open={isPrintModalOpen} onOpenChange={setIsPrintModalOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Printer className="h-5 w-5 text-emerald-600" />
+              Imprimir Comprobante de Garantía
+            </DialogTitle>
+          </DialogHeader>
+          {warrantyToPrint && (
+            <div className="space-y-4 py-2">
+              <div className="bg-muted/50 rounded-lg p-3 text-sm space-y-1">
+                <p><span className="text-muted-foreground">Garantía:</span> <span className="font-medium">{warrantyToPrint.warranty_number}</span></p>
+                <p><span className="text-muted-foreground">Producto:</span> <span className="font-medium">{warrantyToPrint.product_name}</span></p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="print-name">Nombre del cliente <span className="text-red-500">*</span></Label>
+                <Input
+                  id="print-name"
+                  value={printName}
+                  onChange={(e) => setPrintName(e.target.value)}
+                  placeholder="Nombre completo"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="print-cedula">Cédula / Documento <span className="text-red-500">*</span></Label>
+                <Input
+                  id="print-cedula"
+                  value={printCedula}
+                  onChange={(e) => setPrintCedula(e.target.value)}
+                  placeholder="Número de documento"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="print-notes">Nota adicional <span className="text-muted-foreground text-xs">(opcional)</span></Label>
+                <Textarea
+                  id="print-notes"
+                  value={printExtraNotes}
+                  onChange={(e) => setPrintExtraNotes(e.target.value)}
+                  placeholder="Observaciones adicionales para el comprobante..."
+                  rows={3}
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button variant="outline" onClick={() => setIsPrintModalOpen(false)}>Cancelar</Button>
+                <Button onClick={handlePrintWarranty} className="bg-emerald-600 hover:bg-emerald-700 text-white gap-2">
+                  <Printer className="h-4 w-4" />
+                  Imprimir
                 </Button>
               </div>
             </div>
