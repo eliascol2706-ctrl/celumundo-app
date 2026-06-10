@@ -393,6 +393,99 @@ export const printThermalPayment = async (payment: any, invoice?: any): Promise<
   }
 };
 
+// Generar HTML para comprobante de cambio
+export const generateExchangeReceiptHTMLThermal = (exchange: any): string => {
+  const companyName = getCurrentCompany() === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
+  const exchangeDate = new Date(exchange.date).toLocaleString('es-ES', {
+    timeZone: 'America/Bogota',
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+
+  const buildProductsHTML = (products: any[]) =>
+    (products || []).map((prod: any) => {
+      const idsHTML = prod.unitIds?.length
+        ? `<div style="font-size:7px;margin-top:1mm;padding:1mm;background:#f5f5f5;">IDs: ${prod.unitIds.join(', ')}</div>`
+        : '';
+      return `<div style="margin-bottom:2mm;font-size:10px;">
+        <div style="margin-bottom:1mm;">${prod.productName}</div>
+        <div>${prod.quantity} x ${formatCOP(prod.price)} = ${formatCOP(prod.total)}</div>
+        ${idsHTML}
+      </div>`;
+    }).join('');
+
+  const difference = exchange.price_difference || 0;
+  const differenceLabel = difference > 0 ? 'CLIENTE DEBE PAGAR' : difference < 0 ? 'SE REEMBOLSO AL CLIENTE' : 'SIN DIFERENCIA';
+
+  let paymentHTML = '';
+  if (difference !== 0 && exchange.payment_method) {
+    const parts: string[] = [];
+    if (exchange.payment_cash > 0) parts.push(`• Efectivo: ${formatCOP(exchange.payment_cash)}`);
+    if (exchange.payment_transfer > 0) parts.push(`• Transferencia: ${formatCOP(exchange.payment_transfer)}`);
+    if (exchange.payment_other > 0) parts.push(`• Otros: ${formatCOP(exchange.payment_other)}`);
+    if (parts.length > 0) {
+      paymentHTML = `<div style="margin-bottom:3mm;font-size:8px;border-bottom:1px solid black;padding-bottom:2mm;">
+        <div style="margin-bottom:1mm;font-size:9px;">METODO DE PAGO:</div>
+        ${parts.map(p => `<div style="margin-bottom:1mm;">${p}</div>`).join('')}
+      </div>`;
+    }
+  }
+
+  return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>
+    @page { size: 80mm auto; margin: 0; padding: 0; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; box-sizing: border-box; margin: 0; padding: 0; }
+    body { width: 70mm; max-width: 70mm; font-family: Arial, Helvetica, sans-serif; font-size: 11px; font-weight: 500; padding: 2mm 3mm; background: white; color: #000; line-height: 1.5; }
+    .sep { border-bottom: 1px solid black; margin-bottom: 3mm; padding-bottom: 2mm; }
+    .sep2 { border-bottom: 2px solid black; margin-bottom: 3mm; padding-bottom: 2mm; }
+  </style></head><body>
+    <div class="sep2" style="text-align:center;">
+      <div style="font-size:15px;font-weight:800;margin-bottom:2mm;">${companyName}</div>
+      <div style="font-size:13px;font-weight:700;margin-bottom:1mm;">COMPROBANTE DE CAMBIO</div>
+      <div style="font-size:12px;">No. ${exchange.exchange_number}</div>
+    </div>
+    <div class="sep" style="font-size:10px;">
+      <div style="margin-bottom:1mm;">Fecha: ${exchangeDate}</div>
+      <div style="margin-bottom:1mm;">Factura: ${exchange.invoice_number || '-'}</div>
+      <div>Cliente: ${exchange.customer_name || 'Sin nombre'}</div>
+    </div>
+    <div class="sep">
+      <div style="text-align:center;font-size:12px;font-weight:800;margin-bottom:2mm;background:#000;color:#fff;padding:2mm;">PRODUCTOS DEVUELTOS</div>
+      ${buildProductsHTML(exchange.original_products)}
+    </div>
+    <div class="sep">
+      <div style="text-align:center;font-size:12px;font-weight:800;margin-bottom:2mm;background:#000;color:#fff;padding:2mm;">PRODUCTOS ENTREGADOS</div>
+      ${buildProductsHTML(exchange.new_products)}
+    </div>
+    <div style="border-top:2px solid black;border-bottom:2px solid black;padding:3mm 0;text-align:center;background:#f0f0f0;margin-bottom:3mm;">
+      <div style="font-size:11px;font-weight:800;margin-bottom:2mm;">${differenceLabel}</div>
+      <div style="font-size:16px;font-weight:800;">${formatCOP(Math.abs(difference))}</div>
+    </div>
+    ${paymentHTML}
+    <div style="text-align:center;font-size:10px;margin-top:3mm;padding-top:2mm;">
+      <div style="border-top:1px solid black;padding-top:2mm;margin-bottom:2mm;"></div>
+      <div style="font-size:12px;font-weight:800;margin-bottom:2mm;">GRACIAS POR SU COMPRA</div>
+      <div style="font-size:11px;margin-bottom:1mm;">${companyName}</div>
+      <div style="font-size:10px;color:#333;">${new Date().toLocaleString('es-ES')}</div>
+    </div>
+    <div style="height:30mm;width:100%;"></div>
+    <div style="page-break-after:always;"></div>
+  </body></html>`;
+};
+
+export const printThermalExchange = async (exchange: any): Promise<boolean> => {
+  try {
+    const html = generateExchangeReceiptHTMLThermal(exchange);
+    const config = await getPrinterConfig();
+    const printerName = config.thermal || 'web-fallback';
+    const success = await printDirect(printerName, html, 'thermal');
+    if (!success) throw new Error('Error al enviar a la impresora');
+    return true;
+  } catch (error) {
+    console.error('Error al imprimir comprobante de cambio:', error);
+    throw error;
+  }
+};
+
 /**
  * Impresión térmica vía navegador web (para testing sin impresora física).
  * Crea un iframe oculto y lanza window.print() directamente.

@@ -1025,8 +1025,7 @@ export function InvoicesMenu() {
         setEditingInvoice(null);
 
         // Actualizar facturas pendientes
-        const invoices = await getInvoices();
-        const pending = invoices.filter(inv => inv.status === 'pending_confirmation');
+        const pending = await getPendingConfirmationInvoices();
         setPendingInvoices(pending);
 
         loadStats();
@@ -1055,8 +1054,7 @@ export function InvoicesMenu() {
       });
 
       // Actualizar facturas pendientes
-      const invoices = await getInvoices();
-      const pending = invoices.filter(inv => inv.status === 'pending_confirmation');
+      const pending = await getPendingConfirmationInvoices();
       setPendingInvoices(pending);
 
       toast.success('Producto eliminado y stock restaurado');
@@ -1261,8 +1259,7 @@ export function InvoicesMenu() {
       await updateInvoice(editingInvoice.id, { items: updatedItems, subtotal, tax: 0, total });
       setEditingInvoice({ ...editingInvoice, items: updatedItems, subtotal, tax: 0, total });
 
-      const invoices = await getInvoices();
-      setPendingInvoices(invoices.filter(inv => inv.status === 'pending_confirmation'));
+      setPendingInvoices(await getPendingConfirmationInvoices());
       toast.success(`"${product.name}" agregado a la factura`);
       loadStats();
     } catch (err) {
@@ -1287,8 +1284,7 @@ export function InvoicesMenu() {
       setShowEditPriceModal(false);
       setEditPriceIndex(null);
 
-      const invoices = await getInvoices();
-      setPendingInvoices(invoices.filter(inv => inv.status === 'pending_confirmation'));
+      setPendingInvoices(await getPendingConfirmationInvoices());
       toast.success('Precio actualizado');
       loadStats();
     } catch (err) {

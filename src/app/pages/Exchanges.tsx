@@ -26,6 +26,8 @@ import {
 } from '../lib/supabase';
 import { type UnitIdWithNote } from '../lib/unit-ids-utils';
 import { toast } from 'sonner';
+import { isPrintingAvailable } from '../lib/platform-detector';
+import { printThermalExchange } from '../lib/thermal-printer';
 
 type FlowStep = 'search-invoice' | 'select-return-products' | 'select-new-products' | 'payment';
 
@@ -414,223 +416,19 @@ export default function Exchanges() {
     }
   };
 
-  const handlePrintExchange = (exchange: Exchange) => {
-    const html = generateExchangeReceiptHTML(exchange);
-    const printWindow = window.open('', '_blank');
-    if (printWindow) {
-      printWindow.document.write(html);
-      printWindow.document.close();
-      printWindow.focus();
-      setTimeout(() => {
-        printWindow.print();
-      }, 250);
-    }
-  };
-
-  const generateExchangeReceiptHTML = (exchange: Exchange): string => {
-    const companyName = 'CELUMUNDO VIP';
-    const exchangeDate = new Date(exchange.date).toLocaleString('es-ES', {
-      timeZone: 'America/Bogota',
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
-
-    // Productos devueltos
-    const returnedProductsHTML = (exchange.original_products || [])
-      .map((prod: ExchangeProduct) => {
-        let idsHTML = '';
-        if (prod.unitIds && prod.unitIds.length > 0) {
-          const idsText = prod.unitIds.join(', ');
-          idsHTML = `
-            <div style="font-size: 7px; margin-top: 1mm; padding: 1mm; background: #f5f5f5;">
-              <div>IDs: ${idsText}</div>
-            </div>
-          `;
-        }
-
-        return `
-          <div class="product-item">
-            <div style="margin-bottom: 1mm;">${prod.productName}</div>
-            <div>${prod.quantity} x ${formatCOP(prod.price)} = ${formatCOP(prod.total)}</div>
-            ${idsHTML}
-          </div>
-        `;
-      })
-      .join('');
-
-    // Productos entregados
-    const deliveredProductsHTML = (exchange.new_products || [])
-      .map((prod: ExchangeProduct) => {
-        let idsHTML = '';
-        if (prod.unitIds && prod.unitIds.length > 0) {
-          const idsText = prod.unitIds.join(', ');
-          idsHTML = `
-            <div style="font-size: 7px; margin-top: 1mm; padding: 1mm; background: #f5f5f5;">
-              <div>IDs: ${idsText}</div>
-            </div>
-          `;
-        }
-
-        return `
-          <div class="product-item">
-            <div style="margin-bottom: 1mm;">${prod.productName}</div>
-            <div>${prod.quantity} x ${formatCOP(prod.price)} = ${formatCOP(prod.total)}</div>
-            ${idsHTML}
-          </div>
-        `;
-      })
-      .join('');
-
-    const difference = exchange.price_difference || 0;
-    const differenceLabel = difference > 0 ? 'CLIENTE DEBE PAGAR' : difference < 0 ? 'SE REEMBOLSO AL CLIENTE' : 'SIN DIFERENCIA';
-
-    // Método de pago si hay diferencia
-    let paymentHTML = '';
-    if (difference !== 0 && exchange.payment_method) {
-      const parts: string[] = [];
-      if (exchange.payment_cash && exchange.payment_cash > 0) parts.push(`• Efectivo: ${formatCOP(exchange.payment_cash)}`);
-      if (exchange.payment_transfer && exchange.payment_transfer > 0) parts.push(`• Transferencia: ${formatCOP(exchange.payment_transfer)}`);
-      if (exchange.payment_other && exchange.payment_other > 0) parts.push(`• Otros: ${formatCOP(exchange.payment_other)}`);
-
-      if (parts.length > 0) {
-        paymentHTML = `
-          <div style="margin-bottom: 3mm; font-size: 8px; border-bottom: 1px solid black; padding-bottom: 2mm;">
-            <div style="margin-bottom: 1mm; font-size: 9px;">METODO DE PAGO:</div>
-            ${parts.map(p => `<div style="margin-bottom: 1mm;">${p}</div>`).join('')}
-          </div>
-        `;
+  const handlePrintExchange = async (exchange: Exchange) => {
+    if (isPrintingAvailable()) {
+      try {
+        await printThermalExchange(exchange);
+        toast.success('Comprobante enviado a la impresora');
+      } catch {
+        toast.error('Error al imprimir el comprobante');
       }
+    } else {
+      toast.error('La impresión directa solo está disponible en la aplicación de escritorio');
     }
-
-    return `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8">
-        <style>
-          @page {
-            size: 80mm auto;
-            margin: 0;
-            padding: 0;
-          }
-          * {
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-          }
-          body {
-            width: 70mm;
-            max-width: 70mm;
-            font-family: 'Arial', 'Helvetica Neue', Helvetica, sans-serif;
-            font-size: 11px;
-            font-weight: 500;
-            padding: 2mm 3mm;
-            background: white;
-            color: #000;
-            margin: 0;
-            line-height: 1.5;
-          }
-          .header {
-            text-align: center;
-            margin-bottom: 3mm;
-            border-bottom: 2px solid black;
-            padding-bottom: 2mm;
-          }
-          .info {
-            margin-bottom: 3mm;
-            font-size: 10px;
-            border-bottom: 1px solid black;
-            padding-bottom: 2mm;
-          }
-          .products {
-            margin-bottom: 3mm;
-            border-bottom: 1px solid black;
-            padding-bottom: 2mm;
-          }
-          .product-item {
-            margin-bottom: 2mm;
-            font-size: 10px;
-          }
-          .total-section {
-            margin: 3mm 0;
-            border-top: 2px solid black;
-            border-bottom: 2px solid black;
-            padding: 3mm 0;
-            text-align: center;
-            background: #f0f0f0;
-          }
-          .total-label {
-            font-size: 11px;
-            font-weight: 800;
-            margin-bottom: 2mm;
-            color: #000;
-          }
-          .total-amount {
-            font-size: 16px;
-            font-weight: 800;
-            color: #000;
-          }
-          .footer {
-            text-align: center;
-            font-size: 10px;
-            margin-top: 3mm;
-            padding-top: 2mm;
-            color: #000;
-          }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <div style="font-size: 15px; font-weight: 800; margin-bottom: 2mm; color: #000;">${companyName}</div>
-          <div style="font-size: 13px; font-weight: 700; margin-bottom: 1mm; color: #000;">COMPROBANTE DE CAMBIO</div>
-          <div style="font-size: 12px; font-weight: 500; color: #000;">No. ${exchange.exchange_number}</div>
-        </div>
-
-        <div class="info">
-          <div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Fecha: ${exchangeDate}</div>
-          <div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Factura: ${exchange.invoice_number || '-'}</div>
-          <div style="font-size: 11px; color: #000;">Cliente: ${exchange.customer_name || 'Sin nombre'}</div>
-        </div>
-
-        <div class="products">
-          <div style="text-align: center; font-size: 12px; font-weight: 800; margin-bottom: 2mm; color: #000; background: #000; color: #fff; padding: 2mm;">PRODUCTOS DEVUELTOS</div>
-          ${returnedProductsHTML}
-        </div>
-
-        <div class="products">
-          <div style="text-align: center; font-size: 12px; font-weight: 800; margin-bottom: 2mm; color: #000; background: #000; color: #fff; padding: 2mm;">PRODUCTOS ENTREGADOS</div>
-          ${deliveredProductsHTML}
-        </div>
-
-        <div class="total-section">
-          <div class="total-label">${differenceLabel}</div>
-          <div class="total-amount">${formatCOP(Math.abs(difference))}</div>
-        </div>
-
-        ${paymentHTML}
-
-        <div class="footer">
-          <div style="margin: 2mm 0; border-top: 1px solid black; padding-top: 2mm;"></div>
-          <div style="font-size: 12px; font-weight: 800; margin-bottom: 2mm; color: #000;">GRACIAS POR SU COMPRA</div>
-          <div style="font-size: 11px; font-weight: 500; margin-bottom: 1mm; color: #000;">${companyName}</div>
-          <div style="font-size: 11px; font-weight: 500; margin-bottom: 1mm; color: #000;">www.celumundovip.com</div>
-          <div style="font-size: 10px; color: #333;">${new Date().toLocaleString('es-ES')}</div>
-        </div>
-
-        <!-- Espacio adicional para que el comprobante salga completo -->
-        <div style="height: 30mm; width: 100%;"></div>
-
-        <!-- Comando de corte de papel (ESC/POS) -->
-        <div style="page-break-after: always;"></div>
-      </body>
-    </html>
-  `;
   };
+
 
   const handleSubmit = async () => {
     if (!selectedInvoice) {
