@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { formatCOP } from '../lib/currency';
 import { getWarranties, searchProductsForInvoice, addWarranty, getCurrentUser, getWarrantiesStats, updateWarrantyStatus, type Warranty, type Product } from '../lib/supabase';
 import { toast } from 'sonner';
+import { useTaskQueue } from '../contexts/TaskQueueContext';
 
 export default function Warranties() {
   const [warranties, setWarranties] = useState<Warranty[]>([]);
@@ -55,6 +56,7 @@ export default function Warranties() {
 
   const itemsPerPage = 10;
   const currentUser = getCurrentUser();
+  const { addTask, updateTask } = useTaskQueue();
 
   useEffect(() => {
     loadData();
@@ -202,7 +204,7 @@ export default function Warranties() {
     return null;
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     const error = validateForm();
     if (error) {
       toast.error(error);
@@ -211,36 +213,51 @@ export default function Warranties() {
 
     if (!selectedProduct || !currentUser) return;
 
-    setIsLoading(true);
-    try {
-      const warrantyData = {
-        date: new Date().toISOString(),
-        product_id: selectedProduct.id,
-        product_name: selectedProduct.name,
-        product_code: selectedProduct.code,
-        quantity: quantity,
-        unit_ids: selectedProduct.use_unit_ids && discountFromStock ? unitIds : undefined,
-        notes: notes.trim(),
-        discount_from_stock: discountFromStock,
-        status: 'pending' as const,
-        registered_by: currentUser.username,
-      };
+    const warrantyData = {
+      date: new Date().toISOString(),
+      product_id: selectedProduct.id,
+      product_name: selectedProduct.name,
+      product_code: selectedProduct.code,
+      quantity: quantity,
+      unit_ids: selectedProduct.use_unit_ids && discountFromStock ? unitIds : undefined,
+      notes: notes.trim(),
+      discount_from_stock: discountFromStock,
+      status: 'pending' as const,
+      registered_by: currentUser.username,
+    };
 
-      const result = await addWarranty(warrantyData);
+    // Cerrar modal inmediatamente
+    setIsDialogOpen(false);
+    setSelectedProduct(null);
+    setQuantity(1);
+    setUnitIds([]);
+    setNotes('');
+    setDiscountFromStock(true);
 
-      if (result) {
-        toast.success('Garantía registrada exitosamente');
-        setIsDialogOpen(false);
-        loadData();
-      } else {
-        toast.error('Error al registrar la garantía');
+    const taskId = addTask({
+      type: 'warranty',
+      message: `Registrando garantía para ${selectedProduct.name}...`,
+      data: {},
+    });
+
+    (async () => {
+      try {
+        updateTask(taskId, { status: 'processing', progress: 20 });
+        const result = await addWarranty(warrantyData);
+        if (result) {
+          updateTask(taskId, { status: 'completed', progress: 100, message: `Garantía ${result.warranty_number} registrada` });
+          toast.success(`Garantía ${result.warranty_number} registrada exitosamente`);
+          loadData();
+        } else {
+          updateTask(taskId, { status: 'error', message: 'Error al registrar la garantía' });
+          toast.error('Error al registrar la garantía');
+        }
+      } catch (err) {
+        console.error('Error submitting warranty:', err);
+        updateTask(taskId, { status: 'error', message: 'Error al procesar la garantía' });
+        toast.error('Error al procesar la garantía');
       }
-    } catch (error) {
-      console.error('Error submitting warranty:', error);
-      toast.error('Error al procesar la garantía');
-    } finally {
-      setIsLoading(false);
-    }
+    })();
   };
 
   const handleOpenStatusDialog = (warranty: Warranty) => {

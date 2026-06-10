@@ -2,7 +2,7 @@ import { createContext, useContext, useState, useCallback, ReactNode } from 'rea
 
 export interface Task {
   id: string;
-  type: 'invoice' | 'credit_invoice' | 'movement' | 'return';
+  type: 'invoice' | 'credit_invoice' | 'movement' | 'return' | 'warranty';
   status: 'pending' | 'processing' | 'completed' | 'error';
   progress: number;
   message: string;

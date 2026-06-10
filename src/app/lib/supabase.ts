@@ -4584,20 +4584,36 @@ export const getWarranties = async (): Promise<Warranty[]> => {
   }
 };
 
+const generateUniqueWarrantyNumber = async (company: string): Promise<string> => {
+  const chars = '0123456789';
+  let warrantyNumber = '';
+  let isUnique = false;
+
+  while (!isUnique) {
+    let digits = '';
+    for (let i = 0; i < 5; i++) {
+      digits += chars[Math.floor(Math.random() * chars.length)];
+    }
+    warrantyNumber = `W-${digits}`;
+
+    const { data } = await supabase
+      .from('warranties')
+      .select('id')
+      .eq('company', company)
+      .eq('warranty_number', warrantyNumber)
+      .maybeSingle();
+
+    isUnique = !data;
+  }
+
+  return warrantyNumber;
+};
+
 export const addWarranty = async (warrantyData: Omit<Warranty, 'id' | 'warranty_number' | 'company' | 'created_at' | 'updated_at'>): Promise<Warranty | null> => {
   const company = getCurrentCompany();
-  
+
   const today = getColombiaDateTime();
-  const { data: warrantyNumber } = await supabase.rpc('generate_warranty_number', { 
-    p_company: company,
-    p_date: today.toISOString()
-  });
-  
-  if (!warrantyNumber) {
-    console.error('Error generating warranty number');
-    return null;
-  }
-  
+  const warrantyNumber = await generateUniqueWarrantyNumber(company);
   const colombiaDateTime = today.toISOString();
   
   const { data, error } = await supabase
