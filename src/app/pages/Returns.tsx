@@ -9,8 +9,10 @@ import {
   updateProduct,
   getCurrentUser,
   getCurrentCompany,
+  searchProductsForInvoice,
   type Invoice,
-  type Return
+  type Return,
+  type Product,
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -43,6 +45,27 @@ export function Returns() {
   const [isInvoiceSelectorOpen, setIsInvoiceSelectorOpen] = useState(false);
   const [invoiceSearchTerm, setInvoiceSearchTerm] = useState('');
   const [invoicePeriodFilter, setInvoicePeriodFilter] = useState<'today' | 'yesterday' | 'current_month' | 'last_month' | 'all'>('all');
+
+  // Estados para devolución sin factura
+  const [isDirectReturnOpen, setIsDirectReturnOpen] = useState(false);
+  const [directReturnProducts, setDirectReturnProducts] = useState<Array<{
+    productId: string;
+    productName: string;
+    price: string;
+    quantity: string;
+    useUnitIds: boolean;
+    disabledIds: Array<{ id: string; note?: string }>;
+    unitIds: string[];
+  }>>([]);
+  const [directReturnReason, setDirectReturnReason] = useState('');
+  const [directRefundMethod, setDirectRefundMethod] = useState('efectivo');
+  const [directMixedRefund, setDirectMixedRefund] = useState({ efectivo: 0, transferencia: 0, nequi: 0, daviplata: 0 });
+  const [isDirectProductSearchOpen, setIsDirectProductSearchOpen] = useState(false);
+  const [directProductSearchTerm, setDirectProductSearchTerm] = useState('');
+  const [directSearchedProducts, setDirectSearchedProducts] = useState<Product[]>([]);
+  const [isSearchingDirect, setIsSearchingDirect] = useState(false);
+  const [hasSearchedDirect, setHasSearchedDirect] = useState(false);
+  const [isSubmittingDirect, setIsSubmittingDirect] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -366,6 +389,180 @@ export function Returns() {
 
   const filteredReturns = getFilteredReturns();
 
+  // ── Devolución sin Factura ──────────────────────────────────────────────────
+
+  const calculateDirectReturnTotal = () =>
+    directReturnProducts.reduce((sum, p) => {
+      const price = parseFloat(p.price) || 0;
+      const qty = p.useUnitIds ? p.unitIds.length : (parseInt(p.quantity) || 0);
+      return sum + price * qty;
+    }, 0);
+
+  const handleOpenDirectReturn = () => {
+    setDirectReturnProducts([]);
+    setDirectReturnReason('');
+    setDirectRefundMethod('efectivo');
+    setDirectMixedRefund({ efectivo: 0, transferencia: 0, nequi: 0, daviplata: 0 });
+    setIsDirectReturnOpen(true);
+  };
+
+  const handleSearchDirectProducts = async () => {
+    if (!directProductSearchTerm.trim()) {
+      toast.error('Ingresa un término de búsqueda');
+      return;
+    }
+    setIsSearchingDirect(true);
+    try {
+      const results = await searchProductsForInvoice(directProductSearchTerm);
+      setDirectSearchedProducts(results);
+      setHasSearchedDirect(true);
+      if (results.length === 0) toast.info('No se encontraron productos');
+    } catch {
+      toast.error('Error al buscar productos');
+    } finally {
+      setIsSearchingDirect(false);
+    }
+  };
+
+  const handleAddDirectProduct = (product: Product) => {
+    if (directReturnProducts.find(p => p.productId === product.id)) {
+      toast.error('Este producto ya está en la lista');
+      return;
+    }
+    const disabledIds = (product.registered_ids || [])
+      .filter((idObj: any) => idObj.disabled === true)
+      .map((idObj: any) => ({ id: idObj.id, note: idObj.note || '' }));
+    setDirectReturnProducts(prev => [
+      ...prev,
+      {
+        productId: product.id,
+        productName: product.name,
+        price: '',
+        quantity: '',
+        useUnitIds: !!product.use_unit_ids,
+        disabledIds,
+        unitIds: [],
+      },
+    ]);
+    setIsDirectProductSearchOpen(false);
+    setDirectProductSearchTerm('');
+    setDirectSearchedProducts([]);
+    setHasSearchedDirect(false);
+  };
+
+  const handleToggleDirectUnitId = (productId: string, unitId: string) => {
+    setDirectReturnProducts(prev => prev.map(p => {
+      if (p.productId !== productId) return p;
+      const already = p.unitIds.includes(unitId);
+      const updated = already ? p.unitIds.filter(id => id !== unitId) : [...p.unitIds, unitId];
+      return { ...p, unitIds: updated, quantity: String(updated.length || '') };
+    }));
+  };
+
+  const handleRemoveDirectProduct = (productId: string) => {
+    setDirectReturnProducts(prev => prev.filter(p => p.productId !== productId));
+  };
+
+  const handleUpdateDirectProduct = (productId: string, field: 'price' | 'quantity', value: string) => {
+    setDirectReturnProducts(prev =>
+      prev.map(p => p.productId === productId ? { ...p, [field]: value } : p)
+    );
+  };
+
+  const handleConfirmDirectReturn = async () => {
+    if (directReturnProducts.length === 0) {
+      toast.error('Agrega al menos un producto');
+      return;
+    }
+
+    for (const p of directReturnProducts) {
+      if (p.price === '' || p.price === undefined) {
+        toast.error(`Ingresa el precio de: ${p.productName}`);
+        return;
+      }
+      if (parseFloat(p.price) <= 0) {
+        toast.error(`El precio de ${p.productName} debe ser mayor a 0`);
+        return;
+      }
+      if (p.useUnitIds) {
+        if (p.unitIds.length === 0) {
+          toast.error(`Selecciona al menos una ID para: ${p.productName}`);
+          return;
+        }
+      } else {
+        if (p.quantity === '' || p.quantity === undefined) {
+          toast.error(`Ingresa la cantidad de: ${p.productName}`);
+          return;
+        }
+        if (parseInt(p.quantity) <= 0) {
+          toast.error(`La cantidad de ${p.productName} debe ser mayor a 0`);
+          return;
+        }
+      }
+    }
+
+    if (!directReturnReason.trim()) {
+      toast.error('Ingresa el motivo de la devolución');
+      return;
+    }
+
+    const total = calculateDirectReturnTotal();
+
+    if (directRefundMethod === 'mixto') {
+      const mixedTotal = directMixedRefund.efectivo + directMixedRefund.transferencia + directMixedRefund.nequi + directMixedRefund.daviplata;
+      if (Math.abs(mixedTotal - total) > 1) {
+        toast.error(`La suma del reembolso mixto (${formatCOP(mixedTotal)}) debe ser exactamente ${formatCOP(total)}`);
+        return;
+      }
+    }
+
+    const currentUser = getCurrentUser();
+
+    setIsSubmittingDirect(true);
+    try {
+      const items = directReturnProducts.map(p => {
+        const qty = p.useUnitIds ? p.unitIds.length : parseInt(p.quantity);
+        return {
+          productId: p.productId,
+          productName: p.productName,
+          price: parseFloat(p.price),
+          quantity: qty,
+          total: parseFloat(p.price) * qty,
+          unitIds: p.useUnitIds ? p.unitIds : [],
+        };
+      });
+
+      const refundMethodStr = directRefundMethod === 'mixto'
+        ? `mixto:efectivo=${directMixedRefund.efectivo},transferencia=${directMixedRefund.transferencia},nequi=${directMixedRefund.nequi},daviplata=${directMixedRefund.daviplata}`
+        : directRefundMethod;
+
+      await addReturn({
+        invoice_id: null as any,
+        invoice_number: 'Sin Factura',
+        customer_name: undefined,
+        customer_document: undefined,
+        type: 'partial',
+        items,
+        subtotal: total,
+        tax: 0,
+        total,
+        reason: directReturnReason,
+        refund_method: refundMethodStr,
+        processed_by: currentUser?.username || 'unknown',
+        date: new Date().toISOString().split('T')[0],
+        created_at: new Date().toISOString(),
+      });
+
+      toast.success('Devolución sin factura registrada correctamente');
+      setIsDirectReturnOpen(false);
+      await loadData();
+    } catch {
+      toast.error('Error al registrar la devolución');
+    } finally {
+      setIsSubmittingDirect(false);
+    }
+  };
+
   // Paginación
   const totalPages = Math.ceil(filteredReturns.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
@@ -379,10 +576,16 @@ export function Returns() {
           <h2 className="text-3xl font-bold">Devoluciones</h2>
           <p className="text-muted-foreground mt-1">Gestión de devoluciones de facturas</p>
         </div>
-        <Button onClick={handleOpenReturnDialog}>
-          <Plus className="h-4 w-4 mr-2" />
-          Nueva Devolución
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={handleOpenDirectReturn}>
+            <Plus className="h-4 w-4 mr-2" />
+            Devolución sin Factura
+          </Button>
+          <Button onClick={handleOpenReturnDialog}>
+            <Plus className="h-4 w-4 mr-2" />
+            Nueva Devolución
+          </Button>
+        </div>
       </div>
 
       {/* Tarjetas de estadísticas */}
@@ -394,7 +597,17 @@ export function Returns() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold text-red-700 dark:text-red-400">{returns.length}</div>
+            <div className="text-3xl font-bold text-red-700 dark:text-red-400">
+              {(() => {
+                const now = new Date();
+                const dayOfWeek = now.getDay();
+                const monday = new Date(now);
+                monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+                monday.setHours(0, 0, 0, 0);
+                return returns.filter(ret => new Date(ret.date) >= monday).length;
+              })()}
+            </div>
+            <p className="text-xs text-red-500 dark:text-red-400 mt-1">Esta semana</p>
           </CardContent>
         </Card>
 
@@ -406,8 +619,20 @@ export function Returns() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-700 dark:text-red-400">
-              {formatCOP(returns.reduce((sum, ret) => sum + ret.total, 0))}
+              {(() => {
+                const now = new Date();
+                const dayOfWeek = now.getDay();
+                const monday = new Date(now);
+                monday.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+                monday.setHours(0, 0, 0, 0);
+                return formatCOP(
+                  returns
+                    .filter(ret => new Date(ret.date) >= monday)
+                    .reduce((sum, ret) => sum + ret.total, 0)
+                );
+              })()}
             </div>
+            <p className="text-xs text-red-500 dark:text-red-400 mt-1">Esta semana</p>
           </CardContent>
         </Card>
 
@@ -985,6 +1210,327 @@ export function Returns() {
             >
               <X className="h-4 w-4 mr-2" />
               Cancelar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modal: Devolución sin Factura ─────────────────────────────────────── */}
+      <Dialog open={isDirectReturnOpen} onOpenChange={setIsDirectReturnOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <RotateCcw className="h-5 w-5 text-red-600 dark:text-red-400" />
+              Devolución sin Factura
+            </DialogTitle>
+            <DialogDescription>
+              Registra una devolución casual sin necesidad de asociarla a una factura
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-5 py-2">
+            {/* Lista de productos */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label>Productos a Devolver</Label>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setDirectProductSearchTerm('');
+                    setDirectSearchedProducts([]);
+                    setHasSearchedDirect(false);
+                    setIsDirectProductSearchOpen(true);
+                  }}
+                >
+                  <Plus className="h-4 w-4 mr-1" />
+                  Agregar Producto
+                </Button>
+              </div>
+
+              {directReturnProducts.length === 0 ? (
+                <div className="border-2 border-dashed border-border rounded-lg p-8 text-center text-muted-foreground">
+                  <Package className="h-8 w-8 mx-auto mb-2 opacity-40" />
+                  <p className="text-sm">No hay productos. Usa "Agregar Producto" para buscar.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {directReturnProducts.map((p) => {
+                    const subtotal = (parseFloat(p.price) || 0) * (p.useUnitIds ? p.unitIds.length : (parseInt(p.quantity) || 0));
+                    return (
+                    <div key={p.productId} className="p-3 border rounded-lg bg-muted/40 space-y-2">
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-sm truncate">{p.productName}</p>
+                          {p.useUnitIds && (
+                            <p className="text-xs text-blue-600 dark:text-blue-400">
+                              🔢 IDs únicas — {p.unitIds.length} seleccionada(s)
+                            </p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <div className="space-y-0.5">
+                            <Label className="text-xs text-muted-foreground">Precio venta</Label>
+                            <Input
+                              type="number"
+                              placeholder="0"
+                              value={p.price}
+                              onChange={(e) => handleUpdateDirectProduct(p.productId, 'price', e.target.value)}
+                              className="w-28 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            />
+                          </div>
+                          {!p.useUnitIds && (
+                            <div className="space-y-0.5">
+                              <Label className="text-xs text-muted-foreground">Cantidad</Label>
+                              <Input
+                                type="number"
+                                placeholder="0"
+                                value={p.quantity}
+                                onChange={(e) => handleUpdateDirectProduct(p.productId, 'quantity', e.target.value)}
+                                className="w-20 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                            </div>
+                          )}
+                          <div className="space-y-0.5">
+                            <Label className="text-xs text-muted-foreground">Subtotal</Label>
+                            <div className="w-24 h-8 flex items-center text-sm font-semibold text-red-600 dark:text-red-400">
+                              {formatCOP(subtotal)}
+                            </div>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveDirectProduct(p.productId)}
+                            className="text-red-500 hover:text-red-700 mt-4"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+
+                      {/* IDs únicas */}
+                      {p.useUnitIds && (
+                        <div className="pl-1 space-y-1">
+                          <p className="text-xs text-muted-foreground">Selecciona las ID(s) que devuelve el cliente:</p>
+                          {p.disabledIds.length === 0 ? (
+                            <p className="text-xs text-amber-600 dark:text-amber-400">No hay IDs vendidas registradas para este producto</p>
+                          ) : (
+                            <div className="flex flex-wrap gap-1.5">
+                              {p.disabledIds.map((idObj) => {
+                                const selected = p.unitIds.includes(idObj.id);
+                                return (
+                                  <button
+                                    key={idObj.id}
+                                    type="button"
+                                    onClick={() => handleToggleDirectUnitId(p.productId, idObj.id)}
+                                    className={`px-2.5 py-1 rounded-full text-xs font-mono border transition-colors ${
+                                      selected
+                                        ? 'bg-red-500 text-white border-red-500'
+                                        : 'bg-muted text-muted-foreground border-border hover:border-red-400'
+                                    }`}
+                                  >
+                                    #{idObj.id}{idObj.note ? ` (${idObj.note})` : ''}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Motivo */}
+            <div className="space-y-2">
+              <Label htmlFor="direct-reason">Motivo de la Devolución *</Label>
+              <Input
+                id="direct-reason"
+                type="text"
+                placeholder="Ej: Producto defectuoso, cambio de opinión, etc."
+                value={directReturnReason}
+                onChange={(e) => setDirectReturnReason(e.target.value)}
+              />
+            </div>
+
+            {/* Método de reembolso */}
+            <div className="space-y-2">
+              <Label>Método de Reembolso *</Label>
+              <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                {[
+                  { value: 'efectivo', label: 'Efectivo', icon: '💵' },
+                  { value: 'transferencia', label: 'Transferencia', icon: '🏦' },
+                  { value: 'nequi', label: 'Nequi', icon: '📱' },
+                  { value: 'daviplata', label: 'Daviplata', icon: '💳' },
+                  { value: 'mixto', label: 'Mixto', icon: '🔀' },
+                ].map((m) => (
+                  <button
+                    key={m.value}
+                    type="button"
+                    onClick={() => setDirectRefundMethod(m.value)}
+                    className={`flex flex-col items-center gap-1 p-3 rounded-lg border-2 text-sm font-medium transition-all ${
+                      directRefundMethod === m.value
+                        ? 'border-red-500 bg-red-50 dark:border-red-600 dark:bg-red-950/40 text-red-700 dark:text-red-400'
+                        : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600 text-zinc-700 dark:text-zinc-300'
+                    }`}
+                  >
+                    <span className="text-lg">{m.icon}</span>
+                    <span className="text-xs">{m.label}</span>
+                  </button>
+                ))}
+              </div>
+
+              {directRefundMethod === 'mixto' && (() => {
+                const total = calculateDirectReturnTotal();
+                const assigned = directMixedRefund.efectivo + directMixedRefund.transferencia + directMixedRefund.nequi + directMixedRefund.daviplata;
+                const remaining = total - assigned;
+                const isExact = Math.abs(remaining) <= 1;
+                return (
+                  <div className="mt-3 p-3 border-2 border-dashed border-red-200 dark:border-red-800 rounded-lg space-y-3">
+                    <div className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Distribuir {formatCOP(total)}</div>
+                    {([
+                      { key: 'efectivo', label: 'Efectivo', icon: '💵' },
+                      { key: 'transferencia', label: 'Transferencia', icon: '🏦' },
+                      { key: 'nequi', label: 'Nequi', icon: '📱' },
+                      { key: 'daviplata', label: 'Daviplata', icon: '💳' },
+                    ] as const).map(({ key, label, icon }) => (
+                      <div key={key} className="flex items-center gap-2">
+                        <span className="w-6 text-center">{icon}</span>
+                        <Label className="w-28 text-xs text-zinc-600 dark:text-zinc-400">{label}</Label>
+                        <Input
+                          type="number"
+                          min={0}
+                          value={directMixedRefund[key] || ''}
+                          placeholder="0"
+                          onChange={(e) => setDirectMixedRefund(prev => ({ ...prev, [key]: parseFloat(e.target.value) || 0 }))}
+                          className="flex-1 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                      </div>
+                    ))}
+                    <div className={`flex justify-between text-sm font-medium pt-1 border-t ${isExact ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+                      <span>Restante:</span>
+                      <span>{isExact ? '✓ Completo' : formatCOP(remaining)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Total */}
+            {directReturnProducts.length > 0 && (
+              <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-950/30">
+                <CardContent className="pt-4 pb-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-lg font-medium text-red-700 dark:text-red-400">Total a Devolver:</span>
+                    <span className="text-2xl font-bold text-red-700 dark:text-red-400">
+                      {formatCOP(calculateDirectReturnTotal())}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            <div className="flex items-start gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+              <AlertCircle className="h-5 w-5 text-yellow-600 mt-0.5 shrink-0" />
+              <p className="text-sm text-yellow-700">
+                El stock de los productos devueltos se reintegrará automáticamente al inventario.
+              </p>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsDirectReturnOpen(false)}>
+              <X className="h-4 w-4 mr-2" />
+              Cancelar
+            </Button>
+            <Button
+              type="button"
+              onClick={handleConfirmDirectReturn}
+              disabled={isSubmittingDirect}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              <CheckCircle className="h-4 w-4 mr-2" />
+              {isSubmittingDirect ? 'Registrando...' : 'Confirmar Devolución'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modal: Búsqueda de productos para devolución directa ──────────────── */}
+      <Dialog open={isDirectProductSearchOpen} onOpenChange={setIsDirectProductSearchOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Search className="h-5 w-5" />
+              Buscar Producto
+            </DialogTitle>
+            <DialogDescription>
+              Busca el producto que el cliente devuelve
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex gap-2 py-2">
+            <div className="relative flex-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                autoFocus
+                placeholder="Buscar por nombre, código..."
+                value={directProductSearchTerm}
+                onChange={(e) => setDirectProductSearchTerm(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSearchDirectProducts(); }}
+                className="pl-10"
+              />
+            </div>
+            <Button onClick={handleSearchDirectProducts} disabled={isSearchingDirect || !directProductSearchTerm.trim()}>
+              {isSearchingDirect ? 'Buscando...' : 'Buscar'}
+            </Button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto border border-border rounded-lg min-h-[250px]">
+            {!hasSearchedDirect ? (
+              <div className="text-center py-16 text-muted-foreground">
+                <Search className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                <p className="font-medium">Escribe para buscar un producto</p>
+                <p className="text-sm mt-1">Los resultados aparecerán aquí</p>
+              </div>
+            ) : directSearchedProducts.length === 0 ? (
+              <div className="text-center py-16 text-muted-foreground">
+                <Package className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                <p>No se encontraron productos</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-border">
+                {directSearchedProducts.map((product) => (
+                  <button
+                    key={product.id}
+                    onClick={() => handleAddDirectProduct(product)}
+                    className="w-full flex items-center justify-between p-4 hover:bg-muted/60 transition-colors text-left"
+                  >
+                    <div>
+                      <p className="font-medium text-sm">{product.name}</p>
+                      <p className="text-xs text-muted-foreground font-mono">{product.code}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold text-green-600 dark:text-green-400">
+                        {formatCOP(product.final_price)}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Stock: {product.stock}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="mt-2">
+            <Button type="button" variant="outline" onClick={() => setIsDirectProductSearchOpen(false)}>
+              <X className="h-4 w-4 mr-2" />
+              Cerrar
             </Button>
           </DialogFooter>
         </DialogContent>

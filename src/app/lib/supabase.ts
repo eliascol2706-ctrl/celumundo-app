@@ -2586,16 +2586,21 @@ export const revertReturn = async (returnId: string): Promise<boolean> => {
       return false;
     }
 
-    // Obtener la factura original
-    const { data: invoice, error: invoiceError } = await supabase
-      .from('invoices')
-      .select('*')
-      .eq('id', returnData.invoice_id)
-      .single();
+    // Obtener la factura original (solo si tiene invoice_id válido)
+    const hasInvoice = returnData.invoice_id && returnData.invoice_id !== 'null';
+    let invoice: any = null;
+    if (hasInvoice) {
+      const { data: invoiceData, error: invoiceError } = await supabase
+        .from('invoices')
+        .select('*')
+        .eq('id', returnData.invoice_id)
+        .single();
 
-    if (invoiceError || !invoice) {
-      console.error('Error obteniendo factura:', invoiceError);
-      return false;
+      if (invoiceError || !invoiceData) {
+        console.error('Error obteniendo factura:', invoiceError);
+        return false;
+      }
+      invoice = invoiceData;
     }
 
     // Procesar cada item devuelto
@@ -2646,24 +2651,26 @@ export const revertReturn = async (returnId: string): Promise<boolean> => {
       }
     }
 
-    // Eliminar también el historial de esta devolución de la factura
-    try {
-      const { data: inv } = await supabase
-        .from('invoices')
-        .select('history_movements')
-        .eq('id', returnData.invoice_id)
-        .single();
-      if (inv && inv.history_movements) {
-        const filtered = (inv.history_movements as HistoryMovement[]).filter(
-          m => !(m.type === 'DEVOLUCIÓN' && m.date === returnData.date && m.performed_by === returnData.processed_by)
-        );
-        await supabase
+    // Eliminar también el historial de esta devolución de la factura (solo si aplica)
+    if (hasInvoice) {
+      try {
+        const { data: inv } = await supabase
           .from('invoices')
-          .update({ history_movements: filtered })
-          .eq('id', returnData.invoice_id);
+          .select('history_movements')
+          .eq('id', returnData.invoice_id)
+          .single();
+        if (inv && inv.history_movements) {
+          const filtered = (inv.history_movements as HistoryMovement[]).filter(
+            m => !(m.type === 'DEVOLUCIÓN' && m.date === returnData.date && m.performed_by === returnData.processed_by)
+          );
+          await supabase
+            .from('invoices')
+            .update({ history_movements: filtered })
+            .eq('id', returnData.invoice_id);
+        }
+      } catch (histError) {
+        console.error('Error removing return history entry:', histError);
       }
-    } catch (histError) {
-      console.error('Error removing return history entry:', histError);
     }
 
     // Eliminar el registro de devolución
@@ -5220,4 +5227,63 @@ export const markAllNotificationsRead = async (): Promise<void> => {
     .update({ read: true, read_at: new Date().toISOString() })
     .eq('company', company)
     .eq('read', false);
+};
+
+// ── Proveedores ────────────────────────────────────────────────────────────────
+
+export interface Supplier {
+  id: string;
+  company: 'celumundo' | 'repuestos';
+  name: string;
+  contact_name?: string;
+  phone?: string;
+  email?: string;
+  address?: string;
+  notes?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const getSuppliers = async (): Promise<Supplier[]> => {
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('suppliers')
+    .select('*')
+    .eq('company', company)
+    .order('name', { ascending: true });
+  if (error) { console.error('Error fetching suppliers:', error); return []; }
+  return data || [];
+};
+
+export const addSupplier = async (
+  data: Omit<Supplier, 'id' | 'company' | 'created_at' | 'updated_at'>
+): Promise<Supplier | null> => {
+  const company = getCurrentCompany();
+  const { data: result, error } = await supabase
+    .from('suppliers')
+    .insert([{ ...data, company }])
+    .select()
+    .single();
+  if (error) { console.error('Error adding supplier:', error); return null; }
+  return result;
+};
+
+export const updateSupplier = async (
+  id: string,
+  data: Partial<Omit<Supplier, 'id' | 'company' | 'created_at' | 'updated_at'>>
+): Promise<Supplier | null> => {
+  const { data: result, error } = await supabase
+    .from('suppliers')
+    .update({ ...data, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) { console.error('Error updating supplier:', error); return null; }
+  return result;
+};
+
+export const deleteSupplier = async (id: string): Promise<boolean> => {
+  const { error } = await supabase.from('suppliers').delete().eq('id', id);
+  if (error) { console.error('Error deleting supplier:', error); return false; }
+  return true;
 };

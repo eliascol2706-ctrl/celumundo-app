@@ -35,7 +35,7 @@ export default function Exchanges() {
   const [exchanges, setExchanges] = useState<Exchange[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [exchangeType, setExchangeType] = useState<'invoice' | 'pending'>('invoice');
+  const [exchangeType, setExchangeType] = useState<'invoice' | 'pending' | 'direct'>('invoice');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [isLoading, setIsLoading] = useState(false);
@@ -72,6 +72,16 @@ export default function Exchanges() {
   const [paymentCash, setPaymentCash] = useState(0);
   const [paymentTransfer, setPaymentTransfer] = useState(0);
   const [paymentOther, setPaymentOther] = useState(0);
+
+  // Estados para búsqueda de productos a devolver (modo Cambio Directo)
+  const [directReturnSearchTerm, setDirectReturnSearchTerm] = useState('');
+  const [directReturnSearchedProducts, setDirectReturnSearchedProducts] = useState<Product[]>([]);
+  const [isSearchingDirectReturn, setIsSearchingDirectReturn] = useState(false);
+  const [hasSearchedDirectReturn, setHasSearchedDirectReturn] = useState(false);
+  const [directReturnTempProduct, setDirectReturnTempProduct] = useState<Product | null>(null);
+  const [directReturnTempQuantity, setDirectReturnTempQuantity] = useState(1);
+  const [directReturnTempPrice, setDirectReturnTempPrice] = useState('');
+  const [directReturnTempUnitIds, setDirectReturnTempUnitIds] = useState<string[]>([]);
 
   // Estadísticas
   const [stats, setStats] = useState({
@@ -158,6 +168,72 @@ export default function Exchanges() {
     }
   };
 
+  const handleSearchDirectReturnProducts = async () => {
+    if (!directReturnSearchTerm.trim()) {
+      toast.error('Ingresa un término de búsqueda');
+      return;
+    }
+    setIsSearchingDirectReturn(true);
+    try {
+      const results = await searchProductsForInvoice(directReturnSearchTerm);
+      setDirectReturnSearchedProducts(results);
+      setHasSearchedDirectReturn(true);
+      if (results.length === 0) toast.info('No se encontraron productos');
+    } catch (error) {
+      toast.error('Error al buscar productos');
+    } finally {
+      setIsSearchingDirectReturn(false);
+    }
+  };
+
+  const handleAddDirectReturnProduct = () => {
+    if (!directReturnTempProduct) {
+      toast.error('Selecciona un producto');
+      return;
+    }
+    if (directReturnTempPrice === '' || directReturnTempPrice === undefined) {
+      toast.error('Ingresa el precio al que se vendió el producto');
+      return;
+    }
+    const parsedPrice = parseFloat(directReturnTempPrice);
+    if (isNaN(parsedPrice) || parsedPrice < 0) {
+      toast.error('Ingresa un precio válido');
+      return;
+    }
+    if (directReturnTempQuantity <= 0) {
+      toast.error('La cantidad debe ser mayor a 0');
+      return;
+    }
+    if (directReturnTempProduct.use_unit_ids) {
+      if (directReturnTempUnitIds.length !== directReturnTempQuantity) {
+        toast.error(`Debes seleccionar ${directReturnTempQuantity} ID(s) única(s)`);
+        return;
+      }
+    }
+    // Prevent duplicate product
+    if (productsToReturn.find(p => p.productId === directReturnTempProduct.id)) {
+      toast.error('Este producto ya fue agregado');
+      return;
+    }
+    const returnProd: ExchangeProduct = {
+      productId: directReturnTempProduct.id,
+      productName: directReturnTempProduct.name,
+      quantity: directReturnTempQuantity,
+      price: parsedPrice,
+      total: parsedPrice * directReturnTempQuantity,
+      unitIds: directReturnTempUnitIds.length > 0 ? directReturnTempUnitIds : undefined,
+    };
+    setProductsToReturn(prev => [...prev, returnProd]);
+    setDirectReturnTempProduct(null);
+    setDirectReturnTempQuantity(1);
+    setDirectReturnTempPrice('');
+    setDirectReturnTempUnitIds([]);
+  };
+
+  const handleRemoveDirectReturnProduct = (index: number) => {
+    setProductsToReturn(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSearchProducts = async () => {
     if (!productSearchTerm.trim()) {
       toast.error('Ingresa un término de búsqueda');
@@ -228,6 +304,15 @@ export default function Exchanges() {
     setProductSearchTerm('');
     setSearchedProducts([]);
     setHasSearchedProducts(false);
+    // Direct return
+    setDirectReturnSearchTerm('');
+    setDirectReturnSearchedProducts([]);
+    setIsSearchingDirectReturn(false);
+    setHasSearchedDirectReturn(false);
+    setDirectReturnTempProduct(null);
+    setDirectReturnTempQuantity(1);
+    setDirectReturnTempPrice('');
+    setDirectReturnTempUnitIds([]);
   };
 
   const handleSelectInvoice = (invoice: Invoice) => {
@@ -431,7 +516,9 @@ export default function Exchanges() {
 
 
   const handleSubmit = async () => {
-    if (!selectedInvoice) {
+    const isDirect = exchangeType === 'direct';
+
+    if (!isDirect && !selectedInvoice) {
       toast.error('Debes seleccionar una factura');
       return;
     }
@@ -462,32 +549,21 @@ export default function Exchanges() {
 
     setIsLoading(true);
     try {
-      const exchangeData = {
-        type: 'invoice' as const,
-        status: exchangeType === 'pending' ? ('pending' as const) : ('completed' as const),
-        invoice_id: selectedInvoice.id,
-        invoice_number: selectedInvoice.number,
-        customer_name: selectedInvoice.customer_name || 'Cliente general',
-
-        // Arrays de productos
+      const baseProducts = {
         original_products: productsToReturn,
         new_products: exchangeType === 'pending' ? [] : newProducts,
-
-        // Compatibilidad con campos antiguos (primer producto de cada array)
         original_product_id: productsToReturn[0]?.productId || '',
         original_product_name: productsToReturn[0]?.productName || '',
         original_quantity: productsToReturn.reduce((sum, p) => sum + p.quantity, 0),
         original_price: productsToReturn[0]?.price || 0,
         original_total: productsToReturn.reduce((sum, p) => sum + p.total, 0),
         original_unit_ids: productsToReturn[0]?.unitIds,
-
         new_product_id: newProducts[0]?.productId,
         new_product_name: newProducts[0]?.productName,
         new_quantity: newProducts.reduce((sum, p) => sum + p.quantity, 0),
         new_price: newProducts[0]?.price || 0,
         new_total: newProducts.reduce((sum, p) => sum + p.total, 0),
         new_unit_ids: newProducts[0]?.unitIds,
-
         price_difference: calculatePriceDifference(),
         payment_cash: paymentCash,
         payment_transfer: paymentTransfer,
@@ -496,9 +572,24 @@ export default function Exchanges() {
         registered_by: currentUser?.username || 'Usuario',
       };
 
+      const exchangeData = isDirect
+        ? {
+            type: 'direct' as const,
+            status: 'completed' as const,
+            ...baseProducts,
+          }
+        : {
+            type: 'invoice' as const,
+            status: exchangeType === 'pending' ? ('pending' as const) : ('completed' as const),
+            invoice_id: selectedInvoice!.id,
+            invoice_number: selectedInvoice!.number,
+            customer_name: selectedInvoice!.customer_name || 'Cliente general',
+            ...baseProducts,
+          };
+
       console.log('📤 [Exchanges] Enviando datos de cambio:', {
-        invoice_id: exchangeData.invoice_id,
-        invoice_number: exchangeData.invoice_number,
+        invoice_id: (exchangeData as any).invoice_id,
+        invoice_number: (exchangeData as any).invoice_number,
         productsToReturn: exchangeData.original_products,
         newProducts: exchangeData.new_products,
         type: exchangeData.type,
@@ -668,7 +759,11 @@ export default function Exchanges() {
                           {new Date(exchange.date).toLocaleDateString('es-ES')}
                         </td>
                         <td className="py-3 px-3 text-sm font-medium text-blue-600 dark:text-blue-400">
-                          {exchange.invoice_number || '-'}
+                          {exchange.type === 'direct' ? (
+                            <span className="text-muted-foreground italic text-xs">Sin factura</span>
+                          ) : (
+                            exchange.invoice_number || '-'
+                          )}
                         </td>
                         <td className="py-3 px-3 text-sm">
                           {exchange.customer_name || <span className="text-muted-foreground italic">Sin nombre</span>}
@@ -886,14 +981,14 @@ export default function Exchanges() {
         <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>
-              {flowStep === 'search-invoice' && 'Buscar Factura'}
+              {flowStep === 'search-invoice' && (exchangeType === 'direct' ? 'Tipo de Cambio' : 'Buscar Factura')}
               {flowStep === 'select-return-products' && 'Productos a Devolver'}
               {flowStep === 'select-new-products' && 'Productos a Entregar'}
               {flowStep === 'payment' && 'Diferencia de Precio'}
             </DialogTitle>
             <DialogDescription>
-              {flowStep === 'search-invoice' && 'Busca la factura de la cual se devolverán productos'}
-              {flowStep === 'select-return-products' && 'Selecciona los productos que el cliente devuelve'}
+              {flowStep === 'search-invoice' && (exchangeType === 'direct' ? 'Selecciona el tipo de cambio directo para continuar' : 'Busca la factura de la cual se devolverán productos')}
+              {flowStep === 'select-return-products' && (exchangeType === 'direct' ? 'Busca y agrega los productos que el cliente devuelve con su precio de venta' : 'Selecciona los productos que el cliente devuelve')}
               {flowStep === 'select-new-products' && 'Busca y agrega los productos que se entregarán al cliente'}
               {flowStep === 'payment' && 'Configura el método de pago de la diferencia'}
             </DialogDescription>
@@ -906,23 +1001,38 @@ export default function Exchanges() {
                 {/* Tipo de Cambio */}
                 <div className="space-y-2">
                   <Label>Tipo de Cambio</Label>
-                  <Select value={exchangeType} onValueChange={(value: 'invoice' | 'pending') => setExchangeType(value)}>
+                  <Select value={exchangeType} onValueChange={(value: 'invoice' | 'pending' | 'direct') => setExchangeType(value)}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="invoice">Cambio Completo</SelectItem>
                       <SelectItem value="pending">En Espera (Solo Devolución)</SelectItem>
+                      <SelectItem value="direct">Cambio Directo (Sin Factura)</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
                     {exchangeType === 'invoice'
                       ? 'Se devolverán productos y se entregarán otros en el mismo proceso'
-                      : 'Solo se registrará la devolución. Los productos a entregar se definirán después'}
+                      : exchangeType === 'pending'
+                      ? 'Solo se registrará la devolución. Los productos a entregar se definirán después'
+                      : 'Cambio sin factura: se seleccionan directamente los productos devueltos y su precio de venta'}
                   </p>
                 </div>
 
-                {/* Buscador de Facturas */}
+                {/* Botón continuar para Cambio Directo */}
+                {exchangeType === 'direct' && (
+                  <div className="flex justify-end pt-2">
+                    <Button onClick={() => setFlowStep('select-return-products')}>
+                      Continuar
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
+
+                {/* Buscador de Facturas — solo para tipos con factura */}
+                {exchangeType !== 'direct' && (
+                <>
                 <div className="space-y-2">
                   <Label>Buscar Factura</Label>
                   <div className="flex gap-2">
@@ -1025,10 +1135,267 @@ export default function Exchanges() {
                     Mostrando {searchedInvoices.length} factura{searchedInvoices.length !== 1 ? 's' : ''} encontrada{searchedInvoices.length !== 1 ? 's' : ''}
                   </p>
                 )}
+                </>
+                )}
               </div>
             )}
 
-            {/* Paso 2: Seleccionar Productos a Devolver */}
+            {/* Paso 2a: Seleccionar Productos a Devolver — Cambio Directo */}
+            {flowStep === 'select-return-products' && exchangeType === 'direct' && (
+              <div className="space-y-4">
+                {/* Buscador de productos a devolver */}
+                <div className="space-y-2">
+                  <Label>Buscar Productos que Devuelve el Cliente</Label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground h-4 w-4" />
+                      <Input
+                        placeholder="Buscar por código, nombre..."
+                        value={directReturnSearchTerm}
+                        onChange={(e) => setDirectReturnSearchTerm(e.target.value)}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleSearchDirectReturnProducts(); }}
+                        className="pl-10"
+                        autoFocus
+                      />
+                    </div>
+                    <Button
+                      onClick={handleSearchDirectReturnProducts}
+                      disabled={isSearchingDirectReturn || !directReturnSearchTerm.trim()}
+                    >
+                      {isSearchingDirectReturn ? (
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Buscando...</>
+                      ) : (
+                        <><Search className="mr-2 h-4 w-4" />Buscar</>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Resultados */}
+                <div className="border border-border rounded-lg min-h-[200px] max-h-[280px] overflow-y-auto">
+                  {!hasSearchedDirectReturn ? (
+                    <div className="text-center py-10 text-muted-foreground">
+                      <Search className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                      <p className="font-medium">Busca el producto que el cliente devuelve</p>
+                    </div>
+                  ) : directReturnSearchedProducts.length === 0 ? (
+                    <div className="text-center py-10 text-muted-foreground">
+                      <Package2 className="h-10 w-10 mx-auto mb-3 opacity-50" />
+                      <p>No se encontraron productos</p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4">
+                      {directReturnSearchedProducts.map((product) => (
+                        <button
+                          key={product.id}
+                          onClick={() => {
+                            setDirectReturnTempProduct(product);
+                            setDirectReturnTempQuantity(1);
+                            setDirectReturnTempPrice('');
+                            setDirectReturnTempUnitIds([]);
+                          }}
+                          className={`p-3 border rounded-lg text-left hover:border-red-400 dark:hover:border-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-all ${
+                            directReturnTempProduct?.id === product.id
+                              ? 'border-red-500 bg-red-50 dark:bg-red-950/30'
+                              : 'border-border'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="text-xs font-mono font-bold bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
+                              {product.code}
+                            </span>
+                            {product.use_unit_ids && (
+                              <span className="text-xs bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 px-2 py-0.5 rounded">
+                                🔢 IDs
+                              </span>
+                            )}
+                          </div>
+                          <h4 className="font-semibold text-sm mb-1">{product.name}</h4>
+                          <div className="text-xs text-muted-foreground">
+                            Stock actual: {product.stock}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Configurar producto seleccionado */}
+                {directReturnTempProduct && (
+                  <div className="p-4 border-2 border-red-500 dark:border-red-600 rounded-lg bg-red-50 dark:bg-red-950/30 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h4 className="font-semibold text-red-900 dark:text-red-100">
+                        Configurar: {directReturnTempProduct.name}
+                      </h4>
+                      <Button variant="ghost" size="sm" onClick={() => setDirectReturnTempProduct(null)}>
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label className="text-sm">Cantidad a devolver</Label>
+                        {directReturnTempProduct.use_unit_ids ? (
+                          <div className="h-9 flex items-center px-3 border rounded-md bg-muted text-sm">
+                            {directReturnTempUnitIds.length} seleccionada(s)
+                          </div>
+                        ) : (
+                          <Input
+                            type="number"
+                            min="1"
+                            className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            value={directReturnTempQuantity}
+                            onChange={(e) => setDirectReturnTempQuantity(parseInt(e.target.value) || 1)}
+                          />
+                        )}
+                      </div>
+
+                      <div className="space-y-1">
+                        <Label className="text-sm">
+                          Precio al que se vendió <span className="text-red-500">*</span>
+                        </Label>
+                        <Input
+                          type="number"
+                          className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          placeholder="Precio de venta original"
+                          value={directReturnTempPrice}
+                          onChange={(e) => setDirectReturnTempPrice(e.target.value)}
+                        />
+                        {directReturnTempPrice === '' && (
+                          <p className="text-xs text-amber-600 dark:text-amber-400">Campo requerido</p>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* IDs únicas si aplica — mostrar IDs deshabilitadas (vendidas) */}
+                    {directReturnTempProduct.use_unit_ids && (
+                      <div className="space-y-2">
+                        <Label className="text-sm">Selecciona las ID(s) que devuelve el cliente</Label>
+                        {getDisabledIds(directReturnTempProduct).length === 0 ? (
+                          <p className="text-xs text-muted-foreground">No hay IDs vendidas registradas para este producto</p>
+                        ) : (
+                          <div className="flex flex-wrap gap-2">
+                            {getDisabledIds(directReturnTempProduct).map((idObj) => {
+                              const isSelected = directReturnTempUnitIds.includes(idObj.id);
+                              return (
+                                <button
+                                  key={idObj.id}
+                                  type="button"
+                                  onClick={() => {
+                                    setDirectReturnTempUnitIds(prev => {
+                                      if (prev.includes(idObj.id)) {
+                                        const updated = prev.filter(id => id !== idObj.id);
+                                        setDirectReturnTempQuantity(updated.length || 1);
+                                        return updated;
+                                      }
+                                      const updated = [...prev, idObj.id];
+                                      setDirectReturnTempQuantity(updated.length);
+                                      return updated;
+                                    });
+                                  }}
+                                  className={`px-3 py-1 rounded-full text-xs font-mono border transition-colors ${
+                                    isSelected
+                                      ? 'bg-red-500 text-white border-red-500'
+                                      : 'bg-muted text-muted-foreground border-border hover:border-red-400'
+                                  }`}
+                                >
+                                  #{idObj.id}{idObj.note ? ` (${idObj.note})` : ''}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {directReturnTempUnitIds.length > 0 && directReturnTempPrice !== '' && (
+                          <p className="text-xs text-muted-foreground">
+                            {directReturnTempUnitIds.length} ID(s) × COP {formatCOP(parseFloat(directReturnTempPrice) || 0)} = <span className="font-semibold text-red-600">COP {formatCOP((parseFloat(directReturnTempPrice) || 0) * directReturnTempUnitIds.length)}</span>
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {directReturnTempPrice !== '' && !directReturnTempProduct.use_unit_ids && (
+                      <div className="p-2 bg-white dark:bg-gray-900 rounded">
+                        <p className="text-sm font-medium">Total a devolver:</p>
+                        <p className="text-lg font-bold text-red-600 dark:text-red-400">
+                          COP {formatCOP((parseFloat(directReturnTempPrice) || 0) * directReturnTempQuantity)}
+                        </p>
+                      </div>
+                    )}
+
+                    <Button onClick={handleAddDirectReturnProduct} className="w-full" variant="destructive">
+                      <Plus className="h-4 w-4 mr-2" />
+                      Agregar Producto Devuelto
+                    </Button>
+                  </div>
+                )}
+
+                {/* Lista de productos ya agregados */}
+                {productsToReturn.length > 0 && (
+                  <div className="space-y-2">
+                    <Label>Productos que devuelve el cliente</Label>
+                    <div className="space-y-2">
+                      {productsToReturn.map((product, index) => (
+                        <div key={index} className="flex items-center gap-2 border rounded p-3 bg-red-50 dark:bg-red-950/30">
+                          <div className="flex-1">
+                            <div className="font-medium text-sm">{product.productName}</div>
+                            <div className="text-xs text-muted-foreground">
+                              {product.quantity} × COP {formatCOP(product.price)} = COP {formatCOP(product.total)}
+                            </div>
+                            {product.unitIds && product.unitIds.length > 0 && (
+                              <div className="text-xs text-blue-600 dark:text-blue-400 mt-1 font-mono">
+                                IDs: {product.unitIds.join(', ')}
+                              </div>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleRemoveDirectReturnProduct(index)}
+                            className="text-red-600 hover:text-red-700"
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="p-3 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded">
+                      <p className="text-sm font-bold text-red-700 dark:text-red-300">
+                        Total a Devolver: COP {formatCOP(productsToReturn.reduce((sum, p) => sum + p.total, 0))}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Botones */}
+                <div className="flex justify-between pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setProductsToReturn([]);
+                      setFlowStep('search-invoice');
+                    }}
+                  >
+                    <ChevronLeft className="mr-2 h-4 w-4" />
+                    Volver
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      if (productsToReturn.length === 0) {
+                        toast.error('Agrega al menos un producto a devolver');
+                        return;
+                      }
+                      setFlowStep('select-new-products');
+                    }}
+                    disabled={productsToReturn.length === 0}
+                  >
+                    Siguiente
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Paso 2b: Seleccionar Productos a Devolver — Cambio con Factura */}
             {flowStep === 'select-return-products' && selectedInvoice && (
               <div className="space-y-4">
                 {/* Info de factura */}

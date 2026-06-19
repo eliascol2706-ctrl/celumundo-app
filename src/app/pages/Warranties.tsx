@@ -1,15 +1,15 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { Search, Plus, Package, Clock, Send, RotateCcw, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Barcode, Printer } from 'lucide-react';
+import { Search, Plus, Package, Clock, Send, RotateCcw, CheckCircle2, XCircle, ChevronLeft, ChevronRight, Barcode, Printer, Building2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
 import { Textarea } from '../components/ui/textarea';
 import { Checkbox } from '../components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { formatCOP } from '../lib/currency';
-import { getWarranties, searchProductsForInvoice, addWarranty, getCurrentUser, getWarrantiesStats, updateWarrantyStatus, type Warranty, type Product } from '../lib/supabase';
+import { getWarranties, searchProductsForInvoice, addWarranty, getCurrentUser, getWarrantiesStats, updateWarrantyStatus, getSuppliers, supabase, type Warranty, type Product, type Supplier } from '../lib/supabase';
 import { toast } from 'sonner';
 import { useTaskQueue } from '../contexts/TaskQueueContext';
 import { isPrintingAvailable } from '../lib/platform-detector';
@@ -49,6 +49,13 @@ export default function Warranties() {
   const [unitIds, setUnitIds] = useState<string[]>([]);
   const [notes, setNotes] = useState('');
   const [discountFromStock, setDiscountFromStock] = useState(true);
+  const [warrantySupplierIdForm, setWarrantySupplierIdForm] = useState('');
+
+  // Proveedores
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+  const [showEditWarrantySupplier, setShowEditWarrantySupplier] = useState(false);
+  const [editWarrantyForSupplier, setEditWarrantyForSupplier] = useState<Warranty | null>(null);
+  const [editWarrantySupplierId, setEditWarrantySupplierId] = useState('');
 
   // Formulario - Actualizar Estado
   const [selectedWarranty, setSelectedWarranty] = useState<Warranty | null>(null);
@@ -73,12 +80,14 @@ export default function Warranties() {
   const loadData = async () => {
     setIsLoading(true);
     try {
-      const [warrantiesData, statsData] = await Promise.all([
+      const [warrantiesData, statsData, suppliersData] = await Promise.all([
         getWarranties(),
-        getWarrantiesStats()
+        getWarrantiesStats(),
+        getSuppliers(),
       ]);
       setWarranties(warrantiesData);
       setStats(statsData);
+      setSuppliers(suppliersData);
     } catch (error) {
       console.error('Error loading data:', error);
       toast.error('Error al cargar los datos');
@@ -232,7 +241,8 @@ export default function Warranties() {
       discount_from_stock: discountFromStock,
       status: 'pending' as const,
       registered_by: currentUser.username,
-    };
+      supplier_id: warrantySupplierIdForm || undefined,
+    } as any;
 
     // Cerrar modal inmediatamente
     setIsDialogOpen(false);
@@ -241,6 +251,7 @@ export default function Warranties() {
     setUnitIds([]);
     setNotes('');
     setDiscountFromStock(true);
+    setWarrantySupplierIdForm('');
 
     const taskId = addTask({
       type: 'warranty',
@@ -379,6 +390,23 @@ export default function Warranties() {
     }
 
     setIsPrintModalOpen(false);
+  };
+
+  const handleSaveWarrantySupplier = async () => {
+    if (!editWarrantyForSupplier) return;
+    try {
+      const { error } = await supabase.from('warranties')
+        .update({ supplier_id: editWarrantySupplierId || null })
+        .eq('id', editWarrantyForSupplier.id);
+      if (error) throw error;
+      toast.success('Proveedor asignado correctamente');
+      setShowEditWarrantySupplier(false);
+      setEditWarrantyForSupplier(null);
+      loadData();
+    } catch (error) {
+      console.error('Error updating warranty supplier:', error);
+      toast.error('Error al asignar el proveedor');
+    }
   };
 
   const handleOpenStatusDialog = (warranty: Warranty) => {
@@ -650,6 +678,19 @@ export default function Warranties() {
                             <Button
                               variant="ghost"
                               size="sm"
+                              onClick={() => {
+                                setEditWarrantyForSupplier(warranty);
+                                setEditWarrantySupplierId((warranty as any).supplier_id || '');
+                                setShowEditWarrantySupplier(true);
+                              }}
+                              title="Asignar proveedor"
+                              className="h-8 w-8 p-0 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950"
+                            >
+                              <Building2 className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               onClick={() => handleOpenPrintModal(warranty)}
                               title="Imprimir comprobante"
                               className="h-8 w-8 p-0"
@@ -877,6 +918,30 @@ export default function Warranties() {
                   }
                 </p>
               </>
+            )}
+
+            {/* Selector de proveedor */}
+            {suppliers.length > 0 && (
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1">
+                  <Building2 className="h-4 w-4" />
+                  Proveedor
+                </Label>
+                <Select
+                  value={warrantySupplierIdForm || 'none'}
+                  onValueChange={v => setWarrantySupplierIdForm(v === 'none' ? '' : v)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Sin proveedor (opcional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Sin proveedor —</SelectItem>
+                    {suppliers.map(s => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             )}
 
             {/* Botones */}
@@ -1171,6 +1236,38 @@ export default function Warranties() {
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Asignar proveedor a garantía */}
+      <Dialog open={showEditWarrantySupplier} onOpenChange={setShowEditWarrantySupplier}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              Asignar Proveedor
+            </DialogTitle>
+            <DialogDescription>
+              Garantía: <span className="font-semibold">{editWarrantyForSupplier?.warranty_number}</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-3">
+            <Select value={editWarrantySupplierId || 'none'} onValueChange={v => setEditWarrantySupplierId(v === 'none' ? '' : v)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Sin proveedor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— Sin proveedor —</SelectItem>
+                {suppliers.map(s => (
+                  <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditWarrantySupplier(false)}>Cancelar</Button>
+            <Button onClick={handleSaveWarrantySupplier}>Guardar</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

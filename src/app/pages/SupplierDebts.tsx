@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
-import { FileText, Plus, DollarSign, Calendar, AlertCircle, CheckCircle, XCircle, Clock, History, Trash2, Edit, Search } from 'lucide-react';
+import { FileText, Plus, DollarSign, Calendar, AlertCircle, CheckCircle, XCircle, Clock, History, Search, Building2 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Badge } from '../components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
-import { supabase, getCurrentCompany, getCurrentUser, getColombiaDate, extractColombiaDate } from '../lib/supabase';
+import { supabase, getCurrentCompany, getCurrentUser, getColombiaDate, extractColombiaDate, getSuppliers, type Supplier } from '../lib/supabase';
 
 interface SupplierDebt {
   id: string;
@@ -16,6 +17,7 @@ interface SupplierDebt {
   invoice_reference: string;
   supplier_name: string;
   supplier_address?: string;
+  supplier_id?: string;
   products_description?: string;
   payment_term_days: number;
   total_amount: number;
@@ -49,6 +51,12 @@ export default function SupplierDebts() {
   const [payments, setPayments] = useState<DebtPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [suppliers, setSuppliers] = useState<Supplier[]>([]);
+
+  // Modal editar proveedor de deuda
+  const [showEditSupplierModal, setShowEditSupplierModal] = useState(false);
+  const [editSupplierDebt, setEditSupplierDebt] = useState<SupplierDebt | null>(null);
+  const [editSupplierId, setEditSupplierId] = useState('');
 
   // Helper para formatear fecha de Colombia
   const formatColombiaDate = (dateStr: string) => {
@@ -63,6 +71,7 @@ export default function SupplierDebts() {
     invoice_reference: '',
     supplier_name: '',
     supplier_address: '',
+    supplier_id: '',
     products_description: '',
     payment_term_days: 30,
     total_amount: 0,
@@ -94,13 +103,15 @@ export default function SupplierDebts() {
     try {
       const company = getCurrentCompany();
 
-      const [{ data: debtsData }, { data: paymentsData }] = await Promise.all([
+      const [{ data: debtsData }, { data: paymentsData }, suppliersData] = await Promise.all([
         supabase.from('supplier_debts').select('*').eq('company', company).order('created_at', { ascending: false }),
-        supabase.from('supplier_debt_payments').select('*').eq('company', company).order('created_at', { ascending: false })
+        supabase.from('supplier_debt_payments').select('*').eq('company', company).order('created_at', { ascending: false }),
+        getSuppliers(),
       ]);
 
       setDebts(debtsData || []);
       setPayments(paymentsData || []);
+      setSuppliers(suppliersData);
     } catch (error) {
       console.error('Error loading debts:', error);
       toast.error('Error al cargar las deudas');
@@ -134,6 +145,7 @@ export default function SupplierDebts() {
         invoice_reference: newDebt.invoice_reference,
         supplier_name: newDebt.supplier_name,
         supplier_address: newDebt.supplier_address || null,
+        supplier_id: newDebt.supplier_id || null,
         products_description: newDebt.products_description || null,
         payment_term_days: newDebt.payment_term_days,
         total_amount: newDebt.total_amount,
@@ -154,6 +166,7 @@ export default function SupplierDebts() {
         invoice_reference: '',
         supplier_name: '',
         supplier_address: '',
+        supplier_id: '',
         products_description: '',
         payment_term_days: 30,
         total_amount: 0,
@@ -164,6 +177,23 @@ export default function SupplierDebts() {
     } catch (error) {
       console.error('Error creating debt:', error);
       toast.error('Error al registrar la deuda');
+    }
+  };
+
+  const handleSaveDebtSupplier = async () => {
+    if (!editSupplierDebt) return;
+    try {
+      const { error } = await supabase.from('supplier_debts')
+        .update({ supplier_id: editSupplierId || null })
+        .eq('id', editSupplierDebt.id);
+      if (error) throw error;
+      toast.success('Proveedor asignado correctamente');
+      setShowEditSupplierModal(false);
+      setEditSupplierDebt(null);
+      loadData();
+    } catch (error) {
+      console.error('Error updating supplier:', error);
+      toast.error('Error al asignar el proveedor');
     }
   };
 
@@ -420,6 +450,19 @@ export default function SupplierDebts() {
                           >
                             <History className="h-4 w-4" />
                           </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditSupplierDebt(debt);
+                              setEditSupplierId(debt.supplier_id || '');
+                              setShowEditSupplierModal(true);
+                            }}
+                            title="Asignar proveedor"
+                            className="text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950"
+                          >
+                            <Building2 className="h-4 w-4" />
+                          </Button>
                           {debt.status !== 'cancelled' && debt.status !== 'paid' && (
                             <>
                               <Button
@@ -476,6 +519,36 @@ export default function SupplierDebts() {
           </DialogHeader>
 
           <div className="space-y-4 py-4">
+            {/* Selector de proveedor registrado */}
+            {suppliers.length > 0 && (
+              <div className="space-y-2">
+                <Label>Proveedor Registrado</Label>
+                <Select
+                  value={newDebt.supplier_id || 'none'}
+                  onValueChange={(val) => {
+                    const sup = val === 'none' ? null : suppliers.find(s => s.id === val);
+                    setNewDebt(prev => ({
+                      ...prev,
+                      supplier_id: val === 'none' ? '' : val,
+                      supplier_name: sup ? sup.name : prev.supplier_name,
+                      supplier_address: sup?.address || prev.supplier_address,
+                    }));
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar proveedor (opcional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">— Sin proveedor registrado —</SelectItem>
+                    {suppliers.map(s => (
+                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">Al seleccionar un proveedor se autocompleta el nombre y dirección.</p>
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="invoice_reference">Referencia de Factura *</Label>
@@ -791,6 +864,38 @@ export default function SupplierDebts() {
             <Button variant="outline" onClick={() => setShowHistoryModal(false)}>
               Cerrar
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal: Asignar proveedor a deuda */}
+      <Dialog open={showEditSupplierModal} onOpenChange={setShowEditSupplierModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              Asignar Proveedor
+            </DialogTitle>
+            <DialogDescription>
+              Factura: <span className="font-semibold">{editSupplierDebt?.invoice_reference}</span>
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-3">
+            <Select value={editSupplierId || 'none'} onValueChange={v => setEditSupplierId(v === 'none' ? '' : v)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Sin proveedor" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">— Sin proveedor —</SelectItem>
+                {suppliers.map(s => (
+                  <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditSupplierModal(false)}>Cancelar</Button>
+            <Button onClick={handleSaveDebtSupplier}>Guardar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

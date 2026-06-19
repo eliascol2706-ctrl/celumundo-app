@@ -60,6 +60,7 @@ const adminNavigation = [
       { name: 'Departamentos', href: '/sistema/departamentos', icon: FolderOpen },
       { name: 'Productos', href: '/sistema/productos', icon: Package },
       { name: 'Garantías', href: '/sistema/garantias', icon: Shield },
+      { name: 'Proveedores', href: '/sistema/proveedores', icon: Building2 },
     ]
   },
   // Sección 2: Operaciones

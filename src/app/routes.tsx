@@ -33,6 +33,7 @@ const CatalogAdmin = React.lazy(() => import('./pages/CatalogAdmin').then(m => (
 const PublicCatalog = React.lazy(() => import('./pages/PublicCatalog').then(m => ({ default: m.PublicCatalog })));
 const CustomerTracking = React.lazy(() => import('./pages/CustomerTracking').then(m => ({ default: m.CustomerTracking })));
 const SupplierDebts = React.lazy(() => import('./pages/SupplierDebts').then(m => ({ default: m.default || m.SupplierDebts })));
+const Suppliers = React.lazy(() => import('./pages/Suppliers').then(m => ({ default: m.Suppliers })));
 
 // Componente Suspense Wrapper
 function SuspenseWrapper({ children }: { children: React.ReactNode }) {
@@ -129,6 +130,16 @@ export const router = createBrowserRouter([
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
             <SuspenseWrapper>
               <Warranties />
+            </SuspenseWrapper>
+          </ProtectedRoute>
+        )
+      },
+      {
+        path: 'proveedores',
+        element: (
+          <ProtectedRoute allowedRoles={['admin']}>
+            <SuspenseWrapper>
+              <Suppliers />
             </SuspenseWrapper>
           </ProtectedRoute>
         )
