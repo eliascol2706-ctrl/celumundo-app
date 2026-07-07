@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useEffect, useState } from 'react';
-import { getInvoicesByDate, getPendingCreditInvoices, getPendingConfirmationInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, type HistoryMovement, type HistoryMovementProduct, getAllProducts, deleteInvoice, supabase, getCreditPaymentsByInvoice, getCreditPayments, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges, getReturns, updateInvoice, updateProduct, addCreditNote, getCreditNotes, getCreditNotesByInvoice, type CreditNote, type CreditNoteItem, addCreditPayment, addMovement, addHistoryMovement, getDepartments, type Department } from '../lib/supabase';
+import { getInvoicesByDate, getPendingCreditInvoices, getPendingConfirmationInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, type HistoryMovement, type HistoryMovementProduct, getAllProducts, getAllInvoices, deleteInvoice, supabase, getCreditPaymentsByInvoice, getCreditPayments, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges, getReturns, updateInvoice, updateProduct, addCreditNote, getCreditNotes, getCreditNotesByInvoice, type CreditNote, type CreditNoteItem, addCreditPayment, addMovement, addHistoryMovement, getDepartments, type Department } from '../lib/supabase';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
@@ -92,6 +92,8 @@ export function InvoicesMenu() {
 
   // Estado para modal de registro de ventas de productos
   const [showProductSalesReport, setShowProductSalesReport] = useState(false);
+  const [allInvoicesForReport, setAllInvoicesForReport] = useState<Invoice[]>([]);
+  const [loadingReport, setLoadingReport] = useState(false);
 
   // Filtros del modal de facturas en confirmación
   const [pendingSearch, setPendingSearch] = useState('');
@@ -870,15 +872,20 @@ export function InvoicesMenu() {
         // Saltar productos comunes (no están en inventario)
         if (item.productId.startsWith('common-')) continue;
 
-        const product = products.find(p => p.id === item.productId);
-        if (!product) continue;
+        // Fetch fresh product from DB to get current registered_ids (state may be stale)
+        const { data: freshProduct } = await supabase
+          .from('products')
+          .select('id, registered_ids, use_unit_ids')
+          .eq('id', item.productId)
+          .single();
+        if (!freshProduct) continue;
 
         // Si el producto usa IDs únicas, marcarlas como vendidas (no eliminar)
-        if (item.unitIds && item.unitIds.length > 0 && product.registered_ids) {
+        if (item.unitIds && item.unitIds.length > 0 && freshProduct.registered_ids) {
           const { markIdsAsSold } = await import('../lib/unit-ids-utils');
-          const newRegisteredIds = markIdsAsSold(product.registered_ids, item.unitIds);
+          const newRegisteredIds = markIdsAsSold(freshProduct.registered_ids, item.unitIds);
 
-          await updateProduct(product.id, {
+          await updateProduct(freshProduct.id, {
             registered_ids: newRegisteredIds
           });
         }
@@ -1511,7 +1518,19 @@ export function InvoicesMenu() {
             </Button>
 
             <Button
-              onClick={() => setShowProductSalesReport(true)}
+              onClick={async () => {
+                setLoadingReport(true);
+                try {
+                  const all = await getAllInvoices();
+                  setAllInvoicesForReport(all);
+                } catch {
+                  toast.error('Error al cargar las facturas');
+                } finally {
+                  setLoadingReport(false);
+                }
+                setShowProductSalesReport(true);
+              }}
+              disabled={loadingReport}
               variant="outline"
               className="border-green-300 dark:border-green-700 hover:bg-green-50 dark:hover:bg-green-950 text-green-700 dark:text-green-400"
             >
@@ -3713,7 +3732,7 @@ export function InvoicesMenu() {
       <ProductSalesReportDialog
         open={showProductSalesReport}
         onOpenChange={setShowProductSalesReport}
-        invoices={todayInvoices}
+        invoices={allInvoicesForReport}
         products={products}
       />
     </div>

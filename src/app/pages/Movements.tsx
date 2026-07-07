@@ -153,6 +153,17 @@ export default function Movements() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isLoadingProducts, setIsLoadingProducts] = useState(false);
 
+  // Estados para búsqueda por ID única
+  const [idSearchDialogOpen, setIdSearchDialogOpen] = useState(false);
+  const [idSearchProductTerm, setIdSearchProductTerm] = useState("");
+  const [idSearchProductResults, setIdSearchProductResults] = useState<Product[]>([]);
+  const [idSearchSelectedProduct, setIdSearchSelectedProduct] = useState<Product | null>(null);
+  const [idSearchUnitId, setIdSearchUnitId] = useState("");
+  const [idSearchResults, setIdSearchResults] = useState<Movement[]>([]);
+  const [idSearchLoading, setIdSearchLoading] = useState(false);
+  const [idSearchSearchingProducts, setIdSearchSearchingProducts] = useState(false);
+  const [idSearchHasSearched, setIdSearchHasSearched] = useState(false);
+
   const [formData, setFormData] = useState({
     type: "entry" as "entry" | "exit",
     reason: "",
@@ -2175,6 +2186,48 @@ export default function Movements() {
     toast.success("Preparando impresión...");
   };
 
+  // ── Búsqueda por ID única ──────────────────────────────────────────────────
+
+  const handleIdSearchProducts = async () => {
+    if (!idSearchProductTerm.trim()) return;
+    setIdSearchSearchingProducts(true);
+    try {
+      const results = await searchProductsForInvoice(idSearchProductTerm);
+      setIdSearchProductResults(results.filter(p => p.use_unit_ids));
+    } catch {
+      toast.error("Error al buscar productos");
+    } finally {
+      setIdSearchSearchingProducts(false);
+    }
+  };
+
+  const handleSearchByUnitId = async () => {
+    if (!idSearchSelectedProduct || !idSearchUnitId.trim()) {
+      toast.error("Selecciona un producto e ingresa el número de ID");
+      return;
+    }
+    setIdSearchLoading(true);
+    setIdSearchHasSearched(false);
+    try {
+      const company = (await import("../lib/supabase")).getCurrentCompany();
+      const { data, error } = await supabase
+        .from("movements")
+        .select("*")
+        .eq("company", company)
+        .eq("product_id", idSearchSelectedProduct.id)
+        .contains("unit_ids", [idSearchUnitId.trim()])
+        .order("created_at", { ascending: false });
+
+      if (error) throw error;
+      setIdSearchResults(data || []);
+      setIdSearchHasSearched(true);
+    } catch {
+      toast.error("Error al buscar movimientos");
+    } finally {
+      setIdSearchLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -2191,6 +2244,21 @@ export default function Movements() {
           >
             <FileText className="h-4 w-4 mr-2" />
             Registro de Ingresos y Salidas
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setIdSearchProductTerm("");
+              setIdSearchProductResults([]);
+              setIdSearchSelectedProduct(null);
+              setIdSearchUnitId("");
+              setIdSearchResults([]);
+              setIdSearchHasSearched(false);
+              setIdSearchDialogOpen(true);
+            }}
+          >
+            <Hash className="h-4 w-4 mr-2" />
+            Buscar por ID
           </Button>
           <Button onClick={() => {
             setIsDialogOpen(true);
@@ -3885,6 +3953,181 @@ export default function Movements() {
         onPrint={() => currentReceipt && handlePrintReceiptPDF(currentReceipt)}
         onDownload={() => currentReceipt && handleDownloadReceiptPDF(currentReceipt)}
       />
+
+      {/* Modal: Búsqueda por ID única */}
+      <Dialog open={idSearchDialogOpen} onOpenChange={setIdSearchDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Hash className="h-5 w-5" />
+              Buscar Movimientos por ID Única
+            </DialogTitle>
+            <DialogDescription>
+              Selecciona el producto y escribe el número de ID para ver su historial
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 flex-shrink-0">
+            {/* Paso 1: buscar producto */}
+            <div className="space-y-2">
+              <Label>1. Buscar Producto</Label>
+              <div className="flex gap-2">
+                <div className="relative flex-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Nombre o código del producto..."
+                    value={idSearchProductTerm}
+                    onChange={e => setIdSearchProductTerm(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") handleIdSearchProducts(); }}
+                    className="pl-10"
+                    autoFocus
+                  />
+                </div>
+                <Button
+                  variant="outline"
+                  onClick={handleIdSearchProducts}
+                  disabled={idSearchSearchingProducts || !idSearchProductTerm.trim()}
+                >
+                  {idSearchSearchingProducts ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+                </Button>
+              </div>
+
+              {idSearchProductResults.length > 0 && (
+                <div className="border rounded-lg divide-y max-h-40 overflow-y-auto">
+                  {idSearchProductResults.map(p => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        setIdSearchSelectedProduct(p);
+                        setIdSearchProductResults([]);
+                        setIdSearchUnitId("");
+                        setIdSearchResults([]);
+                        setIdSearchHasSearched(false);
+                      }}
+                      className={`w-full flex items-center justify-between px-4 py-2.5 text-left text-sm hover:bg-muted/60 transition-colors ${
+                        idSearchSelectedProduct?.id === p.id ? "bg-primary/10" : ""
+                      }`}
+                    >
+                      <div>
+                        <span className="font-medium">{p.name}</span>
+                        <span className="text-muted-foreground ml-2 font-mono text-xs">{p.code}</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground">Stock: {p.stock}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {idSearchProductResults.length === 0 && idSearchProductTerm && !idSearchSearchingProducts && idSearchProductResults !== null && (
+                idSearchSelectedProduct === null && <p className="text-xs text-muted-foreground">Presiona buscar para ver resultados</p>
+              )}
+            </div>
+
+            {/* Producto seleccionado */}
+            {idSearchSelectedProduct && (
+              <div className="flex items-center gap-3 p-3 bg-primary/5 border border-primary/20 rounded-lg">
+                <Hash className="h-4 w-4 text-primary flex-shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-sm">{idSearchSelectedProduct.name}</p>
+                  <p className="text-xs text-muted-foreground font-mono">{idSearchSelectedProduct.code}</p>
+                </div>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => { setIdSearchSelectedProduct(null); setIdSearchHasSearched(false); setIdSearchResults([]); }}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            )}
+
+            {/* Paso 2: ingresar ID */}
+            {idSearchSelectedProduct && (
+              <div className="space-y-2">
+                <Label>2. Número de ID</Label>
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Ej: 12345"
+                    value={idSearchUnitId}
+                    onChange={e => setIdSearchUnitId(e.target.value)}
+                    onKeyDown={e => { if (e.key === "Enter") handleSearchByUnitId(); }}
+                    className="font-mono"
+                  />
+                  <Button onClick={handleSearchByUnitId} disabled={idSearchLoading || !idSearchUnitId.trim()}>
+                    {idSearchLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Search className="h-4 w-4 mr-2" />}
+                    Buscar
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Resultados */}
+          <div className="flex-1 overflow-y-auto min-h-0 mt-2">
+            {idSearchHasSearched && (
+              idSearchResults.length === 0 ? (
+                <div className="text-center py-12 text-muted-foreground">
+                  <Hash className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                  <p className="font-medium">Sin resultados</p>
+                  <p className="text-sm mt-1">No se encontraron movimientos para la ID <span className="font-mono font-semibold">#{idSearchUnitId}</span></p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <p className="text-sm text-muted-foreground px-1">
+                    {idSearchResults.length} movimiento{idSearchResults.length !== 1 ? "s" : ""} para ID <span className="font-mono font-semibold">#{idSearchUnitId}</span>
+                  </p>
+                  <div className="border rounded-lg divide-y">
+                    {idSearchResults.map(mov => (
+                      <div key={mov.id} className="flex items-start gap-3 px-4 py-3 text-sm">
+                        <div className={`mt-0.5 flex-shrink-0 w-7 h-7 rounded-full flex items-center justify-center ${
+                          mov.type === "entry"
+                            ? "bg-green-100 dark:bg-green-950 text-green-700 dark:text-green-400"
+                            : "bg-red-100 dark:bg-red-950 text-red-700 dark:text-red-400"
+                        }`}>
+                          {mov.type === "entry"
+                            ? <ArrowDown className="h-4 w-4" />
+                            : <ArrowUp className="h-4 w-4" />}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-medium">
+                              {mov.type === "entry" ? "Entrada" : "Salida"}
+                            </span>
+                            <span className="text-muted-foreground">·</span>
+                            <span className="text-muted-foreground">{mov.reason}</span>
+                            {mov.reference && (
+                              <>
+                                <span className="text-muted-foreground">·</span>
+                                <span className="text-xs font-mono bg-muted px-1.5 py-0.5 rounded">{mov.reference}</span>
+                              </>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-3 mt-1 text-xs text-muted-foreground">
+                            <span>Cant: {mov.quantity}</span>
+                            {mov.user_name && <span>Por: {mov.user_name}</span>}
+                            <span>{new Date(mov.created_at || "").toLocaleString("es-ES")}</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )
+            )}
+
+            {!idSearchHasSearched && !idSearchLoading && (
+              <div className="text-center py-12 text-muted-foreground">
+                <Hash className="h-10 w-10 mx-auto mb-3 opacity-30" />
+                <p className="text-sm">Selecciona un producto e ingresa la ID para ver sus movimientos</p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter className="flex-shrink-0 mt-2">
+            <Button variant="outline" onClick={() => setIdSearchDialogOpen(false)}>Cerrar</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

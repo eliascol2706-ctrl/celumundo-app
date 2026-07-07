@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useBlocker } from 'react-router';
 import { useTaskQueue } from '../contexts/TaskQueueContext';
 import {
@@ -24,7 +24,12 @@ import {
   Download,
   FileText,
   Save,
-  FolderOpen
+  FolderOpen,
+  ChevronRight,
+  UserPlus,
+  ArrowRightLeft,
+  UserCheck,
+  XCircle,
 } from 'lucide-react';
 import {
   getAllProducts,
@@ -37,7 +42,11 @@ import {
   saveInvoiceDraft,
   getInvoiceSaves,
   deleteInvoiceSave,
-  type InvoiceSave
+  searchInvoiceCustomers,
+  getInvoiceCustomerByName,
+  addInvoiceCustomer,
+  type InvoiceSave,
+  type InvoiceCustomer,
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -113,6 +122,17 @@ export function RegularInvoice() {
   // Información del cliente (opcional)
   const [customerName, setCustomerName] = useState('');
   const [customerDocument, setCustomerDocument] = useState('');
+
+  // Autocomplete y registro de clientes
+  const [customerSuggestions, setCustomerSuggestions] = useState<InvoiceCustomer[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [customerFound, setCustomerFound] = useState<boolean | null>(null); // null = sin buscar
+  const [isSearchingCustomer, setIsSearchingCustomer] = useState(false);
+  const [showRegisterCustomer, setShowRegisterCustomer] = useState(false);
+  const [registeringCustomer, setRegisteringCustomer] = useState(false);
+  const [registerCustomerForm, setRegisterCustomerForm] = useState({ document: '' });
+  const customerSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const customerInputRef = useRef<HTMLDivElement>(null);
 
   // Método de pago
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('cash');
@@ -303,6 +323,99 @@ export function RegularInvoice() {
     }
 
     setItems(newItems);
+  };
+
+  // ── Customer autocomplete ─────────────────────────────────────────────────
+
+  const triggerCustomerSearch = useCallback((name: string) => {
+    if (customerSearchTimeout.current) clearTimeout(customerSearchTimeout.current);
+    if (!name.trim() || name.trim().length < 2) {
+      setCustomerSuggestions([]);
+      setShowSuggestions(false);
+      setCustomerFound(null);
+      return;
+    }
+    customerSearchTimeout.current = setTimeout(async () => {
+      setIsSearchingCustomer(true);
+      try {
+        const suggestions = await searchInvoiceCustomers(name);
+        setCustomerSuggestions(suggestions);
+        setShowSuggestions(suggestions.length > 0);
+        // Exact match check
+        const exact = await getInvoiceCustomerByName(name);
+        setCustomerFound(!!exact);
+        setShowRegisterCustomer(!exact && name.trim().length >= 2);
+      } catch {
+        // silently fail
+      } finally {
+        setIsSearchingCustomer(false);
+      }
+    }, 500);
+  }, []);
+
+  const handleCustomerNameChange = (value: string) => {
+    setCustomerName(value);
+    triggerCustomerSearch(value);
+  };
+
+  const handleSelectSuggestion = (customer: InvoiceCustomer) => {
+    setCustomerName(customer.name);
+    setCustomerDocument(customer.document || '');
+    setCustomerSuggestions([]);
+    setShowSuggestions(false);
+    setCustomerFound(true);
+    setShowRegisterCustomer(false);
+  };
+
+  const handleRegisterCustomer = async () => {
+    if (!customerName.trim()) return;
+    setRegisteringCustomer(true);
+    try {
+      const result = await addInvoiceCustomer({
+        name: customerName.trim(),
+        document: registerCustomerForm.document || customerDocument || undefined,
+      });
+      if (result) {
+        toast.success(`Cliente "${customerName}" registrado exitosamente`);
+        setCustomerFound(true);
+        setShowRegisterCustomer(false);
+        setShowRegisterForm(false);
+        setRegisterCustomerForm({ document: '' });
+      } else {
+        toast.error('Error al registrar el cliente');
+      }
+    } catch {
+      toast.error('Error al registrar el cliente');
+    } finally {
+      setRegisteringCustomer(false);
+    }
+  };
+
+  const [showRegisterForm, setShowRegisterForm] = useState(false);
+
+  // ── Traspasar a Crédito ───────────────────────────────────────────────────
+
+  const handleTransferToCredit = () => {
+    if (items.length === 0) {
+      toast.error('Agrega productos antes de traspasar a crédito');
+      return;
+    }
+    navigate('/sistema/facturacion/credito', {
+      state: {
+        transferredItems: items.map(item => ({
+          productId: item.productId,
+          productName: item.productName,
+          productCode: item.productCode,
+          quantity: item.quantity,
+          price: item.price,
+          total: item.total,
+          useUnitIds: item.useUnitIds,
+          unitIds: item.unitIds,
+          unitIdNotes: item.unitIdNotes,
+        })),
+        customerName: customerName || undefined,
+      }
+    });
   };
 
   const handleSubmit = async () => {
@@ -1248,16 +1361,56 @@ export function RegularInvoice() {
                   Información del Cliente (Opcional)
                 </CardTitle>
               </CardHeader>
-              <CardContent className="pt-6">
+              <CardContent className="pt-6 space-y-4">
                 <div className="grid grid-cols-2 gap-4">
+                  {/* Nombre con autocomplete */}
                   <div>
                     <Label>Nombre</Label>
-                    <Input
-                      value={customerName}
-                      onChange={(e) => setCustomerName(e.target.value)}
-                      placeholder="Nombre del cliente..."
-                    />
+                    <div className="relative" ref={customerInputRef}>
+                      <div className="relative">
+                        <Input
+                          value={customerName}
+                          onChange={(e) => handleCustomerNameChange(e.target.value)}
+                          onFocus={() => { if (customerSuggestions.length > 0) setShowSuggestions(true); }}
+                          onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                          placeholder="Nombre del cliente..."
+                          className="pr-8"
+                        />
+                        {/* Indicador */}
+                        <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                          {isSearchingCustomer ? (
+                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                          ) : customerFound === true ? (
+                            <UserCheck className="h-4 w-4 text-emerald-500" />
+                          ) : customerFound === false && customerName.trim().length >= 2 ? (
+                            <XCircle className="h-4 w-4 text-red-400" />
+                          ) : null}
+                        </div>
+                      </div>
+
+                      {/* Dropdown sugerencias */}
+                      {showSuggestions && customerSuggestions.length > 0 && (
+                        <div className="absolute z-50 w-full mt-1 bg-background border border-border rounded-lg shadow-lg overflow-hidden">
+                          {customerSuggestions.map(c => (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onMouseDown={() => handleSelectSuggestion(c)}
+                              className="w-full flex items-center gap-2 px-3 py-2 text-sm hover:bg-muted text-left"
+                            >
+                              <UserCheck className="h-3.5 w-3.5 text-emerald-500 flex-shrink-0" />
+                              <div className="min-w-0">
+                                <div className="font-medium truncate">{c.name}</div>
+                                {c.document && <div className="text-xs text-muted-foreground">{c.document}</div>}
+                              </div>
+                              <ChevronRight className="h-3.5 w-3.5 ml-auto text-muted-foreground flex-shrink-0" />
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                   </div>
+
                   <div>
                     <Label>Cédula</Label>
                     <Input
@@ -1267,6 +1420,54 @@ export function RegularInvoice() {
                     />
                   </div>
                 </div>
+
+                {/* Botón registrar cliente */}
+                {showRegisterCustomer && customerFound === false && (
+                  <div className="border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 rounded-lg p-3 space-y-3">
+                    <div className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-400">
+                      <UserPlus className="h-4 w-4 flex-shrink-0" />
+                      <span>
+                        <span className="font-semibold">"{customerName}"</span> no está registrado.
+                        {' '}
+                        <button
+                          type="button"
+                          onClick={() => setShowRegisterForm(f => !f)}
+                          className="underline hover:no-underline font-medium"
+                        >
+                          {showRegisterForm ? 'Ocultar formulario' : '¿Deseas registrarlo?'}
+                        </button>
+                      </span>
+                    </div>
+
+                    {showRegisterForm && (
+                      <div className="space-y-2">
+                        <div>
+                          <Label className="text-xs">Cédula</Label>
+                          <Input
+                            size={1}
+                            className="h-8 text-sm"
+                            placeholder="Documento..."
+                            value={registerCustomerForm.document}
+                            onChange={e => setRegisterCustomerForm(p => ({ ...p, document: e.target.value }))}
+                          />
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="w-full bg-amber-600 hover:bg-amber-700"
+                          onClick={handleRegisterCustomer}
+                          disabled={registeringCustomer}
+                        >
+                          {registeringCustomer ? (
+                            <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Registrando...</>
+                          ) : (
+                            <><UserPlus className="h-4 w-4 mr-2" />Registrar Cliente</>
+                          )}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -1611,6 +1812,17 @@ export function RegularInvoice() {
                       Crear Factura
                     </>
                   )}
+                </Button>
+
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={handleTransferToCredit}
+                  disabled={isSubmitting || items.length === 0}
+                  className="w-full border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950"
+                >
+                  <ArrowRightLeft className="w-4 h-4 mr-2" />
+                  Traspasar a Crédito
                 </Button>
 
                 <Button

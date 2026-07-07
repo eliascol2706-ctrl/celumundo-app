@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate, useBlocker } from 'react-router';
+import { useNavigate, useBlocker, useLocation } from 'react-router';
 import { useTaskQueue } from '../contexts/TaskQueueContext';
 import {
   ArrowLeft,
@@ -96,6 +96,7 @@ interface Product {
 
 export function CreditInvoice() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { addTask, updateTask } = useTaskQueue();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -803,6 +804,32 @@ export function CreditInvoice() {
     setCustomers(customersData);
     setProducts(productsData);
     setDepartments(departmentsData);
+
+    // Aplicar items traspasados desde factura regular
+    const transferred = (location.state as any)?.transferredItems;
+    if (transferred && Array.isArray(transferred) && transferred.length > 0) {
+      const mappedItems: InvoiceItem[] = transferred.map((item: any) => {
+        // Usar price2 del producto si está disponible, sino conservar el precio original
+        const product = productsData.find((p: any) => p.id === item.productId);
+        const price = product?.price2 ?? item.price;
+        const availableIds = product?.registered_ids_with_notes
+          ?? (product?.registered_ids || []).map((id: string) => ({ id, note: '' }));
+        return {
+          productId: item.productId,
+          productName: item.productName,
+          productCode: item.productCode,
+          quantity: item.quantity,
+          price,
+          total: price * item.quantity,
+          useUnitIds: item.useUnitIds ?? false,
+          unitIds: item.unitIds ?? [],
+          availableIds,
+          unitIdNotes: item.unitIdNotes ?? {},
+        };
+      });
+      setItems(mappedItems);
+      toast.info(`${mappedItems.length} producto${mappedItems.length > 1 ? 's' : ''} traspasado${mappedItems.length > 1 ? 's' : ''} desde factura regular`);
+    }
   };
 
   const calculatePaymentTerm = () => {

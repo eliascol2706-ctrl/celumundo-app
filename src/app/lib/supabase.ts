@@ -5287,3 +5287,69 @@ export const deleteSupplier = async (id: string): Promise<boolean> => {
   if (error) { console.error('Error deleting supplier:', error); return false; }
   return true;
 };
+
+// ── Clientes de Facturas Regulares ─────────────────────────────────────────────
+
+export interface InvoiceCustomer {
+  id: string;
+  company: 'celumundo' | 'repuestos';
+  name: string;
+  document?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export const searchInvoiceCustomers = async (name: string): Promise<InvoiceCustomer[]> => {
+  if (!name.trim()) return [];
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('invoice_customers')
+    .select('*')
+    .eq('company', company)
+    .ilike('name', `%${name.trim()}%`)
+    .order('name', { ascending: true })
+    .limit(8);
+  if (error) { console.error('Error searching invoice customers:', error); return []; }
+  return data || [];
+};
+
+export const getInvoiceCustomerByName = async (name: string): Promise<InvoiceCustomer | null> => {
+  if (!name.trim()) return null;
+  const company = getCurrentCompany();
+  const { data, error } = await supabase
+    .from('invoice_customers')
+    .select('*')
+    .eq('company', company)
+    .ilike('name', name.trim())
+    .limit(1)
+    .maybeSingle();
+  if (error) { console.error('Error fetching invoice customer:', error); return null; }
+  return data;
+};
+
+export const addInvoiceCustomer = async (
+  data: Omit<InvoiceCustomer, 'id' | 'company' | 'created_at' | 'updated_at'>
+): Promise<InvoiceCustomer | null> => {
+  const company = getCurrentCompany();
+  const { data: result, error } = await supabase
+    .from('invoice_customers')
+    .insert([{ ...data, company }])
+    .select()
+    .single();
+  if (error) { console.error('Error adding invoice customer:', error); return null; }
+  return result;
+};
+
+export const updateInvoiceCustomer = async (
+  id: string,
+  data: Partial<Omit<InvoiceCustomer, 'id' | 'company' | 'created_at' | 'updated_at'>>
+): Promise<InvoiceCustomer | null> => {
+  const { data: result, error } = await supabase
+    .from('invoice_customers')
+    .update({ ...data, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) { console.error('Error updating invoice customer:', error); return null; }
+  return result;
+};

@@ -1059,9 +1059,8 @@ export function DailyClosureDialog({
                   <Button variant="outline" onClick={handleClose}>
                     Cancelar Cierre
                   </Button>
-                  <Button 
+                  <Button
                     onClick={() => setPhase(2)}
-                    disabled={paymentTotals.total <= 0}
                   >
                     Siguiente
                     <ChevronRight className="h-4 w-4 ml-2" />

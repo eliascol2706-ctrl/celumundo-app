@@ -733,7 +733,7 @@ export function Closures() {
 
   const handleOpenClosureDialog = () => {
     if (view === 'daily') {
-      if (dailyStats.totalInvoices === 0) {
+      if (!getDayToClose()) {
         toast.error('No hay facturas para cerrar hoy');
         return;
       }
@@ -856,8 +856,8 @@ export function Closures() {
             <CardHeader>
               <div className="flex items-center justify-between">
                 <CardTitle>Facturas de Hoy</CardTitle>
-                <Button onClick={handleOpenClosureDialog} disabled={dailyStats.totalInvoices === 0}>
-                  {dailyStats.totalInvoices === 0 ? 'No hay facturas para cerrar' : 'Finalizar Cierre'}
+                <Button onClick={handleOpenClosureDialog} disabled={!getDayToClose()}>
+                  {!getDayToClose() ? 'No hay facturas para cerrar' : 'Finalizar Cierre'}
                 </Button>
               </div>
             </CardHeader>
