@@ -431,6 +431,38 @@ export const updateUserCredentials = async (
   return true;
 };
 
+export const addUser = async (userData: {
+  username: string;
+  password: string;
+  role: 'admin' | 'seller';
+  company: 'celumundo' | 'repuestos';
+}): Promise<User | null> => {
+  const { data, error } = await supabase
+    .from('users')
+    .insert([userData])
+    .select()
+    .single();
+
+  if (error) {
+    console.error('Error adding user:', error);
+    return null;
+  }
+  return data;
+};
+
+export const deleteUser = async (userId: string): Promise<boolean> => {
+  const { error } = await supabase
+    .from('users')
+    .delete()
+    .eq('id', userId);
+
+  if (error) {
+    console.error('Error deleting user:', error);
+    return false;
+  }
+  return true;
+};
+
 export const checkUsernameExists = async (
   username: string,
   company: 'celumundo' | 'repuestos',
@@ -1853,14 +1885,15 @@ export const confirmInvoicePayment = async (
     payment_transfer?: number;
     payment_other?: number;
     payment_note?: string;
-    update_date?: boolean; // Nueva opción para actualizar la fecha al día de hoy
+    update_date?: boolean;
+    attended_by?: string; // Quién confirmó el pago
   }
 ): Promise<Invoice | null> => {
   const company = getCurrentCompany();
-  
+
   // Preparar los datos a actualizar
   const updateData: any = {
-    status: 'paid', // CORREGIDO: Usar 'status' en lugar de 'payment_status'
+    status: 'paid',
     payment_method: paymentData.payment_method,
     payment_cash: paymentData.payment_cash || 0,
     payment_transfer: paymentData.payment_transfer || 0,
@@ -1868,9 +1901,12 @@ export const confirmInvoicePayment = async (
     payment_note: paymentData.payment_note || null,
   };
 
-  // Si se solicita actualizar la fecha, usar la fecha actual de Colombia
   if (paymentData.update_date) {
     updateData.date = getColombiaDateTime();
+  }
+
+  if (paymentData.attended_by) {
+    updateData.attended_by = paymentData.attended_by;
   }
   
   const { data, error } = await supabase

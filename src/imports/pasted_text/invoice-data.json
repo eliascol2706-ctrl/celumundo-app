@@ -1,0 +1,120 @@
+🔍 [loadStats] Factura 00872 ANTES de setTodayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): {unitIds: Array(2), unitIdsJSON: '["0004","0005"]'}
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): {unitIds: Array(0), unitIdsJSON: '[]'}
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): {unitIds: Array(1), unitIdsJSON: '["0001"]'}
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getPaginatedInvoices] Factura 00872:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getPaginatedInvoices] Factura 00872:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [handlePreviewInvoice] ANTES de sanitizar - Factura: 00872
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): {unitIds: Array(4), unitIdsJSON: '["0004","0005","0007","0006"]', productId: '4a519ebb-9543-44c9-bba8-a849d5ee8c56'}
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): {unitIds: Array(0), unitIdsJSON: '[]', productId: '9442d528-4c93-4d90-b000-faefdaf65afd'}
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): {unitIds: Array(1), unitIdsJSON: '["0001"]', productId: 'dc09fd23-2c40-466e-9dab-8c8b6f659666'}
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [handlePreviewInvoice] DESPUÉS de sanitizar:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): {unitIds: Array(4), unitIdsJSON: '["0004","0005","0007","0006"]'}
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): {unitIds: Array(0), unitIdsJSON: '[]'}
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): {unitIds: Array(1), unitIdsJSON: '["0001"]'}
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getPaginatedInvoices] Factura 00872:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getPaginatedInvoices] Factura 00872:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [getFilteredInvoices INICIO] Factura 00872 en todayInvoices:
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): ["0004","0005","0007","0006"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): []
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): ["0001"]
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66 🔍 [InvoicesMenu] Renderizando items de factura: 00872
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 0 (DIS OPPO A57): {unitIds: Array(4), unitIdsLength: 4, unitIdsContent: '["0004","0005","0007","0006"]'}
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 1 (DIS POCO M5): {unitIds: Array(0), unitIdsLength: 0, unitIdsContent: '[]'}
+code_components_preview_iframe-c202f2d317069f87.min.js.br:66   Item 2 (BAT TECNO SPARK GO 2023): {unitIds: Array(1), unitIdsLength: 1, unitIdsContent: '["0001"]'}

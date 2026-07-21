@@ -37,7 +37,7 @@ import {
   Fingerprint
 } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { getCurrentUser, logoutUser, getSession, searchProductsForInvoice, type Product, getUsersFromDB, updateUserCredentials, checkUsernameExists, saveSession, canCreateInvoice, supabase } from '../lib/supabase';
+import { getCurrentUser, logoutUser, getSession, searchProductsForInvoice, type Product, type User, getUsersFromDB, updateUserCredentials, checkUsernameExists, addUser, deleteUser, saveSession, canCreateInvoice, supabase } from '../lib/supabase';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { Input } from '../components/ui/input';
 import { Button } from '../components/ui/button';
@@ -96,15 +96,9 @@ const sellerNavigation = [
       { name: 'Devoluciones', href: '/sistema/devoluciones', icon: RotateCcw },
       { name: 'Cambios', href: '/sistema/cambios', icon: RefreshCw },
       { name: 'Clientes', href: '/sistema/clientes', icon: Users },
+      { name: 'Gastos', href: '/sistema/gastos', icon: Receipt },
     ]
   },
-  // Sección 2: Consultas
-  {
-    section: 'Consultas',
-    items: [
-      { name: 'Cierres', href: '/sistema/cierres', icon: DoorOpen },
-    ]
-  }
 ];
 
 const catalogAdminNavigation = [
@@ -168,11 +162,21 @@ export function Layout() {
   const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
   const [adminUsername, setAdminUsername] = useState("");
   const [adminPassword, setAdminPassword] = useState("");
-  const [sellerUsername, setSellerUsername] = useState("");
-  const [sellerPassword, setSellerPassword] = useState("");
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [showAdminPassword, setShowAdminPassword] = useState(false);
-  const [showSellerPassword, setShowSellerPassword] = useState(false);
+
+  // Multi-seller management
+  const [allSellers, setAllSellers] = useState<User[]>([]);
+  const [showAddSellerForm, setShowAddSellerForm] = useState(false);
+  const [newSellerUsername, setNewSellerUsername] = useState("");
+  const [newSellerPassword, setNewSellerPassword] = useState("");
+  const [showNewSellerPassword, setShowNewSellerPassword] = useState(false);
+  const [isAddingSeller, setIsAddingSeller] = useState(false);
+  const [editingSeller, setEditingSeller] = useState<User | null>(null);
+  const [editSellerUsername, setEditSellerUsername] = useState("");
+  const [editSellerPassword, setEditSellerPassword] = useState("");
+  const [showEditSellerPassword, setShowEditSellerPassword] = useState(false);
+  const [isSavingSeller, setIsSavingSeller] = useState(false);
 
   // Estados para configuración de impresoras
   const [thermalPrinter, setThermalPrinter] = useState("");
@@ -213,12 +217,11 @@ export function Layout() {
     const users = await getUsersFromDB(session.company);
 
     const admin = users.find(u => u.role === 'admin');
-    const seller = users.find(u => u.role === 'seller');
+    const sellers = users.filter(u => u.role === 'seller');
 
     setAdminUsername(admin?.username || '');
     setAdminPassword(admin?.password || '');
-    setSellerUsername(seller?.username || '');
-    setSellerPassword(seller?.password || '');
+    setAllSellers(sellers);
   };
 
   const loadPrinterConfig = async () => {
@@ -262,35 +265,19 @@ export function Layout() {
     try {
       const users = await getUsersFromDB(session.company);
       const admin = users.find(u => u.role === 'admin');
-      const seller = users.find(u => u.role === 'seller');
 
-      // Validar que los nombres de usuario no estén vacíos
       if (!adminUsername.trim()) {
         alert('El nombre de usuario del administrador no puede estar vacío');
         setIsSavingSettings(false);
         return;
       }
 
-      if (!sellerUsername.trim()) {
-        alert('El nombre de usuario del vendedor no puede estar vacío');
-        setIsSavingSettings(false);
-        return;
-      }
-
-      // Validar que las contraseñas no estén vacías
       if (!adminPassword.trim()) {
         alert('La contraseña del administrador no puede estar vacía');
         setIsSavingSettings(false);
         return;
       }
 
-      if (!sellerPassword.trim()) {
-        alert('La contraseña del vendedor no puede estar vacía');
-        setIsSavingSettings(false);
-        return;
-      }
-
-      // Verificar si el nuevo username del admin ya existe (excluyendo el admin actual)
       if (admin && adminUsername !== admin.username) {
         const usernameExists = await checkUsernameExists(adminUsername, session.company, admin.id);
         if (usernameExists) {
@@ -300,17 +287,6 @@ export function Layout() {
         }
       }
 
-      // Verificar si el nuevo username del seller ya existe (excluyendo el seller actual)
-      if (seller && sellerUsername !== seller.username) {
-        const usernameExists = await checkUsernameExists(sellerUsername, session.company, seller.id);
-        if (usernameExists) {
-          alert('El nombre de usuario del vendedor ya existe. Por favor elige otro.');
-          setIsSavingSettings(false);
-          return;
-        }
-      }
-
-      // Actualizar credenciales del admin
       if (admin) {
         const adminSuccess = await updateUserCredentials(admin.id, {
           username: adminUsername,
@@ -324,27 +300,11 @@ export function Layout() {
         }
       }
 
-      // Actualizar credenciales del seller
-      if (seller) {
-        const sellerSuccess = await updateUserCredentials(seller.id, {
-          username: sellerUsername,
-          password: sellerPassword
-        });
-
-        if (!sellerSuccess) {
-          alert('Error al actualizar las credenciales del vendedor');
-          setIsSavingSettings(false);
-          return;
-        }
-      }
-
-      // Si el admin cambió su propio username, actualizar la sesión
       if (admin && currentUser.id === admin.id && adminUsername !== admin.username) {
         const updatedUser = { ...currentUser, username: adminUsername };
         saveSession({ user: updatedUser, company: session.company });
       }
 
-      // Guardar configuración de impresoras
       try {
         await savePrinterConfig({
           thermal: thermalPrinter || '',
@@ -353,7 +313,7 @@ export function Layout() {
         });
       } catch (printerError) {
         console.error('❌ Error al guardar impresoras:', printerError);
-        alert('⚠️ Las credenciales se guardaron pero hubo un error al guardar la configuración de impresoras.\n\nSolución:\n1. Abre el archivo CREAR_TABLAS_IMPRESORAS_SIMPLE.sql\n2. Copia todo el contenido\n3. Pégalo en Supabase SQL Editor\n4. Presiona Run');
+        alert('⚠️ Las credenciales se guardaron pero hubo un error al guardar la configuración de impresoras.');
         setIsSavingSettings(false);
         return;
       }
@@ -365,6 +325,105 @@ export function Layout() {
       alert(`Error al guardar la configuración: ${error instanceof Error ? error.message : 'Error desconocido'}`);
     } finally {
       setIsSavingSettings(false);
+    }
+  };
+
+  const handleAddSeller = async () => {
+    if (!session) return;
+    if (!newSellerUsername.trim()) {
+      alert('El nombre de usuario no puede estar vacío');
+      return;
+    }
+    if (!newSellerPassword.trim()) {
+      alert('La contraseña no puede estar vacía');
+      return;
+    }
+
+    setIsAddingSeller(true);
+    try {
+      const usernameExists = await checkUsernameExists(newSellerUsername.trim(), session.company);
+      if (usernameExists) {
+        alert('El nombre de usuario ya existe. Por favor elige otro.');
+        return;
+      }
+
+      const newUser = await addUser({
+        username: newSellerUsername.trim(),
+        password: newSellerPassword.trim(),
+        role: 'seller',
+        company: session.company,
+      });
+
+      if (newUser) {
+        setAllSellers(prev => [...prev, newUser]);
+        setNewSellerUsername('');
+        setNewSellerPassword('');
+        setShowAddSellerForm(false);
+        alert(`✅ Vendedor "${newUser.username}" creado exitosamente`);
+      } else {
+        alert('Error al crear el vendedor');
+      }
+    } catch (error) {
+      console.error('Error adding seller:', error);
+      alert('Error al crear el vendedor');
+    } finally {
+      setIsAddingSeller(false);
+    }
+  };
+
+  const handleSaveSellerEdit = async () => {
+    if (!session || !editingSeller?.id) return;
+    if (!editSellerUsername.trim()) {
+      alert('El nombre de usuario no puede estar vacío');
+      return;
+    }
+    if (!editSellerPassword.trim()) {
+      alert('La contraseña no puede estar vacía');
+      return;
+    }
+
+    setIsSavingSeller(true);
+    try {
+      if (editSellerUsername !== editingSeller.username) {
+        const usernameExists = await checkUsernameExists(editSellerUsername.trim(), session.company, editingSeller.id);
+        if (usernameExists) {
+          alert('El nombre de usuario ya existe. Por favor elige otro.');
+          return;
+        }
+      }
+
+      const success = await updateUserCredentials(editingSeller.id, {
+        username: editSellerUsername.trim(),
+        password: editSellerPassword.trim(),
+      });
+
+      if (success) {
+        setAllSellers(prev => prev.map(s =>
+          s.id === editingSeller.id
+            ? { ...s, username: editSellerUsername.trim(), password: editSellerPassword.trim() }
+            : s
+        ));
+        setEditingSeller(null);
+      } else {
+        alert('Error al guardar los cambios');
+      }
+    } catch (error) {
+      console.error('Error editing seller:', error);
+      alert('Error al guardar los cambios');
+    } finally {
+      setIsSavingSeller(false);
+    }
+  };
+
+  const handleDeleteSeller = async (seller: User) => {
+    if (!seller.id) return;
+    if (!confirm(`¿Eliminar vendedor "${seller.username}"? Esta acción no se puede deshacer.`)) return;
+
+    const success = await deleteUser(seller.id);
+    if (success) {
+      setAllSellers(prev => prev.filter(s => s.id !== seller.id));
+    } else {
+      alert('Error al eliminar el vendedor');
     }
   };
 
@@ -983,7 +1042,7 @@ export function Layout() {
                         <p className="text-2xl font-bold text-green-600">
                           {formatCOP(selectedProduct.price1)}
                         </p>
-                        {selectedProduct.margin1 && (
+                        {currentUser?.role === 'admin' && selectedProduct.margin1 && (
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             Margen: {selectedProduct.margin1.toFixed(1)}%
                           </p>
@@ -995,7 +1054,7 @@ export function Layout() {
                         <p className="text-2xl font-bold text-green-600">
                           {formatCOP(selectedProduct.price2)}
                         </p>
-                        {selectedProduct.margin2 && (
+                        {currentUser?.role === 'admin' && selectedProduct.margin2 && (
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             Margen: {selectedProduct.margin2.toFixed(1)}%
                           </p>
@@ -1007,7 +1066,7 @@ export function Layout() {
                         <p className="text-2xl font-bold text-green-600">
                           {formatCOP(selectedProduct.final_price)}
                         </p>
-                        {selectedProduct.margin_final && (
+                        {currentUser?.role === 'admin' && selectedProduct.margin_final && (
                           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                             Margen: {selectedProduct.margin_final.toFixed(1)}%
                           </p>
@@ -1016,6 +1075,7 @@ export function Layout() {
                     </div>
                   </div>
 
+                  {currentUser?.role === 'admin' && (
                   <div className="mt-4 pt-4 border-t border-green-200 dark:border-green-800">
                     <h4 className="font-semibold text-green-900 dark:text-green-100 mb-2">Información de Costos</h4>
                     <div className="grid grid-cols-2 gap-4">
@@ -1033,6 +1093,7 @@ export function Layout() {
                       </div>
                     </div>
                   </div>
+                  )}
 
                   {selectedProduct.use_unit_ids && (
                     <div className="mt-4 pt-4 border-t border-green-200 dark:border-green-800">
@@ -1208,56 +1269,165 @@ export function Layout() {
                 </div>
               </div>
 
-              {/* Sección de Vendedor */}
+              {/* Sección de Vendedores (multi-seller) */}
               <div className="border border-blue-200 dark:border-blue-800 rounded-lg p-6 bg-blue-50 dark:bg-blue-950/30">
-                <div className="flex items-center gap-2 mb-4">
-                  <Users className="h-5 w-5 text-blue-600" />
-                  <h3 className="text-lg font-bold text-blue-900 dark:text-blue-100">
-                    Credenciales de Vendedor
-                  </h3>
+                <div className="flex items-center justify-between mb-4">
+                  <div className="flex items-center gap-2">
+                    <Users className="h-5 w-5 text-blue-600" />
+                    <h3 className="text-lg font-bold text-blue-900 dark:text-blue-100">
+                      Vendedores ({allSellers.length})
+                    </h3>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => { setShowAddSellerForm(true); setEditingSeller(null); }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-blue-600 text-white text-sm hover:bg-blue-700 transition-colors"
+                  >
+                    <Plus className="h-4 w-4" />
+                    Agregar Vendedor
+                  </button>
                 </div>
 
-                <div className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="sellerUsername">Nombre de Usuario</Label>
-                    <input
-                      id="sellerUsername"
-                      type="text"
-                      placeholder="seller1"
-                      value={sellerUsername}
-                      onChange={(e) => setSellerUsername(e.target.value)}
-                      disabled={isSavingSettings}
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                    />
-                  </div>
+                {/* Lista de vendedores */}
+                <div className="space-y-2 mb-4">
+                  {allSellers.length === 0 && (
+                    <p className="text-sm text-blue-700 dark:text-blue-300 text-center py-3">
+                      No hay vendedores registrados
+                    </p>
+                  )}
+                  {allSellers.map(seller => (
+                    <div key={seller.id} className="bg-white dark:bg-zinc-900 rounded-lg border border-blue-200 dark:border-blue-800 p-3">
+                      {editingSeller?.id === seller.id ? (
+                        <div className="space-y-2">
+                          <div className="grid grid-cols-2 gap-2">
+                            <input
+                              type="text"
+                              value={editSellerUsername}
+                              onChange={e => setEditSellerUsername(e.target.value)}
+                              placeholder="Usuario"
+                              className="flex h-8 rounded-md border border-input bg-background px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                            />
+                            <div className="relative">
+                              <input
+                                type={showEditSellerPassword ? "text" : "password"}
+                                value={editSellerPassword}
+                                onChange={e => setEditSellerPassword(e.target.value)}
+                                placeholder="Contraseña"
+                                className="flex h-8 w-full rounded-md border border-input bg-background px-3 py-1 text-sm pr-8 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowEditSellerPassword(!showEditSellerPassword)}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                                tabIndex={-1}
+                              >
+                                {showEditSellerPassword ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                              </button>
+                            </div>
+                          </div>
+                          <div className="flex gap-2 justify-end">
+                            <button
+                              type="button"
+                              onClick={() => setEditingSeller(null)}
+                              className="px-3 py-1 text-xs rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleSaveSellerEdit}
+                              disabled={isSavingSeller}
+                              className="px-3 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              {isSavingSeller ? 'Guardando...' : 'Guardar'}
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="font-medium text-sm text-zinc-900 dark:text-zinc-100">{seller.username}</p>
+                            <p className="text-xs text-zinc-500 dark:text-zinc-400">Vendedor</p>
+                          </div>
+                          <div className="flex gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setEditingSeller(seller);
+                                setEditSellerUsername(seller.username);
+                                setEditSellerPassword(seller.password);
+                                setShowEditSellerPassword(false);
+                                setShowAddSellerForm(false);
+                              }}
+                              className="p-1.5 rounded hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-600 transition-colors"
+                              title="Editar"
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteSeller(seller)}
+                              className="p-1.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 transition-colors"
+                              title="Eliminar"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
 
-                  <div className="space-y-2">
-                    <Label htmlFor="sellerPassword">Contraseña</Label>
-                    <div className="relative">
+                {/* Formulario para agregar vendedor */}
+                {showAddSellerForm && (
+                  <div className="border-t border-blue-200 dark:border-blue-800 pt-4 space-y-3">
+                    <p className="text-sm font-medium text-blue-900 dark:text-blue-100">Nuevo Vendedor</p>
+                    <div className="space-y-2">
                       <input
-                        id="sellerPassword"
-                        type={showSellerPassword ? "text" : "password"}
-                        placeholder="••••••••"
-                        value={sellerPassword}
-                        onChange={(e) => setSellerPassword(e.target.value)}
-                        disabled={isSavingSettings}
-                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm transition-colors file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 pr-10"
+                        type="text"
+                        value={newSellerUsername}
+                        onChange={e => setNewSellerUsername(e.target.value)}
+                        placeholder="Nombre de usuario"
+                        className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                       />
+                      <div className="relative">
+                        <input
+                          type={showNewSellerPassword ? "text" : "password"}
+                          value={newSellerPassword}
+                          onChange={e => setNewSellerPassword(e.target.value)}
+                          placeholder="Contraseña"
+                          className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm pr-10 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowNewSellerPassword(!showNewSellerPassword)}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                          tabIndex={-1}
+                        >
+                          {showNewSellerPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex gap-2 justify-end">
                       <button
                         type="button"
-                        onClick={() => setShowSellerPassword(!showSellerPassword)}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
-                        tabIndex={-1}
+                        onClick={() => { setShowAddSellerForm(false); setNewSellerUsername(''); setNewSellerPassword(''); }}
+                        className="px-3 py-1.5 text-sm rounded border border-zinc-300 dark:border-zinc-600 hover:bg-zinc-50 dark:hover:bg-zinc-800"
                       >
-                        {showSellerPassword ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
+                        Cancelar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleAddSeller}
+                        disabled={isAddingSeller}
+                        className="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {isAddingSeller ? 'Creando...' : 'Crear Vendedor'}
                       </button>
                     </div>
                   </div>
-                </div>
+                )}
               </div>
 
               {/* Sección de Impresoras */}
@@ -1392,11 +1562,10 @@ export function Layout() {
                   variant="outline"
                   onClick={() => {
                     setSettingsDialogOpen(false);
-                    // Resetear campos al cerrar
                     setAdminUsername('');
                     setAdminPassword('');
-                    setSellerUsername('');
-                    setSellerPassword('');
+                    setShowAddSellerForm(false);
+                    setEditingSeller(null);
                   }}
                   disabled={isSavingSettings}
                 >

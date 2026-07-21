@@ -217,7 +217,7 @@ export const router = createBrowserRouter([
       {
         path: 'gastos',
         element: (
-          <ProtectedRoute allowedRoles={['admin']}>
+          <ProtectedRoute allowedRoles={['admin', 'seller']}>
             <SuspenseWrapper>
               <Expenses />
             </SuspenseWrapper>
@@ -237,7 +237,7 @@ export const router = createBrowserRouter([
       {
         path: 'cierres',
         element: (
-          <ProtectedRoute allowedRoles={['admin', 'seller']}>
+          <ProtectedRoute allowedRoles={['admin']}>
             <SuspenseWrapper>
               <Closures />
             </SuspenseWrapper>

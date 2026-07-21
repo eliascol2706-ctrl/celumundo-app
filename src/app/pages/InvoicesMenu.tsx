@@ -290,6 +290,11 @@ export function InvoicesMenu() {
       if (type === 'credit') query = query.eq('is_credit', true);
       if (type === 'regular') query = query.eq('is_credit', false);
 
+      // Sellers only see their own invoices
+      if (currentUser?.role === 'seller') {
+        query = query.eq('attended_by', currentUser.username);
+      }
+
       if (status !== 'all') {
         if (status === 'paid') query = query.eq('status', 'paid');
         else if (status === 'pending_confirmation') query = query.eq('status', 'pending_confirmation');
@@ -361,10 +366,12 @@ export function InvoicesMenu() {
 
       console.log('[InvoicesMenu] Calculando stats para fecha Colombia:', todayStr);
 
-      // Filtrar facturas de HOY
+      // Filtrar facturas de HOY (sellers only see their own)
       const invoicesToday = invoices.filter(inv => {
         const invoiceDate = extractColombiaDate(inv.date);
-        return invoiceDate === todayStr;
+        if (invoiceDate !== todayStr) return false;
+        if (currentUser?.role === 'seller') return inv.attended_by === currentUser.username;
+        return true;
       });
 
       // Filtrar solo facturas PAGADAS de hoy para calcular ganancias y métodos de pago
@@ -530,7 +537,12 @@ export function InvoicesMenu() {
         transferFromPayments,
       });
 
-      setTodayInvoices(invoices);
+      // Sellers only see their own invoices
+      const filteredInvoices = currentUser?.role === 'seller'
+        ? invoices.filter(inv => inv.attended_by === currentUser.username)
+        : invoices;
+
+      setTodayInvoices(filteredInvoices);
       setPendingInvoices(pendingConfirmations);
       setProducts(products);
     } catch (error) {
@@ -853,7 +865,8 @@ export function InvoicesMenu() {
         payment_cash: paymentCash,
         payment_transfer: paymentTransfer,
         payment_other: paymentOther,
-        update_date: true // ✅ Actualizar la fecha al día actual
+        update_date: true,
+        attended_by: user.username
       });
 
       if (!result) {
@@ -2438,7 +2451,7 @@ export function InvoicesMenu() {
                     <p className="text-xs font-semibold text-amber-700 dark:text-amber-400 uppercase tracking-wide mb-3">
                       Resumen · {filtered.length} {filtered.length === 1 ? 'factura' : 'facturas'} en confirmación
                     </p>
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div className={`grid gap-4 ${currentUser?.role === 'admin' ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3'}`}>
                       <div>
                         <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-0.5">Total acumulado</p>
                         <p className="text-xl font-bold text-amber-700 dark:text-amber-300">{formatCOP(totalConfirmacion)}</p>
@@ -2451,6 +2464,7 @@ export function InvoicesMenu() {
                         <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-0.5">💳 Transferencia</p>
                         <p className="text-xl font-bold text-blue-600 dark:text-blue-400">{formatCOP(totalTransferencia)}</p>
                       </div>
+                      {currentUser?.role === 'admin' && (
                       <div>
                         <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-0.5">
                           📈 Ganancia estimada{loadingPendingCosts ? ' (cargando...)' : ''}
@@ -2462,6 +2476,7 @@ export function InvoicesMenu() {
                           <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">Costo: {formatCOP(totalCostos)}</p>
                         )}
                       </div>
+                      )}
                     </div>
                   </div>
                 );
@@ -2984,9 +2999,11 @@ export function InvoicesMenu() {
                         <span>Cantidad: <strong>{p.quantity}</strong></span>
                         <span>P. venta / u: <strong>{formatCOP(p.salePrice)}</strong></span>
                         <span>P. venta total: <strong>{formatCOP(p.totalSalePrice)}</strong></span>
-                        <span>Costo unitario: <strong>{formatCOP(p.cost)}</strong></span>
-                        <span>Costo total: <strong>{formatCOP(p.totalCost)}</strong></span>
-                        <span>Utilidad: <strong className="text-emerald-600 dark:text-emerald-400">{formatCOP(p.profit)}</strong></span>
+                        {currentUser?.role === 'admin' && <>
+                          <span>Costo unitario: <strong>{formatCOP(p.cost)}</strong></span>
+                          <span>Costo total: <strong>{formatCOP(p.totalCost)}</strong></span>
+                          <span>Utilidad: <strong className="text-emerald-600 dark:text-emerald-400">{formatCOP(p.profit)}</strong></span>
+                        </>}
                       </div>
                     </div>
                   ))}
@@ -3010,9 +3027,11 @@ export function InvoicesMenu() {
                           <span>Cantidad: <strong>{p.quantity}</strong></span>
                           <span>P. venta / u: <strong>{formatCOP(p.salePrice)}</strong></span>
                           <span>P. venta total: <strong>{formatCOP(p.totalSalePrice)}</strong></span>
-                          <span>Costo unitario: <strong>{formatCOP(p.cost)}</strong></span>
-                          <span>Costo total: <strong>{formatCOP(p.totalCost)}</strong></span>
-                          <span>Utilidad: <strong className="text-emerald-600 dark:text-emerald-400">{formatCOP(p.profit)}</strong></span>
+                          {currentUser?.role === 'admin' && <>
+                            <span>Costo unitario: <strong>{formatCOP(p.cost)}</strong></span>
+                            <span>Costo total: <strong>{formatCOP(p.totalCost)}</strong></span>
+                            <span>Utilidad: <strong className="text-emerald-600 dark:text-emerald-400">{formatCOP(p.profit)}</strong></span>
+                          </>}
                         </div>
                       </div>
                     ))}
