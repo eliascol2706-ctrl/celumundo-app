@@ -206,9 +206,10 @@ export function Layout() {
 
   // Cargar usuarios e impresoras cuando se abre el diálogo de configuración
   useEffect(() => {
-    if (settingsDialogOpen && currentUser?.role === 'admin' && session) {
+    if (!settingsDialogOpen || !session) return;
+    loadPrinterConfig();
+    if (currentUser?.role === 'admin') {
       loadUsers();
-      loadPrinterConfig();
     }
   }, [settingsDialogOpen]);
 
@@ -907,8 +908,8 @@ export function Layout() {
         </div>
       </button>
 
-      {/* Botón flotante de Settings (solo para admin) */}
-      {currentUser?.role === 'admin' && (
+      {/* Botón flotante de Settings (admin y sellers) */}
+      {(currentUser?.role === 'admin' || currentUser?.role === 'seller') && (
         <button
           onClick={() => {
             setSettingsDialogOpen(true);
@@ -1202,8 +1203,8 @@ export function Layout() {
         </Dialog>
       )}
 
-      {/* Diálogo de Configuración (solo para admin) */}
-      {currentUser?.role === 'admin' && (
+      {/* Diálogo de Configuración (admin y sellers) */}
+      {(currentUser?.role === 'admin' || currentUser?.role === 'seller') && (
         <Dialog open={settingsDialogOpen} onOpenChange={setSettingsDialogOpen}>
           <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -1212,11 +1213,14 @@ export function Layout() {
                 Configuración del Sistema
               </DialogTitle>
               <DialogDescription>
-                Administra las credenciales de los usuarios de {companyName}
+                {currentUser?.role === 'admin'
+                  ? `Administra las credenciales de los usuarios de ${companyName}`
+                  : 'Configura tus impresoras'}
               </DialogDescription>
             </DialogHeader>
 
             <div className="space-y-6">
+            {currentUser?.role === 'admin' && (<>
               {/* Sección de Administrador */}
               <div className="border border-green-200 dark:border-green-800 rounded-lg p-6 bg-green-50 dark:bg-green-950/30">
                 <div className="flex items-center gap-2 mb-4">
@@ -1430,6 +1434,7 @@ export function Layout() {
                 )}
               </div>
 
+            </>)}
               {/* Sección de Impresoras */}
               <div className="border border-purple-200 dark:border-purple-800 rounded-lg p-6 bg-purple-50 dark:bg-purple-950/30">
                 <div className="flex items-center gap-2 mb-4">
@@ -1539,7 +1544,7 @@ export function Layout() {
                 </div>
               </div>
 
-              {/* Nota informativa */}
+              {currentUser?.role === 'admin' && (
               <div className="bg-yellow-50 dark:bg-yellow-950/30 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
                 <div className="flex items-start gap-3">
                   <div className="text-yellow-600 dark:text-yellow-400 mt-0.5">ℹ️</div>
@@ -1555,6 +1560,7 @@ export function Layout() {
                   </div>
                 </div>
               </div>
+              )}
 
               {/* Botones de acción */}
               <div className="flex items-center justify-end gap-3 pt-4 border-t">
@@ -1562,22 +1568,49 @@ export function Layout() {
                   variant="outline"
                   onClick={() => {
                     setSettingsDialogOpen(false);
-                    setAdminUsername('');
-                    setAdminPassword('');
-                    setShowAddSellerForm(false);
-                    setEditingSeller(null);
+                    if (currentUser?.role === 'admin') {
+                      setAdminUsername('');
+                      setAdminPassword('');
+                      setShowAddSellerForm(false);
+                      setEditingSeller(null);
+                    }
                   }}
                   disabled={isSavingSettings}
                 >
                   Cancelar
                 </Button>
-                <Button
-                  onClick={handleSaveSettings}
-                  disabled={isSavingSettings}
-                  className="bg-green-600 hover:bg-green-700 text-white"
-                >
-                  {isSavingSettings ? 'Guardando...' : 'Guardar Cambios'}
-                </Button>
+                {currentUser?.role === 'admin' ? (
+                  <Button
+                    onClick={handleSaveSettings}
+                    disabled={isSavingSettings}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    {isSavingSettings ? 'Guardando...' : 'Guardar Cambios'}
+                  </Button>
+                ) : (
+                  <Button
+                    onClick={async () => {
+                      setIsSavingSettings(true);
+                      try {
+                        await savePrinterConfig({
+                          thermal: thermalPrinter || '',
+                          labels: labelPrinter || '',
+                          pdf: pdfPrinter || '',
+                        });
+                        alert('✅ Configuración de impresoras guardada');
+                        setSettingsDialogOpen(false);
+                      } catch {
+                        alert('Error al guardar la configuración de impresoras');
+                      } finally {
+                        setIsSavingSettings(false);
+                      }
+                    }}
+                    disabled={isSavingSettings}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                  >
+                    {isSavingSettings ? 'Guardando...' : 'Guardar Impresoras'}
+                  </Button>
+                )}
               </div>
             </div>
           </DialogContent>
