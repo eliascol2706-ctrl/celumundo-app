@@ -385,7 +385,7 @@ export function InvoicesMenu() {
 
       // Calcular cartera pendiente (créditos sin pagar completamente)
       const totalCreditPending = pendingCredits
-        .reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+        .reduce((sum, inv) => sum + (inv.credit_balance ?? inv.total), 0);
 
       // Calcular TOTAL FACTURADO del día (solo facturas pagadas)
       const totalSalesToday = paidInvoicesToday.reduce((sum, inv) => {

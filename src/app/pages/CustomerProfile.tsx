@@ -814,7 +814,7 @@ export function CustomerProfile() {
   }
 
   const pendingInvoices = invoices.filter((inv) => inv.status === 'pending');
-  const totalBalance = pendingInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+  const totalBalance = pendingInvoices.reduce((sum, inv) => sum + (inv.credit_balance ?? inv.total), 0);
   const usedCredit = totalBalance + debitNotesTotal;
   const availableCredit = customer.credit_limit - usedCredit;
 

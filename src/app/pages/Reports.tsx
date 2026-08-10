@@ -20,6 +20,19 @@ interface SalesAnalysisData {
   averageTicket: number;
 }
 
+interface ProfitProductRow {
+  name: string;
+  code: string;
+  category: string;
+  quantity: number;
+  avgCost: number;
+  avgPrice: number;
+  avgProfit: number;
+  totalProfit: number;
+  totalRevenue: number;
+  marginPct: number;
+}
+
 export default function Reports() {
   const [products, setProducts] = useState<Product[]>([]);
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -31,6 +44,10 @@ export default function Reports() {
   const [analyzingSales, setAnalyzingSales] = useState(false);
   const [salesAnalysis, setSalesAnalysis] = useState<SalesAnalysisData | null>(null);
   const [showSalesAnalysis, setShowSalesAnalysis] = useState(false);
+  const [salesPeriod, setSalesPeriod] = useState<'month' | 'all'>('month');
+  const [showProfitAnalysis, setShowProfitAnalysis] = useState(false);
+  const [profitAnalysisData, setProfitAnalysisData] = useState<ProfitProductRow[]>([]);
+  const [analyzingProfits, setAnalyzingProfits] = useState(false);
 
   // Estados para reporte de inventario
   const [showInventoryReport, setShowInventoryReport] = useState(false);
@@ -546,24 +563,22 @@ export default function Reports() {
   };
 
   // Analizar ventas del mes
-  const analyzeMonthlySales = async () => {
+  const analyzeMonthlySales = async (period: 'month' | 'all' = salesPeriod) => {
     setAnalyzingSales(true);
     setShowSalesAnalysis(true);
 
     const startTime = Date.now();
 
     try {
-      // Obtener facturas del mes actual (incluyendo crédito y regulares)
       const currentMonth = new Date().getMonth();
       const currentYear = new Date().getFullYear();
 
       const monthInvoices = invoices.filter(inv => {
         const invDate = new Date(inv.date);
-        return (
-          invDate.getMonth() === currentMonth &&
-          invDate.getFullYear() === currentYear &&
-          (inv.status === 'paid' || inv.status === 'partial_return' || inv.status === 'pending')
-        );
+        const statusOk = inv.status === 'paid' || inv.status === 'partial_return' || inv.status === 'pending';
+        if (!statusOk) return false;
+        if (period === 'all') return true;
+        return invDate.getMonth() === currentMonth && invDate.getFullYear() === currentYear;
       });
 
       // Analizar productos vendidos
@@ -619,9 +634,10 @@ export default function Reports() {
         .map(([category, data]) => ({ category, ...data }))
         .sort((a, b) => b.revenue - a.revenue);
 
-      // Comparación mensual (últimos 6 meses)
+      // Comparación mensual (últimos 6 meses o 12 si es "todas")
+      const monthsBack = period === 'all' ? 11 : 5;
       const monthlyData = [];
-      for (let i = 5; i >= 0; i--) {
+      for (let i = monthsBack; i >= 0; i--) {
         const date = new Date(currentYear, currentMonth - i, 1);
         const monthInvoicesForPeriod = invoices.filter(inv => {
           const invDate = new Date(inv.date);
@@ -666,6 +682,73 @@ export default function Reports() {
       console.error('Error analyzing sales:', error);
     } finally {
       setAnalyzingSales(false);
+    }
+  };
+
+  // Analizar ganancias por producto (top 30 por margen)
+  const analyzeProfits = async (period: 'month' | 'all' = salesPeriod) => {
+    setAnalyzingProfits(true);
+    setShowProfitAnalysis(true);
+
+    try {
+      const currentMonth = new Date().getMonth();
+      const currentYear = new Date().getFullYear();
+
+      const filteredInvoices = invoices.filter(inv => {
+        const statusOk = inv.status === 'paid' || inv.status === 'partial_return' || inv.status === 'pending';
+        if (!statusOk) return false;
+        if (period === 'all') return true;
+        const d = new Date(inv.date);
+        return d.getMonth() === currentMonth && d.getFullYear() === currentYear;
+      });
+
+      const productMap: Map<string, {
+        name: string; code: string; category: string;
+        quantity: number; totalRevenue: number; totalCost: number;
+      }> = new Map();
+
+      filteredInvoices.forEach(invoice => {
+        invoice.items?.forEach((item: any) => {
+          const product = products.find(p => p.id === item.productId);
+          const cost = product?.current_cost ?? 0;
+          const qty = item.quantity || 0;
+          const price = item.price || 0;
+          const existing = productMap.get(item.productId);
+          if (existing) {
+            existing.quantity += qty;
+            existing.totalRevenue += price * qty;
+            existing.totalCost += cost * qty;
+          } else {
+            productMap.set(item.productId, {
+              name: item.productName || item.product_name || 'Desconocido',
+              code: item.productCode || product?.code || '-',
+              category: product?.category || 'Sin categoría',
+              quantity: qty,
+              totalRevenue: price * qty,
+              totalCost: cost * qty,
+            });
+          }
+        });
+      });
+
+      const rows: ProfitProductRow[] = Array.from(productMap.values())
+        .filter(p => p.quantity > 0)
+        .map(p => {
+          const avgPrice = p.quantity > 0 ? p.totalRevenue / p.quantity : 0;
+          const avgCost = p.quantity > 0 ? p.totalCost / p.quantity : 0;
+          const avgProfit = avgPrice - avgCost;
+          const totalProfit = p.totalRevenue - p.totalCost;
+          const marginPct = avgPrice > 0 ? (avgProfit / avgPrice) * 100 : 0;
+          return { ...p, avgPrice, avgCost, avgProfit, totalProfit, marginPct };
+        })
+        .sort((a, b) => b.totalProfit - a.totalProfit)
+        .slice(0, 30);
+
+      setProfitAnalysisData(rows);
+    } catch (err) {
+      console.error('Error en análisis de ganancias:', err);
+    } finally {
+      setAnalyzingProfits(false);
     }
   };
 
@@ -967,7 +1050,7 @@ export default function Reports() {
         <DialogContent className="max-w-7xl max-h-[95vh] overflow-y-auto p-0">
           <DialogHeader className={analyzingSales ? 'sr-only' : ''}>
             <DialogTitle>
-              {analyzingSales ? 'Analizando Ventas' : 'Análisis de Ventas del Mes'}
+              {analyzingSales ? 'Analizando Ventas' : salesPeriod === 'all' ? 'Análisis de Ventas — Todas las Ventas' : 'Análisis de Ventas del Mes'}
             </DialogTitle>
             <DialogDescription>
               {analyzingSales ? 'Calculando y analizando datos de ventas...' : 'Resumen completo de ventas y análisis de productos'}
@@ -1037,10 +1120,26 @@ export default function Reports() {
           ) : salesAnalysis ? (
             // Contenido del análisis
             <div className="p-6 space-y-6">
-              {/* Título visible */}
-              <div className="flex items-center gap-2 text-2xl font-bold">
-                <BarChart3 className="h-6 w-6 text-blue-600" />
-                Análisis de Ventas del Mes
+              {/* Selector de período */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2 text-2xl font-bold">
+                  <BarChart3 className="h-6 w-6 text-blue-600" />
+                  {salesPeriod === 'all' ? 'Análisis — Todas las Ventas' : 'Análisis de Ventas del Mes'}
+                </div>
+                <div className="flex items-center gap-1 bg-muted rounded-lg p-1">
+                  <button
+                    onClick={() => { setSalesPeriod('month'); analyzeMonthlySales('month'); }}
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${salesPeriod === 'month' ? 'bg-white dark:bg-gray-800 shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    Mes actual
+                  </button>
+                  <button
+                    onClick={() => { setSalesPeriod('all'); analyzeMonthlySales('all'); }}
+                    className={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${salesPeriod === 'all' ? 'bg-white dark:bg-gray-800 shadow text-foreground' : 'text-muted-foreground hover:text-foreground'}`}
+                  >
+                    Todas las ventas
+                  </button>
+                </div>
               </div>
 
               {/* Tarjetas de resumen */}
@@ -1054,7 +1153,7 @@ export default function Reports() {
                       {formatCOP(salesAnalysis.totalRevenue)}
                     </div>
                     <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
-                      Del mes actual
+                      {salesPeriod === 'all' ? 'Total histórico' : 'Del mes actual'}
                     </p>
                   </CardContent>
                 </Card>
@@ -1314,19 +1413,29 @@ export default function Reports() {
                 </Card>
               </div>
 
-              <div className="flex justify-between pt-4">
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    setShowCategoryAnalysisModal(true);
-                    setSelectedCategoryForAnalysis('');
-                    setCategoryAnalysisResults(null);
-                    setCategoryAnalysisLoading(false);
-                  }}
-                >
-                  <BarChart3 className="w-4 h-4 mr-2" />
-                  Análisis de ventas por Categoría
-                </Button>
+              <div className="flex flex-wrap justify-between gap-3 pt-4 border-t">
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setShowCategoryAnalysisModal(true);
+                      setSelectedCategoryForAnalysis('');
+                      setCategoryAnalysisResults(null);
+                      setCategoryAnalysisLoading(false);
+                    }}
+                  >
+                    <BarChart3 className="w-4 h-4 mr-2" />
+                    Análisis por Categoría
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950"
+                    onClick={() => analyzeProfits(salesPeriod)}
+                  >
+                    <TrendingUp className="w-4 h-4 mr-2" />
+                    Analizar ganancias
+                  </Button>
+                </div>
                 <Button variant="outline" onClick={() => setShowSalesAnalysis(false)}>
                   Cerrar
                 </Button>
@@ -1444,6 +1553,137 @@ export default function Reports() {
               </Dialog>
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      {/* Modal de Análisis de Ganancias */}
+      <Dialog open={showProfitAnalysis} onOpenChange={setShowProfitAnalysis}>
+        <DialogContent className="max-w-5xl w-[96vw] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-emerald-600" />
+              Análisis de Ganancias — Top 30 Productos
+              <span className="text-sm font-normal text-muted-foreground ml-1">
+                ({salesPeriod === 'all' ? 'Todas las ventas' : 'Mes actual'})
+              </span>
+            </DialogTitle>
+            <DialogDescription>
+              Productos ordenados por ganancia total generada. Incluye costo, precio promedio de venta y margen.
+            </DialogDescription>
+          </DialogHeader>
+
+          {analyzingProfits ? (
+            <div className="flex flex-col items-center justify-center py-16 gap-6">
+              <div className="relative">
+                <div className="w-20 h-20 rounded-full bg-emerald-100 dark:bg-emerald-900 flex items-center justify-center animate-pulse">
+                  <TrendingUp className="w-10 h-10 text-emerald-600 dark:text-emerald-400" />
+                </div>
+              </div>
+              <div className="space-y-2 text-center">
+                <h3 className="text-xl font-bold text-emerald-700 dark:text-emerald-400">Calculando ganancias...</h3>
+                <div className="flex items-center justify-center gap-1">
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }} />
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }} />
+                  <div className="w-2 h-2 bg-emerald-500 rounded-full animate-bounce" style={{ animationDelay: '0.4s' }} />
+                </div>
+              </div>
+            </div>
+          ) : profitAnalysisData.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 text-muted-foreground gap-3">
+              <Package className="w-12 h-12 opacity-30" />
+              <p className="text-sm">No hay datos de ventas para el período seleccionado.</p>
+            </div>
+          ) : (
+            <div className="mt-2 space-y-4">
+              {/* Totales rápidos */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <Card className="bg-emerald-50 dark:bg-emerald-950 border-emerald-200 dark:border-emerald-800">
+                  <CardContent className="p-4">
+                    <p className="text-xs text-emerald-700 dark:text-emerald-300 font-medium">Ganancia total top 30</p>
+                    <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 mt-1">
+                      {formatCOP(profitAnalysisData.reduce((s, r) => s + r.totalProfit, 0))}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-blue-50 dark:bg-blue-950 border-blue-200 dark:border-blue-800">
+                  <CardContent className="p-4">
+                    <p className="text-xs text-blue-700 dark:text-blue-300 font-medium">Ingresos top 30</p>
+                    <p className="text-xl font-bold text-blue-600 dark:text-blue-400 mt-1">
+                      {formatCOP(profitAnalysisData.reduce((s, r) => s + r.totalRevenue, 0))}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-purple-50 dark:bg-purple-950 border-purple-200 dark:border-purple-800">
+                  <CardContent className="p-4">
+                    <p className="text-xs text-purple-700 dark:text-purple-300 font-medium">Unidades vendidas</p>
+                    <p className="text-xl font-bold text-purple-600 dark:text-purple-400 mt-1">
+                      {profitAnalysisData.reduce((s, r) => s + r.quantity, 0).toLocaleString()}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card className="bg-orange-50 dark:bg-orange-950 border-orange-200 dark:border-orange-800">
+                  <CardContent className="p-4">
+                    <p className="text-xs text-orange-700 dark:text-orange-300 font-medium">Margen promedio</p>
+                    <p className="text-xl font-bold text-orange-600 dark:text-orange-400 mt-1">
+                      {(profitAnalysisData.reduce((s, r) => s + r.marginPct, 0) / profitAnalysisData.length).toFixed(1)}%
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Tabla */}
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="text-left p-3 font-semibold">#</th>
+                      <th className="text-left p-3 font-semibold">Producto</th>
+                      <th className="text-right p-3 font-semibold">Cant.</th>
+                      <th className="text-right p-3 font-semibold">Costo prom.</th>
+                      <th className="text-right p-3 font-semibold">Precio prom.</th>
+                      <th className="text-right p-3 font-semibold">Ganancia prom.</th>
+                      <th className="text-right p-3 font-semibold">Margen</th>
+                      <th className="text-right p-3 font-semibold">Ganancia total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {profitAnalysisData.map((row, idx) => (
+                      <tr
+                        key={`profit-row-${idx}`}
+                        className={`border-t hover:bg-muted/30 transition-colors ${idx === 0 ? 'bg-emerald-50/50 dark:bg-emerald-950/30' : ''}`}
+                      >
+                        <td className="p-3 text-muted-foreground font-mono text-xs">{idx + 1}</td>
+                        <td className="p-3">
+                          <div className="font-medium leading-tight">{row.name}</div>
+                          <div className="text-xs text-muted-foreground">{row.code} · {row.category}</div>
+                        </td>
+                        <td className="p-3 text-right font-semibold">{row.quantity.toLocaleString()}</td>
+                        <td className="p-3 text-right text-muted-foreground">{formatCOP(row.avgCost)}</td>
+                        <td className="p-3 text-right text-blue-600 dark:text-blue-400">{formatCOP(row.avgPrice)}</td>
+                        <td className="p-3 text-right text-emerald-600 dark:text-emerald-400 font-medium">{formatCOP(row.avgProfit)}</td>
+                        <td className="p-3 text-right">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${
+                            row.marginPct >= 40 ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300'
+                            : row.marginPct >= 20 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300'
+                            : 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300'
+                          }`}>
+                            {row.marginPct.toFixed(1)}%
+                          </span>
+                        </td>
+                        <td className="p-3 text-right font-bold text-emerald-700 dark:text-emerald-300">
+                          {formatCOP(row.totalProfit)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="flex justify-end pt-2">
+                <Button variant="outline" onClick={() => setShowProfitAnalysis(false)}>Cerrar</Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 

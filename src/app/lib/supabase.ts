@@ -1287,18 +1287,34 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
 
 export const getInvoices = async (): Promise<Invoice[]> => {
   const company = getCurrentCompany();
-  const { data, error } = await supabase
-    .from('invoices')
-    .select('*')
-    .eq('company', company)
-    .order('date', { ascending: false })
-    .limit(1000); // Límite explícito de 1000
+  const pageSize = 1000;
+  let allData: Invoice[] = [];
+  let page = 0;
+  let hasMore = true;
 
-  if (error) {
-    console.error('Error fetching invoices:', error);
-    return [];
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('company', company)
+      .order('date', { ascending: false })
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error) {
+      console.error('Error fetching invoices:', error);
+      break;
+    }
+
+    if (!data || data.length < pageSize) {
+      if (data) allData = allData.concat(data);
+      hasMore = false;
+    } else {
+      allData = allData.concat(data);
+      page++;
+    }
   }
-  return data || [];
+
+  return allData;
 };
 
 // Obtiene facturas de los últimos N meses (para módulos de análisis)
@@ -1362,10 +1378,10 @@ export const getPendingCreditInvoices = async (): Promise<Invoice[]> => {
   const company = getCurrentCompany();
   const { data, error } = await supabase
     .from('invoices')
-    .select('id, number, customer_name, customer_id, credit_balance, is_credit, status, date')
+    .select('id, number, customer_name, customer_document, customer_id, credit_balance, total, is_credit, status, date, due_date')
     .eq('company', company)
     .eq('is_credit', true)
-    .gt('credit_balance', 0);
+    .eq('status', 'pending');
   if (error) {
     console.error('Error fetching pending credit invoices:', error);
     return [];
@@ -1376,41 +1392,36 @@ export const getPendingCreditInvoices = async (): Promise<Invoice[]> => {
 // NUEVA FUNCIÓN: Obtiene facturas de un cliente específico directamente de la base de datos
 export const getInvoicesByCustomer = async (customerDocument: string, customerName?: string): Promise<Invoice[]> => {
   const company = getCurrentCompany();
-  // Normalizar documento: eliminar espacios en blanco
   const normalizedDocument = customerDocument.trim().replace(/\s+/g, '');
 
-  // Obtener todas las facturas a crédito de la empresa
-  const { data: allInvoices, error } = await supabase
+  // Buscar directamente por documento en la DB para evitar el límite de 1000 filas
+  const { data: byDoc, error: docError } = await supabase
     .from('invoices')
     .select('*')
     .eq('company', company)
     .eq('is_credit', true)
+    .eq('customer_document', normalizedDocument)
     .order('date', { ascending: false });
 
-  if (error) {
-    console.error('Error fetching customer invoices:', error);
-    return [];
+  if (docError) {
+    console.error('Error fetching customer invoices by document:', docError);
+  } else if (byDoc && byDoc.length > 0) {
+    return byDoc;
   }
 
-  if (!allInvoices) return [];
-
-  // Filtrar en el cliente comparando documentos sin espacios
-  const byDocument = allInvoices.filter(invoice => {
-    const invoiceDocument = (invoice.customer_document || '').trim().replace(/\s+/g, '');
-    return invoiceDocument === normalizedDocument;
-  });
-
-  // Si encuentra por documento, retornar
-  if (byDocument.length > 0) {
-    return byDocument;
-  }
-
-  // Si no encuentra por documento y tenemos nombre, buscar por nombre
+  // Fallback: buscar por nombre si no se encontró por documento
   if (customerName) {
-    const byName = allInvoices.filter(invoice =>
-      invoice.customer_name?.toLowerCase().includes(customerName.toLowerCase())
-    );
-    if (byName.length > 0) {
+    const { data: byName, error: nameError } = await supabase
+      .from('invoices')
+      .select('*')
+      .eq('company', company)
+      .eq('is_credit', true)
+      .ilike('customer_name', `%${customerName}%`)
+      .order('date', { ascending: false });
+
+    if (nameError) {
+      console.error('Error fetching customer invoices by name:', nameError);
+    } else if (byName && byName.length > 0) {
       return byName;
     }
   }
@@ -3252,19 +3263,22 @@ export const getCreditMetrics = async () => {
   const company = getCurrentCompany();
   const customers = await getCustomers();
   const invoices = await getInvoices();
-  const creditInvoices = invoices.filter(inv => inv.is_credit && inv.status !== 'cancelled');
-  
-  // Total de cartera
-  const totalPortfolio = creditInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
-  
+  const pendingCreditInvoices = invoices.filter(inv =>
+    inv.is_credit && inv.status === 'pending'
+  );
+
+  const getBalance = (inv: Invoice) => inv.credit_balance ?? inv.total;
+
+  // Total de cartera (solo facturas pendientes)
+  const totalPortfolio = pendingCreditInvoices.reduce((sum, inv) => sum + getBalance(inv), 0);
+
   // Cartera vencida
   const today = new Date();
-  const overdueInvoices = creditInvoices.filter(inv => {
+  const overdueInvoices = pendingCreditInvoices.filter(inv => {
     if (!inv.due_date) return false;
-    const dueDate = new Date(inv.due_date);
-    return dueDate < today && (inv.credit_balance || 0) > 0;
+    return new Date(inv.due_date) < today;
   });
-  const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+  const overdueAmount = overdueInvoices.reduce((sum, inv) => sum + getBalance(inv), 0);
   
   // Pagos de la semana
   const weekAgo = new Date();
@@ -3294,13 +3308,13 @@ export const getTopDebtors = async (limit: number = 5) => {
   const invoices = await getInvoices();
   
   const customersWithDebt = customers.map(customer => {
-    const customerInvoices = invoices.filter(inv => 
-      inv.customer_document === customer.document && 
-      inv.is_credit && 
-      (inv.credit_balance || 0) > 0
+    const customerInvoices = invoices.filter(inv =>
+      inv.customer_document === customer.document &&
+      inv.is_credit &&
+      inv.status === 'pending'
     );
-    
-    const totalDebt = customerInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+
+    const totalDebt = customerInvoices.reduce((sum, inv) => sum + (inv.credit_balance ?? inv.total), 0);
     
     // Calcular días de mora (mayor de todas las facturas)
     const today = new Date();
@@ -3331,27 +3345,26 @@ export const getTopDebtors = async (limit: number = 5) => {
 
 export const getAgingReport = async () => {
   const invoices = await getInvoices();
-  const creditInvoices = invoices.filter(inv => 
-    inv.is_credit && 
-    (inv.credit_balance || 0) > 0 &&
-    inv.status !== 'cancelled'
+  const creditInvoices = invoices.filter(inv =>
+    inv.is_credit &&
+    inv.status === 'pending'
   );
-  
+
   const today = new Date();
-  
+
   const ranges = {
     current: { label: '0-30 días', min: 0, max: 30, amount: 0, count: 0 },
     thirtyToSixty: { label: '31-60 días', min: 31, max: 60, amount: 0, count: 0 },
     sixtyToNinety: { label: '61-90 días', min: 61, max: 90, amount: 0, count: 0 },
     overNinety: { label: 'Más de 90 días', min: 91, max: Infinity, amount: 0, count: 0 }
   };
-  
+
   creditInvoices.forEach(inv => {
     if (!inv.due_date) return;
-    
+
     const dueDate = new Date(inv.due_date);
     const overdueDays = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-    const balance = inv.credit_balance || 0;
+    const balance = inv.credit_balance ?? inv.total;
     
     if (overdueDays >= 0 && overdueDays <= 30) {
       ranges.current.amount += balance;

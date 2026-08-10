@@ -259,10 +259,10 @@ export function CustomersNew() {
     const customerCreditInvoices = invoices.filter(
       inv => inv.customer_document === customerDocument &&
              inv.is_credit &&
-             inv.status !== 'cancelled'
+             inv.status === 'pending'
     );
 
-    return customerCreditInvoices.reduce((sum, inv) => sum + (inv.credit_balance || 0), 0);
+    return customerCreditInvoices.reduce((sum, inv) => sum + (inv.credit_balance ?? inv.total), 0);
   };
 
   const filteredCustomers = customers.filter(customer =>
