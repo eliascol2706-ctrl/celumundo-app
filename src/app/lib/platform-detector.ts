@@ -12,11 +12,11 @@ export const detectPlatform = (): Platform => {
 };
 
 /**
- * isPrintingAvailable — retorna true solo en Electron.
- * La impresión solo está disponible en la aplicación de escritorio.
+ * isPrintingAvailable — siempre true.
+ * En web se usa window.print() como fallback; en Electron se usa la impresora directa.
  */
 export const isPrintingAvailable = (): boolean => {
-  return detectPlatform() === 'electron';
+  return true;
 };
 
 // Verificar si la plataforma es Electron (impresoras físicas directas)

@@ -5,6 +5,7 @@ import { jsPDF } from 'jspdf';
 import { getPrinterConfig, printDirect } from './printer-config';
 import { formatCOP } from './currency';
 import { getCurrentCompany } from './supabase';
+import { generateQRSVG, getPublicInvoiceURL } from './qr-utils';
 
 interface PDFInvoiceOptions {
   invoice: any;
@@ -16,7 +17,8 @@ interface PDFInvoiceOptions {
 const generatePDFInvoiceHTML = (
   invoice: any,
   creditPayments: any[] = [],
-  products: any[] = []
+  products: any[] = [],
+  qrSvg = ''
 ): string => {
   const companyName = getCurrentCompany() === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
 
@@ -67,6 +69,27 @@ const generatePDFInvoiceHTML = (
     if (invoice.payment_transfer > 0) parts.push(`Transferencia: ${formatCOP(invoice.payment_transfer)}`);
     if (invoice.payment_other > 0) parts.push(`Otros: ${formatCOP(invoice.payment_other)}`);
     paymentText = parts.length > 0 ? parts.join(' &nbsp;|&nbsp; ') : invoice.payment_method;
+  }
+
+  // Garantía
+  let warrantySection = '';
+  if (invoice.warranty_enabled && invoice.warranty_months) {
+    const isElectro = invoice.warranty_category === 'electrodomesticos';
+    const catLabel = isElectro ? 'Electrodomésticos' : 'Dispositivos electrónicos';
+    const months = invoice.warranty_months;
+    const warrantyText = isElectro
+      ? 'GARANTÍA: Cubre únicamente defectos de fabricación y fallas técnicas no ocasionadas por el usuario. No cubre golpes, caídas, humedad, líquidos, daños eléctricos, fluctuaciones de voltaje, manipulación o reparación no autorizada, instalación incorrecta, desgaste normal ni uso inadecuado. Toda garantía está sujeta a diagnóstico técnico. No se efectuará ningún proceso de garantía sin la caja original del producto.'
+      : 'GARANTÍA: Cubre únicamente defectos de fabricación y fallas técnicas no ocasionadas por el usuario. No cubre golpes, caídas, humedad, líquidos, manipulación o reparación no autorizada, accesorios incompatibles, desgaste normal, uso inadecuado ni daños en el pin/puerto de carga del celular. Toda garantía está sujeta a diagnóstico técnico. No se efectuará ningún proceso de garantía sin la caja original del producto. La garantía no cubre pérdida de datos o información.';
+    warrantySection = `
+      <div style="margin-top:14px;border:1.5px solid #1a1a1a;border-radius:3px;overflow:hidden;">
+        <div style="background:#1a1a1a;color:#fff;padding:6px 10px;font-size:9pt;font-weight:700;letter-spacing:0.4px;display:flex;justify-content:space-between;align-items:center;">
+          <span>GARANTÍA INCLUIDA &mdash; ${catLabel}</span>
+          <span style="font-size:11pt;font-weight:800;">${months} ${months === 1 ? 'MES' : 'MESES'}</span>
+        </div>
+        <div style="padding:8px 12px;background:#f9f9f9;">
+          <div style="font-size:7.5pt;color:#1a1a1a;line-height:1.5;">${warrantyText}</div>
+        </div>
+      </div>`;
   }
 
   // Abonos (crédito)
@@ -163,7 +186,8 @@ const generatePDFInvoiceHTML = (
         <td style="width:50%;vertical-align:top;padding-right:16px;">
           <div style="font-size:7.5pt;color:#666;text-transform:uppercase;font-weight:700;margin-bottom:3px;">Cliente</div>
           <div style="font-size:9.5pt;font-weight:600;">${invoice.customer_name || 'Consumidor Final'}</div>
-          ${invoice.customer_document ? `<div style="font-size:8.5pt;color:#444;">Doc: ${invoice.customer_document}</div>` : ''}
+          <div style="font-size:8.5pt;color:#444;">Cédula: ${invoice.customer_document || 'N/A'}</div>
+          <div style="font-size:8.5pt;color:#444;">Teléfono: ${invoice.customer_phone || 'N/A'}</div>
         </td>
         <td style="width:50%;vertical-align:top;">
           <div style="font-size:7.5pt;color:#666;text-transform:uppercase;font-weight:700;margin-bottom:3px;">Información</div>
@@ -215,11 +239,23 @@ const generatePDFInvoiceHTML = (
     <strong>Método de pago:</strong> ${paymentText}
   </div>` : ''}
 
+  <!-- GARANTÍA -->
+  ${warrantySection}
+
   <!-- SECCIÓN CRÉDITO -->
   ${creditSection}
 
+  <!-- QR CONSULTA ONLINE -->
+  ${qrSvg ? `
+  <div style="margin-top:14px;text-align:center;">
+    <div style="display:inline-block;line-height:0;border:1.5px solid #1a1a1a;padding:4px;background:#fff;border-radius:3px;">
+      ${qrSvg}
+    </div>
+    <div style="margin-top:5px;font-size:8.5pt;color:#444;font-weight:600;">Escanea tu factura</div>
+  </div>` : ''}
+
   <!-- FIRMA -->
-  <div style="margin-top:30px;">
+  <div style="margin-top:24px;">
     <table style="width:100%;">
       <tr>
         <td style="width:45%;text-align:center;vertical-align:bottom;padding-top:30px;border-top:1px solid #1a1a1a;font-size:8pt;color:#555;">
@@ -234,8 +270,8 @@ const generatePDFInvoiceHTML = (
   </div>
 
   <!-- PIE -->
-  <div style="margin-top:14px;border-top:1px solid #ddd;padding-top:7px;text-align:center;font-size:7.5pt;color:#888;">
-    ${companyName} &nbsp;·&nbsp; Gracias por su compra &nbsp;·&nbsp; ${new Date().toLocaleDateString('es-ES')}
+  <div style="margin-top:14px;border-top:1px solid #ddd;padding-top:8px;text-align:center;font-size:7.5pt;color:#888;">
+    <span style="font-weight:700;color:#555;">${companyName}</span> &nbsp;·&nbsp; Gracias por su compra &nbsp;·&nbsp; ${new Date().toLocaleDateString('es-ES')}
   </div>
 
 </body>
@@ -246,18 +282,21 @@ const generatePDFInvoiceHTML = (
 export const printPDFInvoice = async (options: PDFInvoiceOptions): Promise<boolean> => {
   try {
     const config = await getPrinterConfig();
+    const isElectron = !!(window as any).electron?.isElectron;
 
-    if (!config.pdf) {
+    if (isElectron && !config.pdf) {
       throw new Error('No se ha configurado una impresora PDF. Ve a Configuración para configurarla.');
     }
 
+    const qrSvg = await generateQRSVG(getPublicInvoiceURL(options.invoice.number), 180);
     const html = generatePDFInvoiceHTML(
       options.invoice,
       options.creditPayments || [],
-      options.products || []
+      options.products || [],
+      qrSvg
     );
 
-    const success = await printDirect(config.pdf, html, 'pdf');
+    const success = await printDirect(config.pdf || 'web', html, 'pdf');
 
     if (!success) {
       throw new Error('Error al enviar el documento a la impresora');
@@ -272,10 +311,12 @@ export const printPDFInvoice = async (options: PDFInvoiceOptions): Promise<boole
 
 // Generar Blob PDF descargable usando html2canvas + jsPDF
 export const generatePDFBlob = async (options: PDFInvoiceOptions): Promise<Blob> => {
+  const qrSvg = await generateQRSVG(getPublicInvoiceURL(options.invoice.number), 180);
   const html = generatePDFInvoiceHTML(
     options.invoice,
     options.creditPayments || [],
-    options.products || []
+    options.products || [],
+    qrSvg
   );
 
   // Renderizar el HTML en un iframe oculto para capturarlo
@@ -326,11 +367,13 @@ export const generatePDFBlob = async (options: PDFInvoiceOptions): Promise<Blob>
 };
 
 // Descargar factura PDF en el navegador (sin impresora)
-export const downloadPDFInvoice = (options: PDFInvoiceOptions): void => {
+export const downloadPDFInvoice = async (options: PDFInvoiceOptions): Promise<void> => {
+  const qrSvg = await generateQRSVG(getPublicInvoiceURL(options.invoice.number), 180);
   const html = generatePDFInvoiceHTML(
     options.invoice,
     options.creditPayments || [],
-    options.products || []
+    options.products || [],
+    qrSvg
   );
 
   const iframe = document.createElement('iframe');

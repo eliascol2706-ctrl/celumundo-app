@@ -14,6 +14,9 @@ import {
   getWarranties,
   getCreditNotes,
   getDailyClosures,
+  updateInvoice,
+  addCreditHistory,
+  getCurrentUser,
   type CreditPayment,
   type Return,
   type Exchange,
@@ -49,7 +52,9 @@ import {
   ArrowDownRight,
   Package,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Pencil,
+  History,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -158,6 +163,13 @@ export function FinancialManagement() {
 
   // Estado para modal de desglose de costos de productos
   const [isCostBreakdownOpen, setIsCostBreakdownOpen] = useState(false);
+
+  // Estado para modificar valor de deuda
+  const [editDebtOpen, setEditDebtOpen] = useState(false);
+  const [editDebtInvoice, setEditDebtInvoice] = useState<Invoice | null>(null);
+  const [editDebtValue, setEditDebtValue] = useState('');
+  const [editDebtReason, setEditDebtReason] = useState('');
+  const [isEditingDebt, setIsEditingDebt] = useState(false);
 
   // Filtros para modales
   const [searchTerm, setSearchTerm] = useState('');
@@ -660,6 +672,70 @@ export function FinancialManagement() {
     setActiveModal(null);
     setSearchTerm('');
     setDateFilter('');
+  };
+
+  const openEditDebt = (invoice: Invoice) => {
+    setEditDebtInvoice(invoice);
+    setEditDebtValue(String(invoice.total));
+    setEditDebtReason('');
+    setEditDebtOpen(true);
+  };
+
+  const handleSaveDebtValue = async () => {
+    if (!editDebtInvoice) return;
+    const newTotal = parseFloat(editDebtValue.replace(/[^0-9.]/g, ''));
+    if (isNaN(newTotal) || newTotal < 0) {
+      toast.error('Ingresa un valor válido');
+      return;
+    }
+    if (newTotal === editDebtInvoice.total) {
+      toast.error('El valor es igual al actual');
+      return;
+    }
+    setIsEditingDebt(true);
+    try {
+      const oldTotal = editDebtInvoice.total;
+      const alreadyPaid = oldTotal - (editDebtInvoice.credit_balance ?? oldTotal);
+      const newCreditBalance = Math.max(0, newTotal - alreadyPaid);
+
+      const updated = await updateInvoice(editDebtInvoice.id, {
+        total: newTotal,
+        credit_balance: newCreditBalance,
+        subtotal: newTotal,
+      });
+
+      if (!updated) {
+        toast.error('Error al actualizar la factura');
+        return;
+      }
+
+      // Registrar en historial de crédito
+      if (editDebtInvoice.customer_document) {
+        await addCreditHistory({
+          customer_document: editDebtInvoice.customer_document,
+          event_type: 'note',
+          description: `Valor de factura ${editDebtInvoice.number} modificado: ${formatCOP(oldTotal)} → ${formatCOP(newTotal)}${editDebtReason ? ` | Motivo: ${editDebtReason}` : ''}`,
+          amount: newTotal,
+          reference_id: editDebtInvoice.id,
+          registered_by: getCurrentUser()?.username || 'Admin',
+        });
+      }
+
+      // Actualizar en la lista local
+      setInvoices(prev => prev.map(inv =>
+        inv.id === editDebtInvoice.id
+          ? { ...inv, total: newTotal, credit_balance: newCreditBalance, subtotal: newTotal }
+          : inv
+      ));
+
+      toast.success(`Factura ${editDebtInvoice.number} actualizada a ${formatCOP(newTotal)}`);
+      setEditDebtOpen(false);
+    } catch (err) {
+      console.error('Error editing debt:', err);
+      toast.error('Error al modificar el valor');
+    } finally {
+      setIsEditingDebt(false);
+    }
   };
 
   const viewInvoice = (invoice: Invoice) => {
@@ -1983,8 +2059,8 @@ export function FinancialManagement() {
                       fill="#8884d8"
                       dataKey="value"
                     >
-                      {chartData.paymentMethods.map((entry) => (
-                        <Cell key={entry.key} fill={COLORS[chartData.paymentMethods.indexOf(entry) % COLORS.length]} />
+                      {chartData.paymentMethods.map((entry, index) => (
+                        <Cell key={`cell-pm-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
                     <Tooltip formatter={(value: any) => formatCOP(value)} />
@@ -2441,7 +2517,7 @@ export function FinancialManagement() {
                         )}
                       </div>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex gap-2 flex-wrap">
                       <Button variant="outline" size="sm" onClick={() => viewInvoice(invoice)}>
                         <Eye className="w-4 h-4 mr-2" />
                         Ver
@@ -2450,6 +2526,16 @@ export function FinancialManagement() {
                         <Printer className="w-4 h-4 mr-2" />
                         Imprimir
                       </Button>
+                      {invoice.status === 'pending' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => openEditDebt(invoice)}
+                          className="border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30">
+                          <Pencil className="w-4 h-4 mr-2" />
+                          Modificar valor
+                        </Button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3343,6 +3429,97 @@ export function FinancialManagement() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDailyBreakdownOpen(false)}>
               Cerrar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Dialog: Modificar valor de deuda ───────────────────────────────── */}
+      <Dialog open={editDebtOpen} onOpenChange={open => { if (!isEditingDebt) setEditDebtOpen(open); }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="w-4 h-4 text-amber-500" />
+              Modificar valor de factura
+            </DialogTitle>
+            {editDebtInvoice && (
+              <DialogDescription>
+                Factura <strong>{editDebtInvoice.number}</strong> — {editDebtInvoice.customer_name || 'Sin nombre'}
+              </DialogDescription>
+            )}
+          </DialogHeader>
+
+          {editDebtInvoice && (
+            <div className="space-y-4 py-1">
+              {/* Valores actuales */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="px-3 py-2.5 bg-zinc-50 dark:bg-zinc-800 rounded-lg">
+                  <p className="text-xs text-zinc-400 mb-0.5">Total actual</p>
+                  <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{formatCOP(editDebtInvoice.total)}</p>
+                </div>
+                <div className="px-3 py-2.5 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-800">
+                  <p className="text-xs text-amber-500 mb-0.5">Saldo pendiente</p>
+                  <p className="text-sm font-semibold text-amber-700 dark:text-amber-400">{formatCOP(editDebtInvoice.credit_balance ?? editDebtInvoice.total)}</p>
+                </div>
+              </div>
+
+              {/* Nuevo valor */}
+              <div>
+                <Label className="text-xs text-zinc-500 mb-1.5 block">Nuevo valor total (COP)</Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-400 pointer-events-none">$</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="1000"
+                    className="pl-6 h-10 text-sm"
+                    value={editDebtValue}
+                    onChange={e => setEditDebtValue(e.target.value)}
+                    placeholder="Nuevo valor"
+                    autoFocus
+                  />
+                </div>
+                {editDebtValue && !isNaN(parseFloat(editDebtValue)) && parseFloat(editDebtValue) !== editDebtInvoice.total && (
+                  <div className="mt-1.5 flex items-center gap-1.5 text-xs">
+                    <History className="w-3 h-3 text-zinc-400" />
+                    <span className="text-zinc-400">
+                      Cambio: {formatCOP(editDebtInvoice.total)} → <span className={parseFloat(editDebtValue) > editDebtInvoice.total ? 'text-amber-600' : 'text-emerald-600'}>{formatCOP(parseFloat(editDebtValue))}</span>
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Motivo */}
+              <div>
+                <Label className="text-xs text-zinc-500 mb-1.5 block">Motivo del cambio (opcional)</Label>
+                <Input
+                  className="h-9 text-sm"
+                  placeholder="Ej: Ajuste por acuerdo con cliente"
+                  value={editDebtReason}
+                  onChange={e => setEditDebtReason(e.target.value)}
+                />
+              </div>
+
+              <div className="p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <p className="text-xs text-blue-700 dark:text-blue-400">
+                  El cambio se registrará en el historial de crédito del cliente.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditDebtOpen(false)} disabled={isEditingDebt}>
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveDebtValue}
+              disabled={isEditingDebt || !editDebtValue}
+              className="bg-amber-600 hover:bg-amber-700 text-white">
+              {isEditingDebt
+                ? <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Guardando...</>
+                : <><Pencil className="w-4 h-4 mr-2" />Guardar cambio</>
+              }
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -251,14 +251,15 @@ export function InvoicesMenu() {
 
   const applyClientPaymentFilter = (data: any[], filter: string) => {
     if (filter === 'all') return data;
+    const isMixed = (p: string) => p === 'mixed' || p === 'mixto' || p.includes(':') || p.includes(',');
     return data.filter(inv => {
       const p = (inv.payment_method || '').toLowerCase();
-      if (filter === 'mixto') return p.includes(':') || p.includes(',');
-      if (filter === 'efectivo') return p.includes('efectivo') && !p.includes(':') && !p.includes(',');
-      if (filter === 'transferencia') return p.includes('transferencia') && !p.includes(':') && !p.includes(',');
-      if (filter === 'nequi') return p.includes('nequi') && !p.includes(':') && !p.includes(',');
-      if (filter === 'daviplata') return p.includes('daviplata') && !p.includes(':') && !p.includes(',');
-      if (filter === 'otros') return p.includes('otros') && !p.includes(':') && !p.includes(',');
+      if (filter === 'mixto') return isMixed(p);
+      if (filter === 'efectivo') return p.includes('efectivo') && !isMixed(p);
+      if (filter === 'transferencia') return p.includes('transferencia') && !isMixed(p);
+      if (filter === 'nequi') return p.includes('nequi') && !isMixed(p);
+      if (filter === 'daviplata') return p.includes('daviplata') && !isMixed(p);
+      if (filter === 'otros') return p.includes('otros') && !isMixed(p);
       return true;
     });
   };
@@ -592,16 +593,7 @@ export function InvoicesMenu() {
 
     // Filtrar por método de pago
     if (paymentFilter !== 'all') {
-      filtered = filtered.filter(inv => {
-        const paymentStr = (inv.payment_method || '').toLowerCase();
-        if (paymentFilter === 'mixto') return paymentStr.includes(':') || paymentStr.includes(',');
-        if (paymentFilter === 'efectivo') return paymentStr.includes('efectivo') && !paymentStr.includes(':') && !paymentStr.includes(',');
-        if (paymentFilter === 'transferencia') return paymentStr.includes('transferencia') && !paymentStr.includes(':') && !paymentStr.includes(',');
-        if (paymentFilter === 'nequi') return paymentStr.includes('nequi') && !paymentStr.includes(':') && !paymentStr.includes(',');
-        if (paymentFilter === 'daviplata') return paymentStr.includes('daviplata') && !paymentStr.includes(':') && !paymentStr.includes(',');
-        if (paymentFilter === 'otros') return paymentStr.includes('otros') && !paymentStr.includes(':') && !paymentStr.includes(',');
-        return true;
-      });
+      filtered = applyClientPaymentFilter(filtered, paymentFilter);
     }
 
     // Filtrar por estado
@@ -642,54 +634,21 @@ export function InvoicesMenu() {
     return Math.ceil(filtered.length / itemsPerPage);
   };
 
-  const handleNavigateToRegular = async () => {
+  const handleNavigateToNew = async () => {
     setIsValidating(true);
     try {
       const validation = await canCreateInvoice();
-      
       if (!validation.canCreate) {
-        const toastMessage = validation.message || 'No se puede crear factura en este momento';
-        const toastDuration = validation.requiresMonthlyClose ? 10000 : 8000;
-        
-        toast.error(toastMessage, {
-          duration: toastDuration,
+        toast.error(validation.message || 'No se puede crear factura en este momento', {
+          duration: validation.requiresMonthlyClose ? 10000 : 8000,
           action: {
             label: validation.requiresMonthlyClose ? '🔒 Realizar Cierre Mensual' : 'Ir a Cierres',
-            onClick: () => navigate('/sistema/cierres')
-          }
+            onClick: () => navigate('/sistema/cierres'),
+          },
         });
         return;
       }
-
-      navigate('/sistema/facturacion/regular');
-    } catch (error) {
-      console.error('Error validating invoice creation:', error);
-      toast.error('Error al validar permisos de facturación');
-    } finally {
-      setIsValidating(false);
-    }
-  };
-
-  const handleNavigateToCredit = async () => {
-    setIsValidating(true);
-    try {
-      const validation = await canCreateInvoice();
-      
-      if (!validation.canCreate) {
-        const toastMessage = validation.message || 'No se puede crear factura en este momento';
-        const toastDuration = validation.requiresMonthlyClose ? 10000 : 8000;
-        
-        toast.error(toastMessage, {
-          duration: toastDuration,
-          action: {
-            label: validation.requiresMonthlyClose ? '🔒 Realizar Cierre Mensual' : 'Ir a Cierres',
-            onClick: () => navigate('/sistema/cierres')
-          }
-        });
-        return;
-      }
-
-      navigate('/sistema/facturacion/credito');
+      navigate('/sistema/facturacion/nueva');
     } catch (error) {
       console.error('Error validating invoice creation:', error);
       toast.error('Error al validar permisos de facturación');
@@ -1189,8 +1148,7 @@ export function InvoicesMenu() {
 
       setEditingInvoice({ ...editingInvoice, items: updatedItems, subtotal, tax, total });
 
-      const invoices = await getInvoices();
-      const pending = invoices.filter(inv => inv.status === 'pending_confirmation');
+      const pending = await getPendingConfirmationInvoices();
       setPendingInvoices(pending);
 
       toast.success('Unidad restada y stock restaurado');
@@ -1489,13 +1447,13 @@ export function InvoicesMenu() {
         <div className="p-6 flex items-center justify-between">
           <div>
             <h1 className="text-3xl font-semibold text-zinc-900 dark:text-zinc-100">Facturación</h1>
-            <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Seleccione el tipo de factura a crear</p>
+            <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">Gestión de facturas y cartera</p>
           </div>
           
           {/* Botones de creación de facturas */}
           <div className="flex items-center gap-3">
             <Button
-              onClick={handleNavigateToRegular}
+              onClick={handleNavigateToNew}
               disabled={isValidating}
               className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white"
             >
@@ -1507,25 +1465,7 @@ export function InvoicesMenu() {
               ) : (
                 <>
                   <Receipt className="w-4 h-4 mr-2" />
-                  Factura Regular
-                </>
-              )}
-            </Button>
-
-            <Button
-              onClick={handleNavigateToCredit}
-              disabled={isValidating}
-              className="bg-blue-600 hover:bg-blue-700 dark:bg-blue-700 dark:hover:bg-blue-600 text-white"
-            >
-              {isValidating ? (
-                <>
-                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                  Validando...
-                </>
-              ) : (
-                <>
-                  <CreditCard className="w-4 h-4 mr-2" />
-                  Factura a Crédito
+                  Nueva Factura
                 </>
               )}
             </Button>
@@ -2025,6 +1965,7 @@ export function InvoicesMenu() {
                       <thead className="bg-zinc-50 dark:bg-zinc-900">
                         <tr>
                           <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-3 sm:px-4 py-2.5 sm:py-3 whitespace-nowrap">Factura</th>
+                          <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-3 sm:px-4 py-2.5 sm:py-3 hidden xl:table-cell whitespace-nowrap">Atendido por</th>
                           <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-3 sm:px-4 py-2.5 sm:py-3 whitespace-nowrap">Cliente</th>
                           <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-3 sm:px-4 py-2.5 sm:py-3 hidden lg:table-cell whitespace-nowrap">Tipo</th>
                           <th className="text-left text-xs font-semibold text-zinc-600 dark:text-zinc-400 px-3 sm:px-4 py-2.5 sm:py-3 whitespace-nowrap">Total</th>
@@ -2043,6 +1984,11 @@ export function InvoicesMenu() {
                             <td className="px-3 sm:px-4 py-2.5 sm:py-3 whitespace-nowrap">
                               <span className="text-xs sm:text-sm font-mono font-semibold text-zinc-900 dark:text-zinc-100">
                                 #{invoice.number}
+                              </span>
+                            </td>
+                            <td className="px-3 sm:px-4 py-2.5 sm:py-3 hidden xl:table-cell whitespace-nowrap">
+                              <span className="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300">
+                                {invoice.attended_by || <span className="text-zinc-400 dark:text-zinc-600">—</span>}
                               </span>
                             </td>
                             <td className="px-3 sm:px-4 py-2.5 sm:py-3 min-w-[120px] max-w-[180px]">
@@ -2637,26 +2583,50 @@ export function InvoicesMenu() {
                 )}
               </div>
 
-              <div className="border-t border-b border-zinc-200 dark:border-zinc-800 py-3 sm:py-4">
+              <div className="border-t border-b border-zinc-200 dark:border-zinc-800 py-3 sm:py-4 space-y-3 sm:space-y-4">
+                {/* Cliente + Total */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                   <div>
-                    <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase mb-1">Cliente</div>
-                    <div className="text-sm sm:text-base font-medium text-zinc-900 dark:text-zinc-100 break-words">
+                    <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1.5">Cliente</div>
+                    <div className="text-sm sm:text-base font-semibold text-zinc-900 dark:text-zinc-100 break-words">
                       {selectedInvoice.customer_name || 'Sin cliente'}
                     </div>
                     {selectedInvoice.customer_document && (
-                      <div className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400 mt-0.5">
-                        {selectedInvoice.customer_document}
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className="text-[10px] font-semibold uppercase text-zinc-400 dark:text-zinc-500">Doc.</span>
+                        <span className="text-xs text-zinc-700 dark:text-zinc-300 font-mono">{selectedInvoice.customer_document}</span>
+                      </div>
+                    )}
+                    {selectedInvoice.customer_phone && (
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className="text-[10px] font-semibold uppercase text-zinc-400 dark:text-zinc-500">Tel.</span>
+                        <span className="text-xs text-zinc-700 dark:text-zinc-300">{selectedInvoice.customer_phone}</span>
+                      </div>
+                    )}
+                    {selectedInvoice.customer_address && (
+                      <div className="flex items-start gap-1.5 mt-1">
+                        <span className="text-[10px] font-semibold uppercase text-zinc-400 dark:text-zinc-500 mt-0.5 flex-shrink-0">Dir.</span>
+                        <span className="text-xs text-zinc-700 dark:text-zinc-300 break-words">{selectedInvoice.customer_address}</span>
                       </div>
                     )}
                   </div>
                   <div className="sm:text-right">
-                    <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase mb-1">Total</div>
+                    <div className="text-xs text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1.5">Total</div>
                     <div className="text-xl sm:text-2xl font-bold text-emerald-600 dark:text-emerald-400">
                       {formatCOP(selectedInvoice.total)}
                     </div>
                   </div>
                 </div>
+
+                {/* Atendido por */}
+                {selectedInvoice.attended_by && (
+                  <div className="flex items-center gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800/60">
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-zinc-400 dark:text-zinc-500">Atendido por</span>
+                    <Badge variant="outline" className="bg-zinc-50 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700 text-[10px] sm:text-xs font-medium px-2 py-0.5">
+                      {selectedInvoice.attended_by}
+                    </Badge>
+                  </div>
+                )}
               </div>
 
               {selectedInvoice.items && selectedInvoice.items.length > 0 && (

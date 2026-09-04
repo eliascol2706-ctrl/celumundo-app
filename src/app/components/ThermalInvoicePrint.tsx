@@ -473,6 +473,59 @@ export function ThermalInvoicePrint({ invoice, creditPayments = [], products = [
           </div>
         )}
 
+        {/* ── GARANTÍA ── */}
+        {invoice.warranty_enabled && invoice.warranty_months && (
+          <div style={{
+            background: '#fff8e1',
+            border: '2px solid #000',
+            padding: '2.5mm 3mm',
+            marginBottom: '2.5mm',
+            textAlign: 'center',
+          }}>
+            <div style={{
+              fontSize: '12px',
+              fontWeight: 800,
+              letterSpacing: '0.6px',
+              marginBottom: '2mm',
+              color: '#000',
+            }}>
+              🛡 GARANTÍA INCLUIDA
+            </div>
+
+            <div style={{
+              fontSize: '14px',
+              fontWeight: 800,
+              letterSpacing: '0.2px',
+              marginBottom: '1mm',
+              color: '#000',
+            }}>
+              {invoice.warranty_months} {invoice.warranty_months === 1 ? 'MES' : 'MESES'}
+            </div>
+
+            <div style={{
+              fontSize: '10px',
+              fontWeight: 500,
+              color: '#333',
+              marginBottom: '1.5mm',
+            }}>
+              {invoice.warranty_category === 'electrodomesticos' ? 'Electrodomésticos' : 'Dispositivos electrónicos'}
+            </div>
+
+            <div style={divider} />
+
+            <div style={{
+              fontSize: '10px',
+              fontWeight: 500,
+              color: '#555',
+              lineHeight: 1.5,
+              marginTop: '1.5mm',
+            }}>
+              Garantía válida a partir de la fecha de compra.{'\n'}
+              Conserve esta factura para hacer válida la garantía.
+            </div>
+          </div>
+        )}
+
         {/* ── FOOTER ── */}
         <div style={divider} />
 

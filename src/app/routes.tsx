@@ -12,8 +12,7 @@ import { ProductConsultation } from './pages/ProductConsultation';
 // Lazy loading para componentes pesados
 const Products = React.lazy(() => import('./pages/Products').then(m => ({ default: m.Products })));
 const InvoicesMenu = React.lazy(() => import('./pages/InvoicesMenu').then(m => ({ default: m.InvoicesMenu })));
-const RegularInvoice = React.lazy(() => import('./pages/RegularInvoice').then(m => ({ default: m.RegularInvoice })));
-const CreditInvoice = React.lazy(() => import('./pages/CreditInvoice').then(m => ({ default: m.CreditInvoice })));
+const NewInvoice = React.lazy(() => import('./pages/NewInvoice').then(m => ({ default: m.NewInvoice })));
 const FinancialManagement = React.lazy(() => import('./pages/FinancialManagement').then(m => ({ default: m.FinancialManagement })));
 const FinancialClosures = React.lazy(() => import('./pages/FinancialClosures').then(m => ({ default: m.FinancialClosures })));
 const Movements = React.lazy(() => import('./pages/Movements').then(m => ({ default: m.default || m.Movements })));
@@ -34,6 +33,7 @@ const PublicCatalog = React.lazy(() => import('./pages/PublicCatalog').then(m =>
 const CustomerTracking = React.lazy(() => import('./pages/CustomerTracking').then(m => ({ default: m.CustomerTracking })));
 const SupplierDebts = React.lazy(() => import('./pages/SupplierDebts').then(m => ({ default: m.default || m.SupplierDebts })));
 const Suppliers = React.lazy(() => import('./pages/Suppliers').then(m => ({ default: m.Suppliers })));
+const PublicInvoice = React.lazy(() => import('./pages/PublicInvoice'));
 
 // Componente Suspense Wrapper
 function SuspenseWrapper({ children }: { children: React.ReactNode }) {
@@ -103,6 +103,14 @@ export const router = createBrowserRouter([
     Component: PublicCatalog,
   },
   {
+    path: '/factura/:number',
+    element: (
+      <SuspenseWrapper>
+        <PublicInvoice />
+      </SuspenseWrapper>
+    ),
+  },
+  {
     path: '/sistema',
     Component: Layout,
     children: [
@@ -155,21 +163,11 @@ export const router = createBrowserRouter([
         )
       },
       {
-        path: 'facturacion/regular',
+        path: 'facturacion/nueva',
         element: (
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
             <SuspenseWrapper>
-              <RegularInvoice />
-            </SuspenseWrapper>
-          </ProtectedRoute>
-        )
-      },
-      {
-        path: 'facturacion/credito',
-        element: (
-          <ProtectedRoute allowedRoles={['admin', 'seller']}>
-            <SuspenseWrapper>
-              <CreditInvoice />
+              <NewInvoice />
             </SuspenseWrapper>
           </ProtectedRoute>
         )

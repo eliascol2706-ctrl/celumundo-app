@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
-import { FileText, Plus, DollarSign, Calendar, AlertCircle, CheckCircle, XCircle, Clock, History, Search, Building2 } from 'lucide-react';
+import { FileText, Plus, DollarSign, Calendar, AlertCircle, CheckCircle, XCircle, Clock, History, Search, Building2, Pencil, FileDown } from 'lucide-react';
+import { jsPDF } from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
@@ -51,9 +53,14 @@ export default function SupplierDebts() {
   const [payments, setPayments] = useState<DebtPayment[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('all');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
-  // Modal editar proveedor de deuda
+  // Modal editar valor de deuda
+  const [showEditAmountModal, setShowEditAmountModal] = useState(false);
+  const [editAmountDebt, setEditAmountDebt] = useState<SupplierDebt | null>(null);
+  const [editAmountValue, setEditAmountValue] = useState(0);
+
   const [showEditSupplierModal, setShowEditSupplierModal] = useState(false);
   const [editSupplierDebt, setEditSupplierDebt] = useState<SupplierDebt | null>(null);
   const [editSupplierId, setEditSupplierId] = useState('');
@@ -197,6 +204,37 @@ export default function SupplierDebts() {
     }
   };
 
+  const handleSaveEditAmount = async () => {
+    if (!editAmountDebt) return;
+    if (editAmountValue <= 0) {
+      toast.error('El monto debe ser mayor a 0');
+      return;
+    }
+    if (editAmountValue < editAmountDebt.paid_amount) {
+      toast.error('El monto no puede ser menor al monto ya pagado');
+      return;
+    }
+    try {
+      const newPendingAmount = editAmountValue - editAmountDebt.paid_amount;
+      const newStatus = newPendingAmount <= 0 ? 'paid' : editAmountDebt.status;
+      const { error } = await supabase.from('supplier_debts')
+        .update({
+          total_amount: editAmountValue,
+          pending_amount: Math.max(0, newPendingAmount),
+          status: newStatus,
+        })
+        .eq('id', editAmountDebt.id);
+      if (error) throw error;
+      toast.success('Valor actualizado exitosamente');
+      setShowEditAmountModal(false);
+      setEditAmountDebt(null);
+      loadData();
+    } catch (error) {
+      console.error('Error updating amount:', error);
+      toast.error('Error al actualizar el valor');
+    }
+  };
+
   const handleAddPayment = async () => {
     if (!selectedDebt) return;
 
@@ -298,16 +336,157 @@ export default function SupplierDebts() {
     }
   };
 
-  const filteredDebts = debts.filter(debt =>
-    debt.invoice_reference.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    debt.supplier_name.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredDebts = debts.filter(debt => {
+    const matchesSearch =
+      debt.invoice_reference.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      debt.supplier_name.toLowerCase().includes(searchTerm.toLowerCase());
+    const matchesSupplier = supplierFilter === 'all' || debt.supplier_id === supplierFilter;
+    return matchesSearch && matchesSupplier;
+  });
 
   // Calcular estadísticas
   const activeDebts = debts.filter(d => d.status === 'active' || d.status === 'overdue');
   const totalPending = activeDebts.reduce((sum, d) => sum + d.pending_amount, 0);
   const totalOverdue = debts.filter(d => d.status === 'overdue').reduce((sum, d) => sum + d.pending_amount, 0);
   const totalPaid = debts.reduce((sum, d) => sum + d.paid_amount, 0);
+
+  const generateDebtReport = () => {
+    const activeDebtsForReport = debts
+      .filter(d => d.status === 'active' || d.status === 'overdue')
+      .sort((a, b) => {
+        const nameComp = a.supplier_name.localeCompare(b.supplier_name, 'es');
+        if (nameComp !== 0) return nameComp;
+        const dateComp = a.invoice_date.localeCompare(b.invoice_date);
+        if (dateComp !== 0) return dateComp;
+        return b.total_amount - a.total_amount;
+      });
+
+    const totalGeneral = activeDebtsForReport.reduce((s, d) => s + d.pending_amount, 0);
+    const totalVencidas = activeDebtsForReport.filter(d => d.status === 'overdue').reduce((s, d) => s + d.pending_amount, 0);
+    const totalPagadoGeneral = debts.reduce((s, d) => s + d.paid_amount, 0);
+
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const now = new Date().toLocaleString('es-CO', {
+      timeZone: 'America/Bogota',
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit',
+    });
+
+    // Encabezado
+    doc.setFillColor(37, 99, 235);
+    doc.rect(0, 0, pageW, 28, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(18);
+    doc.setFont('helvetica', 'bold');
+    doc.text('CELUMUNDO VIP', 14, 11);
+    doc.setFontSize(10);
+    doc.setFont('helvetica', 'normal');
+    doc.text('Reporte de Deudas a Proveedores', 14, 18);
+    doc.setFontSize(8);
+    doc.text(`Generado: ${now}`, 14, 24);
+    doc.setFontSize(8);
+    doc.text(`Facturas activas: ${activeDebtsForReport.length}`, pageW - 14, 24, { align: 'right' });
+
+    // Resumen
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(9);
+    doc.setFont('helvetica', 'bold');
+    doc.text('RESUMEN GENERAL', 14, 36);
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.3);
+    doc.line(14, 37.5, pageW - 14, 37.5);
+
+    const summaryY = 43;
+    const col = (pageW - 28) / 3;
+    const summaryItems = [
+      { label: 'Total Deuda Pendiente', value: formatCOP(totalGeneral) },
+      { label: 'Total Atrasadas (Vencidas)', value: formatCOP(totalVencidas) },
+      { label: 'Total Pagado (Histórico)', value: formatCOP(totalPagadoGeneral) },
+    ];
+    summaryItems.forEach((item, i) => {
+      const x = 14 + col * i;
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(80, 80, 80);
+      doc.text(item.label, x, summaryY);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(11);
+      doc.setTextColor(0, 0, 0);
+      doc.text(item.value, x, summaryY + 6);
+    });
+
+    // Tabla de deudas
+    const tableStartY = summaryY + 20;
+
+    autoTable(doc, {
+      startY: tableStartY,
+      head: [['Proveedor', 'Referencia', 'Fecha', 'Vencimiento', 'Monto Total', 'Pagado', 'Pendiente', 'Estado']],
+      body: activeDebtsForReport.map(d => [
+        d.supplier_name,
+        d.invoice_reference,
+        formatColombiaDate(d.invoice_date),
+        formatColombiaDate(d.due_date),
+        formatCOP(d.total_amount),
+        formatCOP(d.paid_amount),
+        formatCOP(d.pending_amount),
+        d.status === 'overdue' ? 'VENCIDA' : 'ACTIVA',
+      ]),
+      headStyles: {
+        fillColor: [37, 99, 235],
+        textColor: [255, 255, 255],
+        fontStyle: 'bold',
+        fontSize: 8,
+      },
+      bodyStyles: { fontSize: 7.5 },
+      alternateRowStyles: { fillColor: [245, 247, 255] },
+      columnStyles: {
+        0: { cellWidth: 32 },
+        1: { cellWidth: 28 },
+        2: { cellWidth: 18 },
+        3: { cellWidth: 18 },
+        4: { cellWidth: 26, halign: 'right' },
+        5: { cellWidth: 24, halign: 'right' },
+        6: { cellWidth: 26, halign: 'right', fontStyle: 'bold' },
+        7: { cellWidth: 16, halign: 'center' },
+      },
+      didParseCell: (data) => {
+        if (data.section === 'body' && data.column.index === 7) {
+          const val = data.cell.raw as string;
+          if (val === 'VENCIDA') {
+            data.cell.styles.textColor = [180, 40, 40];
+            data.cell.styles.fontStyle = 'bold';
+          } else {
+            data.cell.styles.textColor = [30, 100, 180];
+          }
+        }
+        if (data.section === 'body' && data.column.index === 6) {
+          data.cell.styles.textColor = [180, 40, 40];
+        }
+      },
+      foot: [[
+        { content: 'TOTALES', colSpan: 6, styles: { halign: 'right', fontStyle: 'bold', fillColor: [230, 235, 255] } },
+        { content: formatCOP(totalGeneral), styles: { halign: 'right', fontStyle: 'bold', fillColor: [230, 235, 255], textColor: [180, 40, 40] } },
+        { content: '', styles: { fillColor: [230, 235, 255] } },
+      ]],
+      footStyles: { fontSize: 8 },
+      margin: { left: 14, right: 14 },
+    });
+
+    // Pie de página
+    const pageCount = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= pageCount; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`Pág. ${i} / ${pageCount}`, pageW - 14, doc.internal.pageSize.getHeight() - 8, { align: 'right' });
+      doc.text('CELUMUNDO VIP — Reporte de Deudas a Proveedores', 14, doc.internal.pageSize.getHeight() - 8);
+    }
+
+    const fecha = new Date().toLocaleDateString('es-CO', { timeZone: 'America/Bogota', year: 'numeric', month: '2-digit', day: '2-digit' }).replace(/\//g, '-');
+    doc.save(`Reporte-Deudas-Proveedores-${fecha}.pdf`);
+    toast.success('Reporte descargado exitosamente');
+  };
 
   if (loading) {
     return (
@@ -327,10 +506,20 @@ export default function SupplierDebts() {
           <h2 className="text-3xl font-bold">Gestión de Deudas</h2>
           <p className="text-muted-foreground mt-1">Administra las facturas de proveedores</p>
         </div>
-        <Button onClick={() => setShowNewDebtModal(true)} className="bg-blue-600 hover:bg-blue-700">
-          <Plus className="h-4 w-4 mr-2" />
-          Nueva Deuda
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={generateDebtReport}
+            className="border-blue-300 text-blue-700 hover:bg-blue-50 dark:border-blue-700 dark:text-blue-400 dark:hover:bg-blue-950"
+          >
+            <FileDown className="h-4 w-4 mr-2" />
+            Reporte de Deudas
+          </Button>
+          <Button onClick={() => setShowNewDebtModal(true)} className="bg-blue-600 hover:bg-blue-700">
+            <Plus className="h-4 w-4 mr-2" />
+            Nueva Deuda
+          </Button>
+        </div>
       </div>
 
       {/* Estadísticas */}
@@ -389,7 +578,7 @@ export default function SupplierDebts() {
       </div>
 
       {/* Buscador */}
-      <div className="flex items-center gap-4">
+      <div className="flex items-center gap-3">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <Input
@@ -400,6 +589,22 @@ export default function SupplierDebts() {
             className="pl-10"
           />
         </div>
+        {suppliers.length > 0 && (
+          <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+            <SelectTrigger className="w-56">
+              <div className="flex items-center gap-2 min-w-0">
+                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                <SelectValue placeholder="Todos los proveedores" />
+              </div>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos los proveedores</SelectItem>
+              {suppliers.map(s => (
+                <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {/* Tabla de deudas */}
@@ -449,6 +654,19 @@ export default function SupplierDebts() {
                             title="Ver historial"
                           >
                             <History className="h-4 w-4" />
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setEditAmountDebt(debt);
+                              setEditAmountValue(debt.total_amount);
+                              setShowEditAmountModal(true);
+                            }}
+                            title="Editar valor"
+                            className="text-amber-600 hover:text-amber-700 hover:bg-amber-50 dark:hover:bg-amber-950"
+                          >
+                            <Pencil className="h-4 w-4" />
                           </Button>
                           <Button
                             variant="ghost"
@@ -504,6 +722,63 @@ export default function SupplierDebts() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Modal: Editar Valor de Deuda */}
+      <Dialog open={showEditAmountModal} onOpenChange={setShowEditAmountModal}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Pencil className="h-5 w-5 text-amber-600" />
+              Editar Valor de Factura
+            </DialogTitle>
+            <DialogDescription>
+              {editAmountDebt?.invoice_reference} — {editAmountDebt?.supplier_name}
+            </DialogDescription>
+          </DialogHeader>
+          {editAmountDebt && (
+            <div className="space-y-4 py-4">
+              <div className="bg-muted p-4 rounded-lg space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Monto actual:</span>
+                  <span className="font-semibold">{formatCOP(editAmountDebt.total_amount)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Ya pagado:</span>
+                  <span className="font-semibold text-green-600">{formatCOP(editAmountDebt.paid_amount)}</span>
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit_amount_value">Nuevo Monto Total *</Label>
+                <Input
+                  id="edit_amount_value"
+                  type="number"
+                  min={editAmountDebt.paid_amount}
+                  step="0.01"
+                  value={editAmountValue || ''}
+                  onChange={(e) => setEditAmountValue(parseFloat(e.target.value) || 0)}
+                  autoFocus
+                />
+                {editAmountValue > 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    Nuevo pendiente:{' '}
+                    <span className="font-semibold text-red-600">
+                      {formatCOP(Math.max(0, editAmountValue - editAmountDebt.paid_amount))}
+                    </span>
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowEditAmountModal(false)}>
+              Cancelar
+            </Button>
+            <Button onClick={handleSaveEditAmount} className="bg-amber-600 hover:bg-amber-700">
+              Guardar Cambio
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Modal: Nueva Deuda */}
       <Dialog open={showNewDebtModal} onOpenChange={setShowNewDebtModal}>

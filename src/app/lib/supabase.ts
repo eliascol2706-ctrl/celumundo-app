@@ -60,24 +60,35 @@ export interface Invoice {
   company: 'celumundo' | 'repuestos';
   number: string;
   date: string;
-  type: 'regular' | 'wholesale';
-  invoice_type?: 'regular' | 'wholesale'; // Alias para compatibilidad
+  type: 'regular' | 'wholesale' | 'credit';
+  invoice_type?: 'regular' | 'wholesale' | 'credit'; // Alias para compatibilidad
+  serie?: string; // Serie del comprobante (FV, FC, etc.)
+  emission_date?: string; // Fecha de emisión configurada por el usuario
   customer_name?: string;
   customer_document?: string;
+  customer_id?: string; // FK a customers (facturas a crédito)
+  customer_doc_type?: string; // Tipo de documento (cc, nit, ce, pasaporte)
+  customer_phone?: string;
+  customer_address?: string;
   items: InvoiceItem[];
   subtotal: number;
   tax: number;
   total: number;
+  discount_value?: number; // Valor del descuento aplicado
+  discount_is_percent?: boolean; // Si el descuento es porcentaje
+  include_iva?: boolean; // Si incluye IVA del 19%
   status: 'pending' | 'paid' | 'cancelled' | 'partial_return' | 'returned' | 'pending_confirmation' | 'anulada';
   payment_method?: string;
   payment_cash?: number;
   payment_transfer?: number;
   payment_other?: number;
-  payment_note?: string; // NUEVO: Nota adicional del pago
-  attended_by?: string; // Usuario que atendió
-  is_credit?: boolean; // Si es una venta a crédito
-  credit_balance?: number; // Saldo pendiente por pagar
-  due_date?: string; // Fecha de vencimiento para créditos
+  payment_note?: string;
+  payment_term_days?: number; // Plazo de pago en días
+  notes?: string; // Notas / observaciones de la factura
+  attended_by?: string;
+  is_credit?: boolean;
+  credit_balance?: number;
+  due_date?: string;
   history_movements?: HistoryMovement[];
   created_at?: string;
   updated_at?: string;
@@ -643,7 +654,7 @@ export const getAllProducts = async (): Promise<Product[]> => {
         while (hasMore) {
           const { data, error } = await supabase
             .from('products')
-            .select('id, code, name, description, price1, price2, final_price, stock, min_stock, category, registered_ids, created_at, updated_at, company, current_cost')
+            .select('id, code, name, description, price1, price2, final_price, stock, min_stock, category, registered_ids, created_at, updated_at, company, current_cost, use_unit_ids')
             .eq('company', company)
             .order('name')
             .range(page * pageSize, (page + 1) * pageSize - 1);
@@ -5344,6 +5355,8 @@ export interface InvoiceCustomer {
   company: 'celumundo' | 'repuestos';
   name: string;
   document?: string;
+  phone?: string;
+  address?: string;
   created_at?: string;
   updated_at?: string;
 }
@@ -5358,6 +5371,30 @@ export const searchInvoiceCustomers = async (name: string): Promise<InvoiceCusto
     .ilike('name', `%${name.trim()}%`)
     .order('name', { ascending: true })
     .limit(8);
+  if (error) { console.error('Error searching invoice customers:', error); return []; }
+  return data || [];
+};
+
+export const searchInvoiceCustomersByQuery = async (query: string): Promise<InvoiceCustomer[]> => {
+  if (!query.trim()) {
+    const company = getCurrentCompany();
+    const { data } = await supabase
+      .from('invoice_customers')
+      .select('*')
+      .eq('company', company)
+      .order('name', { ascending: true })
+      .limit(50);
+    return data || [];
+  }
+  const company = getCurrentCompany();
+  const q = query.trim();
+  const { data, error } = await supabase
+    .from('invoice_customers')
+    .select('*')
+    .eq('company', company)
+    .or(`name.ilike.%${q}%,document.ilike.%${q}%`)
+    .order('name', { ascending: true })
+    .limit(20);
   if (error) { console.error('Error searching invoice customers:', error); return []; }
   return data || [];
 };

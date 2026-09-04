@@ -4,6 +4,7 @@ import { getPrinterConfig, printDirect } from './printer-config';
 import { formatCOP } from './currency';
 import { getCurrentCompany } from './supabase';
 import { toast } from 'sonner';
+import { generateQRSVG, getPublicInvoiceURL } from './qr-utils';
 
 interface ThermalInvoiceOptions {
   invoice: any;
@@ -15,7 +16,8 @@ interface ThermalInvoiceOptions {
 const generateThermalInvoiceHTML = (
   invoice: any,
   creditPayments: any[] = [],
-  products: any[] = []
+  products: any[] = [],
+  qrSvg = ''
 ): string => {
   const companyName = getCurrentCompany() === 'celumundo' ? 'CELUMUNDO VIP' : 'REPUESTOS VIP';
 
@@ -121,6 +123,42 @@ const generateThermalInvoiceHTML = (
     `;
   }
 
+  // Garantía
+  let warrantyHTML = '';
+  if (invoice.warranty_enabled && invoice.warranty_months) {
+    const isElectro = invoice.warranty_category === 'electrodomesticos';
+    const catLabel = isElectro ? 'Electrodomesticos' : 'Disp. electronicos';
+    const months = invoice.warranty_months;
+    const docText = invoice.customer_document ? invoice.customer_document : 'N/A';
+    const phoneText = invoice.customer_phone ? invoice.customer_phone : 'N/A';
+    const warrantyBodyText = isElectro
+      ? 'Cubre defectos de fabricacion y fallas tecnicas no ocasionadas por el usuario. No cubre golpes, caidas, humedad, liquidos, danos electricos, fluctuaciones de voltaje, manipulacion no autorizada, instalacion incorrecta, desgaste normal ni uso inadecuado. Requiere caja original del producto.'
+      : 'Cubre defectos de fabricacion y fallas tecnicas no ocasionadas por el usuario. No cubre golpes, caidas, humedad, liquidos, manipulacion no autorizada, accesorios incompatibles, desgaste normal, uso inadecuado ni danos en el puerto de carga. Requiere caja original del producto. No cubre perdida de datos.';
+    warrantyHTML = `
+      <div style="margin-bottom: 3mm; border: 2px solid black; padding: 2mm;">
+        <div style="text-align: center; font-size: 11px; font-weight: 800; margin-bottom: 1mm; border-bottom: 1px solid black; padding-bottom: 1mm;">
+          GARANTIA — ${months} ${months === 1 ? 'MES' : 'MESES'}
+        </div>
+        <div style="font-size: 9px; margin-bottom: 1mm;">${catLabel}</div>
+        <div style="font-size: 7.5px; margin-bottom: 2mm; line-height: 1.4;">${warrantyBodyText}</div>
+        <div style="font-size: 9px; border-top: 1px dashed black; padding-top: 1mm;">
+          <div>Cedula: ${docText}</div>
+          <div>Telefono: ${phoneText}</div>
+        </div>
+      </div>
+    `;
+  }
+
+  // QR
+  const qrHTML = qrSvg ? `
+    <div style="text-align: center; margin-bottom: 3mm; border-top: 1px dashed black; padding-top: 3mm;">
+      <div style="display: inline-block; line-height: 0; border: 1.5px solid #000; padding: 3px; background: #fff;">
+        ${qrSvg}
+      </div>
+      <div style="font-size: 8px; margin-top: 2mm; font-weight: 600;">Escanea tu factura</div>
+    </div>
+  ` : '';
+
   return `
     <!DOCTYPE html>
     <html>
@@ -209,10 +247,13 @@ const generateThermalInvoiceHTML = (
 
         <div class="info">
           <div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Cliente: ${invoice.customer_name || 'Consumidor Final'}</div>
-          ${
-            invoice.customer_document
-              ? `<div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Doc: ${invoice.customer_document}</div>`
-              : ''
+          ${invoice.customer_document
+            ? `<div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Cedula: ${invoice.customer_document}</div>`
+            : '<div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Cedula: N/A</div>'
+          }
+          ${invoice.customer_phone
+            ? `<div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Tel: ${invoice.customer_phone}</div>`
+            : '<div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Tel: N/A</div>'
           }
           <div style="margin-bottom: 1mm; font-size: 11px; color: #000;">Fecha: ${new Date(invoice.date).toLocaleString('es-ES', {
             day: '2-digit',
@@ -221,10 +262,9 @@ const generateThermalInvoiceHTML = (
             hour: '2-digit',
             minute: '2-digit',
           })}</div>
-          ${
-            invoice.attended_by
-              ? `<div style="font-size: 11px; color: #000;">Vendedor: ${invoice.attended_by}</div>`
-              : ''
+          ${invoice.attended_by
+            ? `<div style="font-size: 11px; color: #000;">Vendedor: ${invoice.attended_by}</div>`
+            : ''
           }
         </div>
 
@@ -240,6 +280,8 @@ const generateThermalInvoiceHTML = (
 
         ${paymentHTML}
         ${creditHTML}
+        ${warrantyHTML}
+        ${qrHTML}
 
         <div class="footer">
           <div style="margin: 2mm 0; border-top: 1px solid black; padding-top: 2mm;"></div>
@@ -262,10 +304,12 @@ const generateThermalInvoiceHTML = (
 // Imprimir factura térmica directamente
 export const printThermalInvoice = async (options: ThermalInvoiceOptions): Promise<boolean> => {
   try {
+    const qrSvg = await generateQRSVG(getPublicInvoiceURL(options.invoice.number), 110, 'H');
     const html = generateThermalInvoiceHTML(
       options.invoice,
       options.creditPayments || [],
-      options.products || []
+      options.products || [],
+      qrSvg
     );
 
     // En web: printDirect hace fallback automático al navegador

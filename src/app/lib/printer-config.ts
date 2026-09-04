@@ -164,30 +164,11 @@ export const printDirect = async (
 ): Promise<boolean> => {
   console.log('🖨️ printDirect llamado:', { printerName, type, contentLength: content.length });
 
-  // Si estamos en web, usar window.print() como fallback
+  // La impresión solo está disponible en la aplicación de escritorio
   if (!window.electron?.isElectron) {
-    console.warn('⚠️ No estamos en Electron — usando fallback de navegador web');
-    const printWindow = window.open('', '_blank', 'width=420,height=700,scrollbars=yes');
-    if (!printWindow) {
-      alert('El navegador bloqueó la ventana emergente. Por favor, permite ventanas emergentes para este sitio.');
-      return false;
-    }
-    printWindow.document.write(content);
-    printWindow.document.close();
-
-    // Esperar a que cargue el contenido y luego llamar a print
-    printWindow.onload = () => {
-      printWindow.focus();
-      printWindow.print();
-    };
-
-    // Fallback por si onload no se dispara
-    setTimeout(() => {
-      printWindow.focus();
-      printWindow.print();
-    }, 250);
-
-    return true;
+    console.warn('⚠️ Impresión no disponible en navegador web — se requiere la app de escritorio');
+    alert('La impresión solo está disponible en la aplicación de escritorio (CELUMUNDO VIP App). Abre la app para imprimir.');
+    return false;
   }
 
   if (!window.electron?.printer) {

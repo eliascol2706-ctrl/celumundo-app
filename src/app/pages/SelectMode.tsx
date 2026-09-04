@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router';
-import { LogIn, Search } from 'lucide-react';
+import { LogIn, Search, Receipt } from 'lucide-react';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '../components/ui/dialog';
@@ -12,6 +12,8 @@ import { registerDevice, checkDeviceAuthorization } from '../lib/device-auth';
 export function SelectMode() {
   const navigate = useNavigate();
   const [isPasswordDialogOpen, setIsPasswordDialogOpen] = useState(false);
+  const [isInvoiceDialogOpen, setIsInvoiceDialogOpen] = useState(false);
+  const [invoiceNumber, setInvoiceNumber] = useState('');
   const [password, setPassword] = useState('');
   const [selectedMode, setSelectedMode] = useState<'login' | 'consultation' | null>(null);
   const [isChecking, setIsChecking] = useState(true);
@@ -42,6 +44,12 @@ export function SelectMode() {
       setSelectedMode(mode);
       setIsPasswordDialogOpen(true);
     }
+  };
+
+  const handleInvoiceLookup = () => {
+    const num = invoiceNumber.trim();
+    if (!num) { toast.error('Ingresa el número de factura'); return; }
+    navigate(`/factura/${num}`);
   };
 
   const handlePasswordSubmit = async () => {
@@ -94,7 +102,7 @@ export function SelectMode() {
             </p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Opción 1: Ingresar al Sistema */}
             <Card
               className="cursor-pointer transition-all hover:shadow-xl hover:scale-105 border-2 hover:border-blue-500"
@@ -134,6 +142,26 @@ export function SelectMode() {
                 </p>
               </CardContent>
             </Card>
+
+            {/* Opción 3: Verificar Factura (sin contraseña) */}
+            <Card
+              className="cursor-pointer transition-all hover:shadow-xl hover:scale-105 border-2 hover:border-amber-500"
+              onClick={() => { setInvoiceNumber(''); setIsInvoiceDialogOpen(true); }}
+            >
+              <CardContent className="p-8 text-center">
+                <div className="flex justify-center mb-6">
+                  <div className="p-4 bg-amber-100 dark:bg-amber-900 rounded-full">
+                    <Receipt className="h-12 w-12 text-amber-600 dark:text-amber-400" />
+                  </div>
+                </div>
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-3">
+                  Verificar Factura
+                </h2>
+                <p className="text-gray-600 dark:text-gray-400">
+                  Consulta el estado y detalles de una factura por su número
+                </p>
+              </CardContent>
+            </Card>
           </div>
 
           <div className="mt-8 text-center text-sm text-gray-500 dark:text-gray-400">
@@ -141,6 +169,42 @@ export function SelectMode() {
           </div>
         </div>
       </div>
+
+      {/* Dialog para verificar factura (sin contraseña) */}
+      <Dialog open={isInvoiceDialogOpen} onOpenChange={setIsInvoiceDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Verificar Factura</DialogTitle>
+            <DialogDescription>
+              Ingresa el número de la factura para consultar su estado y detalles
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="invoice-number">Número de factura</Label>
+              <Input
+                id="invoice-number"
+                type="text"
+                value={invoiceNumber}
+                onChange={e => setInvoiceNumber(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleInvoiceLookup(); }}
+                placeholder="Ej: 000123"
+                autoFocus
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setIsInvoiceDialogOpen(false); setInvoiceNumber(''); }}>
+              Cancelar
+            </Button>
+            <Button onClick={handleInvoiceLookup} className="bg-amber-500 hover:bg-amber-600 text-white">
+              Consultar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog para contraseña */}
       <Dialog open={isPasswordDialogOpen} onOpenChange={setIsPasswordDialogOpen}>
