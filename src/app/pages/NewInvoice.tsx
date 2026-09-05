@@ -160,6 +160,7 @@ export function NewInvoice() {
   const [mixedTransfer, setMixedTransfer] = useState(0);
   const [mixedNequi, setMixedNequi] = useState(0);
   const [mixedDaviplata, setMixedDaviplata] = useState(0);
+  const [cashReceived, setCashReceived] = useState(0);
 
   // Garantía (step 3)
   const [warrantyEnabled, setWarrantyEnabled] = useState(false);
@@ -356,10 +357,12 @@ export function NewInvoice() {
 
   // ─── Cart operations ───────────────────────────────────────────────────────
 
-  const addProductToCart = async (product: any) => {
-    const price = invoiceType === 'credit'
-      ? (product.price2 || product.final_price || 0)
-      : (product.final_price || 0);
+  const addProductToCart = async (product: any, overridePrice?: number) => {
+    const price = overridePrice !== undefined
+      ? overridePrice
+      : invoiceType === 'credit'
+        ? (product.price2 || product.final_price || 0)
+        : (product.final_price || 0);
 
     const priceFields = {
       price1: product.price1 ?? 0,
@@ -645,6 +648,7 @@ export function NewInvoice() {
         toast.error(`Asigná al menos una ID para ${item.productName}`); return;
       }
     }
+    setCashReceived(calculateTotal());
     setStep(3);
   };
 
@@ -727,9 +731,15 @@ export function NewInvoice() {
             paymentData.payment_note = `Nequi: ${formatCOP(mixedNequi)}, Daviplata: ${formatCOP(mixedDaviplata)}`;
           } else {
             paymentData.payment_method = PAYMENT_LABELS[paymentMethod];
-            if (paymentMethod === 'cash') paymentData.payment_cash = total;
-            else if (paymentMethod === 'transfer') paymentData.payment_transfer = total;
-            else paymentData.payment_other = total;
+            if (paymentMethod === 'cash') {
+              paymentData.payment_cash = total;
+              paymentData.payment_received = cashReceived;
+              paymentData.payment_change = Math.max(0, cashReceived - total);
+            } else if (paymentMethod === 'transfer') {
+              paymentData.payment_transfer = total;
+            } else {
+              paymentData.payment_other = total;
+            }
           }
         }
         invoiceData = {
@@ -1392,12 +1402,13 @@ export function NewInvoice() {
                         ? (product.price2 || product.final_price || 0)
                         : (product.final_price || 0);
                       const cartCount = cart.filter(i => i.productId === product.id).length;
-                      const outOfStock = (product.stock ?? 0) <= 0 && !product.use_unit_ids;
+                      const stock = product.stock ?? 0;
+                      const noStock = stock <= 0 && !product.use_unit_ids;
                       return (
                         <div key={product.id}
-                          className={`flex items-center gap-2 px-3 py-2 transition-colors ${outOfStock ? 'opacity-50' : 'active:bg-zinc-50 dark:active:bg-zinc-800/60'}`}>
+                          className="flex items-center gap-2 px-3 py-2 active:bg-zinc-50 dark:active:bg-zinc-800/60 transition-colors">
                           {/* Left: info */}
-                          <div className="flex-1 min-w-0" onClick={() => !outOfStock ? addProductToCart(product) : undefined}>
+                          <div className="flex-1 min-w-0" onClick={() => addProductToCart(product)}>
                             <div className="flex items-center gap-1 mb-0.5">
                               <span className="text-[9px] font-mono text-zinc-400 shrink-0">{product.code}</span>
                               {cartCount > 0 && (
@@ -1409,13 +1420,28 @@ export function NewInvoice() {
                             </div>
                             <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 leading-tight truncate">{product.name}</p>
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[9px] text-zinc-400">P1 <span className="text-zinc-500">{formatCOP(product.price1 ?? 0)}</span></span>
+                              <button
+                                onClick={e => { e.stopPropagation(); addProductToCart(product, product.price1 ?? 0); }}
+                                title="Agregar con P1"
+                                className="text-[9px] text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 active:scale-95 transition-all">
+                                P1 <span className="text-zinc-500">{formatCOP(product.price1 ?? 0)}</span>
+                              </button>
                               <span className="text-zinc-300 dark:text-zinc-600">·</span>
-                              <span className="text-[9px] text-zinc-400">P2 <span className="text-zinc-500">{formatCOP(product.price2 ?? 0)}</span></span>
+                              <button
+                                onClick={e => { e.stopPropagation(); addProductToCart(product, product.price2 ?? 0); }}
+                                title="Agregar con P2"
+                                className="text-[9px] text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 active:scale-95 transition-all">
+                                P2 <span className="text-zinc-500">{formatCOP(product.price2 ?? 0)}</span>
+                              </button>
                               {isAdmin && (product.current_cost ?? 0) > 0 && (
                                 <>
                                   <span className="text-zinc-300 dark:text-zinc-600">·</span>
-                                  <span className="text-[9px] text-amber-500">C {formatCOP(product.current_cost)}</span>
+                                  <button
+                                    onClick={e => { e.stopPropagation(); addProductToCart(product, product.current_cost ?? 0); }}
+                                    title="Agregar con Costo"
+                                    className="text-[9px] text-amber-500 hover:text-amber-600 active:scale-95 transition-all">
+                                    C {formatCOP(product.current_cost)}
+                                  </button>
                                 </>
                               )}
                             </div>
@@ -1424,8 +1450,11 @@ export function NewInvoice() {
                           <div className="flex items-center gap-1.5 shrink-0">
                             <div className="text-right">
                               <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 leading-none">{formatCOP(finalPrice)}</p>
-                              <p className="text-[9px] text-zinc-400 leading-none mt-0.5">
-                                {outOfStock ? <span className="text-red-400">Sin stock</span> : `Stk:${product.stock}`}
+                              <p className="text-[9px] leading-none mt-0.5">
+                                {noStock
+                                  ? <span className="text-orange-400">Stk:{stock}</span>
+                                  : <span className="text-zinc-400">Stk:{stock}</span>
+                                }
                               </p>
                             </div>
                             <button
@@ -1434,9 +1463,9 @@ export function NewInvoice() {
                               <Info className="w-3.5 h-3.5" />
                             </button>
                             <button
-                              onClick={e => { e.stopPropagation(); if (!outOfStock) addProductToCart(product); }}
-                              disabled={outOfStock}
-                              className={`w-7 h-7 flex items-center justify-center rounded-lg border-2 transition-all font-bold text-base ${outOfStock ? 'border-zinc-200 dark:border-zinc-700 text-zinc-300 cursor-not-allowed' : 'border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white active:scale-95'}`}>
+                              onClick={e => { e.stopPropagation(); addProductToCart(product); }}
+                              disabled={product.use_unit_ids && (product.stock ?? 0) <= 0}
+                              className={`w-7 h-7 flex items-center justify-center rounded-lg border-2 transition-all font-bold text-base ${product.use_unit_ids && (product.stock ?? 0) <= 0 ? 'border-zinc-200 dark:border-zinc-700 text-zinc-300 cursor-not-allowed' : 'border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white active:scale-95'}`}>
                               <Plus className="w-4 h-4" />
                             </button>
                           </div>
@@ -1449,11 +1478,12 @@ export function NewInvoice() {
                   <div className="hidden sm:grid sm:grid-cols-2 gap-3 p-5">
                     {pagedProducts.map((product: any) => {
                       const cartCount = cart.filter(i => i.productId === product.id).length;
-                      const outOfStock = (product.stock ?? 0) <= 0;
+                      const stock = product.stock ?? 0;
+                      const noStock = stock <= 0 && !product.use_unit_ids;
                       return (
                         <div key={product.id}
-                          className={`relative border rounded-xl p-3 flex flex-col gap-2 transition-all cursor-pointer ${outOfStock && !product.use_unit_ids ? 'border-zinc-200 dark:border-zinc-700 opacity-60' : 'border-zinc-200 dark:border-zinc-700 hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'}`}
-                          onClick={() => !outOfStock || product.use_unit_ids ? addProductToCart(product) : undefined}>
+                          className="relative border rounded-xl p-3 flex flex-col gap-2 transition-all cursor-pointer border-zinc-200 dark:border-zinc-700 hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                          onClick={() => addProductToCart(product)}>
                           <div className="flex items-start justify-between gap-1.5">
                             <div className="flex-1 min-w-0">
                               <p className="text-[10px] text-zinc-400 font-mono">{product.code}</p>
@@ -1471,28 +1501,40 @@ export function NewInvoice() {
                             </div>
                           </div>
                           <div className="flex flex-wrap gap-1.5">
-                            <span className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
+                            <button
+                              onClick={e => { e.stopPropagation(); addProductToCart(product, product.price1 ?? 0); }}
+                              title={`Agregar con Precio 1: ${formatCOP(product.price1 ?? 0)}`}
+                              className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 transition-all cursor-pointer">
                               <span className="text-[9px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500 leading-none mb-0.5">P1</span>
                               <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 leading-none">{formatCOP(product.price1 ?? 0)}</span>
-                            </span>
-                            <span className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
+                            </button>
+                            <button
+                              onClick={e => { e.stopPropagation(); addProductToCart(product, product.price2 ?? 0); }}
+                              title={`Agregar con Precio 2: ${formatCOP(product.price2 ?? 0)}`}
+                              className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 transition-all cursor-pointer">
                               <span className="text-[9px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500 leading-none mb-0.5">P2</span>
                               <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 leading-none">{formatCOP(product.price2 ?? 0)}</span>
-                            </span>
-                            <span className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700">
+                            </button>
+                            <button
+                              onClick={e => { e.stopPropagation(); addProductToCart(product, product.final_price ?? 0); }}
+                              title={`Agregar con Precio Final: ${formatCOP(product.final_price ?? 0)}`}
+                              className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 active:scale-95 transition-all cursor-pointer">
                               <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-500 leading-none mb-0.5">Final</span>
                               <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 leading-none">{formatCOP(product.final_price ?? 0)}</span>
-                            </span>
+                            </button>
                             {isAdmin && (product.current_cost ?? 0) > 0 && (
-                              <span className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700">
+                              <button
+                                onClick={e => { e.stopPropagation(); addProductToCart(product, product.current_cost ?? 0); }}
+                                title={`Agregar con Costo: ${formatCOP(product.current_cost)}`}
+                                className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50 active:scale-95 transition-all cursor-pointer">
                                 <span className="text-[9px] font-bold uppercase tracking-wide text-amber-500 leading-none mb-0.5">Costo</span>
                                 <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 leading-none">{formatCOP(product.current_cost)}</span>
-                              </span>
+                              </button>
                             )}
                           </div>
                           <div className="flex items-center justify-between gap-2 mt-0.5">
-                            <p className="text-[11px] text-zinc-400">
-                              {outOfStock ? <span className="text-red-400">Sin stock</span> : `Stock: ${product.stock}`}
+                            <p className={`text-[11px] ${noStock ? 'text-orange-400' : 'text-zinc-400'}`}>
+                              Stock: {stock}
                             </p>
                             <div className="flex items-center gap-1.5">
                               <button
@@ -1503,8 +1545,8 @@ export function NewInvoice() {
                               </button>
                               <button
                                 onClick={e => { e.stopPropagation(); addProductToCart(product); }}
-                                disabled={outOfStock && !product.use_unit_ids}
-                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold transition-all flex-shrink-0 ${outOfStock && !product.use_unit_ids ? 'border border-zinc-200 dark:border-zinc-700 text-zinc-300 cursor-not-allowed' : 'border-2 border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white'}`}>
+                                disabled={product.use_unit_ids && stock <= 0}
+                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold transition-all flex-shrink-0 ${product.use_unit_ids && stock <= 0 ? 'border border-zinc-200 dark:border-zinc-700 text-zinc-300 cursor-not-allowed' : 'border-2 border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white'}`}>
                                 <Plus className="w-3 h-3" />
                                 Agregar
                               </button>
@@ -1603,7 +1645,13 @@ export function NewInvoice() {
                             ) : (
                               <>
                                 <button onClick={() => updateCartQty(i, item.quantity - 1)} className="w-5 h-5 sm:w-6 sm:h-6 rounded border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500 hover:border-zinc-400 text-xs font-bold">−</button>
-                                <span className="text-xs font-semibold w-5 text-center">{item.quantity}</span>
+                                <input
+                                  type="number"
+                                  value={item.quantity === 0 ? '' : item.quantity}
+                                  onChange={e => updateCartQty(i, parseInt(e.target.value) || 0)}
+                                  onWheel={e => e.currentTarget.blur()}
+                                  className="w-8 text-xs font-semibold text-center bg-transparent border-b border-zinc-300 dark:border-zinc-600 focus:outline-none focus:border-emerald-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                />
                                 <button onClick={() => updateCartQty(i, item.quantity + 1)} className="w-5 h-5 sm:w-6 sm:h-6 rounded border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500 hover:border-zinc-400 text-xs font-bold">+</button>
                               </>
                             )}
@@ -1681,7 +1729,20 @@ export function NewInvoice() {
               </div>
 
               {/* Totals */}
-              <div className="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-700 space-y-2">
+              <div className="mt-4 pt-3 border-t border-zinc-200 dark:border-zinc-700 space-y-2">
+                {/* Resumen de unidades */}
+                {cart.length > 0 && (
+                  <div className="flex items-center justify-between pb-2 border-b border-zinc-100 dark:border-zinc-800">
+                    <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                      <Package className="w-3.5 h-3.5" />
+                      <span><span className="font-semibold text-zinc-700 dark:text-zinc-300">{cart.length}</span> {cart.length === 1 ? 'producto' : 'productos'}</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
+                      <span><span className="font-semibold text-zinc-700 dark:text-zinc-300">{cart.reduce((s, i) => s + (i.useUnitIds ? (i.unitIds?.length ?? i.quantity) : i.quantity), 0)}</span> unidades</span>
+                      <Hash className="w-3.5 h-3.5" />
+                    </div>
+                  </div>
+                )}
                 <div className="flex justify-between text-sm text-zinc-600 dark:text-zinc-400">
                   <span>Subtotal</span>
                   <span>{formatCOP(calculateSubtotal())}</span>
@@ -1800,6 +1861,64 @@ export function NewInvoice() {
                           </button>
                         ))}
                       </div>
+
+                      {/* Calculadora de cambio — efectivo */}
+                      {paymentMethod === 'cash' && (
+                        <div className="mt-4 p-4 bg-zinc-50 dark:bg-zinc-800 rounded-xl space-y-3">
+                          <div className="flex items-center justify-between gap-4">
+                            <div className="flex-1">
+                              <Label className="text-xs text-zinc-500 mb-1.5 block">Pago del cliente</Label>
+                              <div className="relative">
+                                <Banknote className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />
+                                <Input
+                                  type="number" min="0" step="100"
+                                  className="pl-9 h-10 text-base font-semibold"
+                                  value={cashReceived || ''}
+                                  onChange={e => setCashReceived(parseFloat(e.target.value) || 0)}
+                                  placeholder={String(calculateTotal())}
+                                />
+                              </div>
+                            </div>
+                            <div className="flex-1">
+                              <p className="text-xs text-zinc-500 mb-1.5">
+                                {cashReceived >= calculateTotal() ? 'Cambio a devolver' : 'Falta por pagar'}
+                              </p>
+                              <div className={`h-10 flex items-center justify-center rounded-lg px-3 font-bold text-lg border-2 ${
+                                cashReceived === 0
+                                  ? 'border-zinc-200 dark:border-zinc-700 text-zinc-400'
+                                  : cashReceived >= calculateTotal()
+                                    ? 'border-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400'
+                                    : 'border-red-300 bg-red-50 dark:bg-red-950/30 text-red-500'
+                              }`}>
+                                {cashReceived === 0
+                                  ? formatCOP(0)
+                                  : cashReceived >= calculateTotal()
+                                    ? formatCOP(cashReceived - calculateTotal())
+                                    : `-${formatCOP(calculateTotal() - cashReceived)}`
+                                }
+                              </div>
+                            </div>
+                          </div>
+                          {/* Atajos de denominaciones rápidas */}
+                          <div className="flex flex-wrap gap-1.5">
+                            {[1000, 2000, 5000, 10000, 20000, 50000, 100000].map(denom => (
+                              <button
+                                key={denom}
+                                type="button"
+                                onClick={() => setCashReceived(prev => prev + denom)}
+                                className="px-2.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-600 text-xs font-medium text-zinc-600 dark:text-zinc-300 hover:border-emerald-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors">
+                                +{denom >= 1000 ? `${denom / 1000}k` : denom}
+                              </button>
+                            ))}
+                            <button
+                              type="button"
+                              onClick={() => setCashReceived(calculateTotal())}
+                              className="px-2.5 py-1 rounded-lg border border-emerald-300 dark:border-emerald-700 text-xs font-medium text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 transition-colors">
+                              Exacto
+                            </button>
+                          </div>
+                        </div>
+                      )}
 
                       {paymentMethod === 'mixed' && (
                         <div className="mt-4 grid grid-cols-2 gap-3 p-4 bg-zinc-50 dark:bg-zinc-800 rounded-xl">
