@@ -1306,60 +1306,58 @@ export function NewInvoice() {
           STEP 2 — Catálogo + Carrito
       ════════════════════════════════════════════════════════════════════════ */}
       {step === 2 && (
-        <div className="p-3 sm:p-6">
+        <div className="p-2 sm:p-4 lg:p-6">
           {/* Mobile tab switcher */}
-          <div className="flex lg:hidden mb-3 rounded-xl overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-zinc-100 dark:bg-zinc-800 p-1 gap-1">
+          <div className="flex lg:hidden mb-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5 gap-0.5">
             <button
               onClick={() => setMobileView('catalog')}
-              className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 ${mobileView === 'catalog' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400'}`}>
-              <Package className="w-4 h-4" />
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors flex items-center justify-center gap-1.5 ${mobileView === 'catalog' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400'}`}>
+              <Package className="w-3.5 h-3.5" />
               Catálogo
             </button>
             <button
               onClick={() => setMobileView('cart')}
-              className={`flex-1 py-2.5 text-sm font-medium rounded-lg transition-colors flex items-center justify-center gap-2 ${mobileView === 'cart' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400'}`}>
-              <Receipt className="w-4 h-4" />
+              className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors flex items-center justify-center gap-1.5 ${mobileView === 'cart' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400'}`}>
+              <Receipt className="w-3.5 h-3.5" />
               Carrito
               {cart.length > 0 && (
-                <span className="px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-[10px] rounded-full font-bold">{cart.length}</span>
+                <span className="min-w-[16px] h-4 px-1 bg-emerald-500 text-white text-[9px] rounded-full font-bold flex items-center justify-center">{cart.length}</span>
               )}
             </button>
           </div>
 
-          <div className="flex flex-col lg:flex-row gap-4 sm:gap-6 items-start">
+          <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 lg:gap-6 items-start">
 
             {/* ── Catálogo (izquierda) ──────────────────────────────────────────── */}
-            <div className={`${mobileView === 'cart' ? 'hidden lg:block' : 'block'} flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl`}>
-              {/* Tabs */}
-              <div className="flex border-b border-zinc-200 dark:border-zinc-700 px-5">
-                {(['catalog', 'frequent'] as const).map(tab => (
-                  <button key={tab}
-                    onClick={() => { setCatalogTab(tab); setCatalogPage(1); }}
-                    className={`py-4 text-sm font-medium border-b-2 mr-6 -mb-px transition-colors ${catalogTab === tab ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400' : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'}`}>
-                    {tab === 'catalog' ? 'Catálogo de productos' : 'Productos frecuentes'}
-                  </button>
-                ))}
-              </div>
+            <div className={`${mobileView === 'cart' ? 'hidden lg:block' : 'block'} flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden`}>
 
-              <div className="p-5">
-                {/* Search row */}
-                <div className="flex items-center gap-3 mb-4">
+              {/* Tabs + search — header compacto */}
+              <div className="border-b border-zinc-200 dark:border-zinc-700">
+                {/* Sub-tabs */}
+                <div className="flex px-3 sm:px-5">
+                  {(['catalog', 'frequent'] as const).map(tab => (
+                    <button key={tab}
+                      onClick={() => { setCatalogTab(tab); setCatalogPage(1); }}
+                      className={`py-2.5 sm:py-3.5 text-xs sm:text-sm font-medium border-b-2 mr-4 sm:mr-6 -mb-px transition-colors whitespace-nowrap ${catalogTab === tab ? 'border-emerald-500 text-emerald-600 dark:text-emerald-400' : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'}`}>
+                      {tab === 'catalog' ? 'Catálogo' : 'Frecuentes'}
+                    </button>
+                  ))}
+                </div>
+                {/* Search bar — compacto en mobile */}
+                <div className="px-2 sm:px-3 pb-2 pt-1 flex items-center gap-1.5">
                   <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400 pointer-events-none" />
+                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400 pointer-events-none" />
                     <Input
-                      placeholder="Buscar por código o nombre..."
-                      className="pl-9 h-9"
+                      placeholder="Código o nombre..."
+                      className="pl-8 h-8 text-xs sm:text-sm"
                       value={catalogSearchInput}
                       onChange={e => { setCatalogSearchInput(e.target.value); setCatalogPage(1); }}
                     />
                   </div>
-                  <button className="h-9 w-9 flex items-center justify-center border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 transition-colors" title="Escanear código">
-                    <Scan className="w-4 h-4" />
-                  </button>
                   <Select value={selectedDept} onValueChange={v => { setSelectedDept(v); setCatalogPage(1); }}>
-                    <SelectTrigger className="h-9 w-40">
-                      <Filter className="w-3.5 h-3.5 mr-1.5 text-zinc-400" />
-                      <SelectValue placeholder="Departamento" />
+                    <SelectTrigger className="h-8 w-[110px] sm:w-36 text-xs shrink-0">
+                      <Filter className="w-3 h-3 mr-1 text-zinc-400 shrink-0" />
+                      <SelectValue placeholder="Dpto." />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">Todos</SelectItem>
@@ -1368,32 +1366,94 @@ export function NewInvoice() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <button className="h-8 w-8 shrink-0 flex items-center justify-center border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 transition-colors" title="Escanear código">
+                    <Scan className="w-3.5 h-3.5" />
+                  </button>
                 </div>
+              </div>
 
-                {/* Product grid */}
-                {isCatalogLoading ? (
-                  <div className="text-center py-12 text-zinc-400 dark:text-zinc-600">
-                    <Loader2 className="w-8 h-8 mx-auto mb-2 animate-spin opacity-40" />
-                    <p className="text-sm">Cargando productos...</p>
-                  </div>
-                ) : pagedProducts.length === 0 ? (
-                  <div className="text-center py-12 text-zinc-400 dark:text-zinc-600">
-                    <Package className="w-10 h-10 mx-auto mb-2 opacity-40" />
-                    <p className="text-sm">No se encontraron productos</p>
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 sm:grid-cols-2 gap-3">
+              {/* Product list */}
+              {isCatalogLoading ? (
+                <div className="text-center py-10 text-zinc-400 dark:text-zinc-600">
+                  <Loader2 className="w-7 h-7 mx-auto mb-2 animate-spin opacity-40" />
+                  <p className="text-xs sm:text-sm">Cargando productos...</p>
+                </div>
+              ) : pagedProducts.length === 0 ? (
+                <div className="text-center py-10 text-zinc-400 dark:text-zinc-600">
+                  <Package className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                  <p className="text-xs sm:text-sm">No se encontraron productos</p>
+                </div>
+              ) : (
+                <>
+                  {/* MOBILE: lista horizontal compacta (< sm) */}
+                  <div className="sm:hidden divide-y divide-zinc-100 dark:divide-zinc-800">
                     {pagedProducts.map((product: any) => {
-                      const price = invoiceType === 'credit'
+                      const finalPrice = invoiceType === 'credit'
                         ? (product.price2 || product.final_price || 0)
                         : (product.final_price || 0);
+                      const cartCount = cart.filter(i => i.productId === product.id).length;
+                      const outOfStock = (product.stock ?? 0) <= 0 && !product.use_unit_ids;
+                      return (
+                        <div key={product.id}
+                          className={`flex items-center gap-2 px-3 py-2 transition-colors ${outOfStock ? 'opacity-50' : 'active:bg-zinc-50 dark:active:bg-zinc-800/60'}`}>
+                          {/* Left: info */}
+                          <div className="flex-1 min-w-0" onClick={() => !outOfStock ? addProductToCart(product) : undefined}>
+                            <div className="flex items-center gap-1 mb-0.5">
+                              <span className="text-[9px] font-mono text-zinc-400 shrink-0">{product.code}</span>
+                              {cartCount > 0 && (
+                                <span className="inline-flex items-center px-1 rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-[8px] font-bold">×{cartCount}</span>
+                              )}
+                              {product.use_unit_ids && (
+                                <span className="inline-flex items-center gap-0.5 px-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 text-[8px] font-bold"><Hash className="w-2 h-2" />ID</span>
+                              )}
+                            </div>
+                            <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 leading-tight truncate">{product.name}</p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[9px] text-zinc-400">P1 <span className="text-zinc-500">{formatCOP(product.price1 ?? 0)}</span></span>
+                              <span className="text-zinc-300 dark:text-zinc-600">·</span>
+                              <span className="text-[9px] text-zinc-400">P2 <span className="text-zinc-500">{formatCOP(product.price2 ?? 0)}</span></span>
+                              {isAdmin && (product.current_cost ?? 0) > 0 && (
+                                <>
+                                  <span className="text-zinc-300 dark:text-zinc-600">·</span>
+                                  <span className="text-[9px] text-amber-500">C {formatCOP(product.current_cost)}</span>
+                                </>
+                              )}
+                            </div>
+                          </div>
+                          {/* Right: price + actions */}
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <div className="text-right">
+                              <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 leading-none">{formatCOP(finalPrice)}</p>
+                              <p className="text-[9px] text-zinc-400 leading-none mt-0.5">
+                                {outOfStock ? <span className="text-red-400">Sin stock</span> : `Stk:${product.stock}`}
+                              </p>
+                            </div>
+                            <button
+                              onClick={e => { e.stopPropagation(); openPriceInfoFromCatalog(product); }}
+                              className="w-7 h-7 flex items-center justify-center rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:text-emerald-600 hover:border-emerald-400 transition-colors">
+                              <Info className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={e => { e.stopPropagation(); if (!outOfStock) addProductToCart(product); }}
+                              disabled={outOfStock}
+                              className={`w-7 h-7 flex items-center justify-center rounded-lg border-2 transition-all font-bold text-base ${outOfStock ? 'border-zinc-200 dark:border-zinc-700 text-zinc-300 cursor-not-allowed' : 'border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white active:scale-95'}`}>
+                              <Plus className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* DESKTOP: grid de tarjetas (sm+) */}
+                  <div className="hidden sm:grid sm:grid-cols-2 gap-3 p-5">
+                    {pagedProducts.map((product: any) => {
                       const cartCount = cart.filter(i => i.productId === product.id).length;
                       const outOfStock = (product.stock ?? 0) <= 0;
                       return (
                         <div key={product.id}
                           className={`relative border rounded-xl p-3 flex flex-col gap-2 transition-all cursor-pointer ${outOfStock && !product.use_unit_ids ? 'border-zinc-200 dark:border-zinc-700 opacity-60' : 'border-zinc-200 dark:border-zinc-700 hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'}`}
                           onClick={() => !outOfStock || product.use_unit_ids ? addProductToCart(product) : undefined}>
-                          {/* Header row: ID badge + name */}
                           <div className="flex items-start justify-between gap-1.5">
                             <div className="flex-1 min-w-0">
                               <p className="text-[10px] text-zinc-400 font-mono">{product.code}</p>
@@ -1401,9 +1461,7 @@ export function NewInvoice() {
                             </div>
                             <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
                               {cartCount > 0 && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/50 border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold leading-none">
-                                  ×{cartCount}
-                                </span>
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/50 border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold leading-none">×{cartCount}</span>
                               )}
                               {product.use_unit_ids && (
                                 <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 text-[9px] font-bold leading-none">
@@ -1412,8 +1470,6 @@ export function NewInvoice() {
                               )}
                             </div>
                           </div>
-
-                          {/* Price badges */}
                           <div className="flex flex-wrap gap-1.5">
                             <span className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
                               <span className="text-[9px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500 leading-none mb-0.5">P1</span>
@@ -1424,7 +1480,7 @@ export function NewInvoice() {
                               <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 leading-none">{formatCOP(product.price2 ?? 0)}</span>
                             </span>
                             <span className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700">
-                              <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-500 dark:text-emerald-500 leading-none mb-0.5">Final</span>
+                              <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-500 leading-none mb-0.5">Final</span>
                               <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 leading-none">{formatCOP(product.final_price ?? 0)}</span>
                             </span>
                             {isAdmin && (product.current_cost ?? 0) > 0 && (
@@ -1434,8 +1490,6 @@ export function NewInvoice() {
                               </span>
                             )}
                           </div>
-
-                          {/* Footer row: stock + actions */}
                           <div className="flex items-center justify-between gap-2 mt-0.5">
                             <p className="text-[11px] text-zinc-400">
                               {outOfStock ? <span className="text-red-400">Sin stock</span> : `Stock: ${product.stock}`}
@@ -1460,32 +1514,38 @@ export function NewInvoice() {
                       );
                     })}
                   </div>
-                )}
+                </>
+              )}
 
-                {/* Pagination */}
-                {catalogTab === 'catalog' && (
-                  <div className="mt-5 flex items-center justify-center gap-3">
-                    <Button variant="outline" size="sm" onClick={() => setCatalogPage(p => Math.max(1, p - 1))} disabled={catalogPage === 1 || isCatalogLoading}>
-                      Anterior
-                    </Button>
-                    <span className="text-sm text-zinc-500">
-                      {isCatalogLoading ? 'Buscando...' : `Página ${catalogPage} de ${Math.max(1, getTotalPages())} · ${catalogTotalCount} productos`}
-                    </span>
-                    <Button variant="outline" size="sm" onClick={() => setCatalogPage(p => Math.min(getTotalPages(), p + 1))} disabled={catalogPage >= getTotalPages() || isCatalogLoading}>
-                      Ver más
-                    </Button>
-                  </div>
-                )}
-              </div>
+              {/* Pagination */}
+              {catalogTab === 'catalog' && (
+                <div className="px-3 py-2 sm:px-5 sm:py-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2">
+                  <button
+                    onClick={() => setCatalogPage(p => Math.max(1, p - 1))}
+                    disabled={catalogPage === 1 || isCatalogLoading}
+                    className="h-7 px-2.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    ← Ant.
+                  </button>
+                  <span className="text-[10px] sm:text-xs text-zinc-400 text-center">
+                    {isCatalogLoading ? 'Buscando...' : `${catalogPage} / ${Math.max(1, getTotalPages())} · ${catalogTotalCount} prod.`}
+                  </span>
+                  <button
+                    onClick={() => setCatalogPage(p => Math.min(getTotalPages(), p + 1))}
+                    disabled={catalogPage >= getTotalPages() || isCatalogLoading}
+                    className="h-7 px-2.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    Sig. →
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* ── Carrito (derecha) ─────────────────────────────────────────────── */}
-            <div className={`${mobileView === 'catalog' ? 'hidden lg:flex' : 'flex'} w-full lg:w-[520px] xl:w-[600px] flex-shrink-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 sm:p-5 flex-col lg:sticky lg:top-4`}>
+            <div className={`${mobileView === 'catalog' ? 'hidden lg:flex' : 'flex'} w-full lg:w-[500px] xl:w-[560px] flex-shrink-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 sm:p-5 flex-col lg:sticky lg:top-4`}>
 
               {/* Resumen del cliente */}
               {(invoiceType === 'credit' ? selectedCreditCustomer?.name : (isConsumerFinal ? 'Consumidor Final' : customerName)) && (
-                <div className="mb-4 flex items-center gap-2 px-3 py-2 bg-zinc-50 dark:bg-zinc-800 rounded-lg">
-                  <User className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
+                <div className="mb-3 flex items-center gap-2 px-2.5 py-1.5 bg-zinc-50 dark:bg-zinc-800 rounded-lg">
+                  <User className="w-3 h-3 text-zinc-400 flex-shrink-0" />
                   <p className="text-xs text-zinc-600 dark:text-zinc-400 truncate">
                     {invoiceType === 'credit' ? selectedCreditCustomer?.name : (isConsumerFinal ? 'Consumidor Final' : customerName)}
                   </p>
@@ -1493,7 +1553,7 @@ export function NewInvoice() {
                 </div>
               )}
 
-              <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center justify-between mb-2">
                 <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
                   Carrito{cart.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-[10px] rounded-full font-bold">{cart.length}</span>}
                 </h2>
@@ -1505,23 +1565,24 @@ export function NewInvoice() {
               </div>
 
               {/* Cart items */}
-              <div className="flex-1 space-y-2 max-h-[55vh] lg:max-h-[560px] overflow-y-auto min-h-[100px]">
+              <div className="flex-1 space-y-0 max-h-[52vh] lg:max-h-[560px] overflow-y-auto min-h-[80px]">
                 {cart.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center h-24 text-zinc-300 dark:text-zinc-600">
-                    <Package className="w-8 h-8 mb-1.5" />
+                  <div className="flex flex-col items-center justify-center h-20 text-zinc-300 dark:text-zinc-600">
+                    <Package className="w-7 h-7 mb-1" />
                     <p className="text-xs">Agrega productos desde el catálogo</p>
                   </div>
                 ) : (
                   cart.map((item, i) => (
-                    <div key={i} className="py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
-                      <div className="flex gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
-                          <Package className="w-5 h-5 text-zinc-400" />
+                    <div key={i} className="py-2 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
+                      <div className="flex gap-2">
+                        {/* Sin el icono cuadrado en mobile — va directo al texto */}
+                        <div className="hidden sm:flex w-9 h-9 rounded-lg bg-zinc-100 dark:bg-zinc-800 items-center justify-center flex-shrink-0">
+                          <Package className="w-4 h-4 text-zinc-400" />
                         </div>
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{item.productName}</p>
-                          <p className="text-[11px] text-zinc-400 font-mono">{item.productCode}</p>
-                          <div className="flex items-center gap-2 mt-1.5">
+                          <p className="text-xs sm:text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{item.productName}</p>
+                          <p className="text-[10px] text-zinc-400 font-mono">{item.productCode}</p>
+                          <div className="flex items-center gap-1.5 mt-1">
                             {item.useUnitIds ? (
                               <>
                                 <button
@@ -1533,49 +1594,45 @@ export function NewInvoice() {
                                       ? { ...ci, unitIds: newIds, quantity: Math.max(1, newIds.length), total: ci.price * Math.max(1, newIds.length) }
                                       : ci));
                                   }}
-                                  className="w-6 h-6 rounded border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500 hover:border-zinc-400 text-sm font-bold">−</button>
-                                <span className="text-sm font-semibold w-6 text-center">{item.unitIds?.length ?? item.quantity}</span>
+                                  className="w-5 h-5 sm:w-6 sm:h-6 rounded border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500 hover:border-zinc-400 text-xs font-bold">−</button>
+                                <span className="text-xs font-semibold w-5 text-center">{item.unitIds?.length ?? item.quantity}</span>
                                 <button
                                   onClick={() => { setCurrentItemIndex(i); setSelectedUnitIds(item.unitIds || []); setUnitIdNotes(item.unitIdNotes || {}); setUnitIdDialogOpen(true); }}
-                                  className="w-6 h-6 rounded border border-amber-300 dark:border-amber-600 flex items-center justify-center text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-sm font-bold">+</button>
+                                  className="w-5 h-5 sm:w-6 sm:h-6 rounded border border-amber-300 dark:border-amber-600 flex items-center justify-center text-amber-600 dark:text-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950/30 text-xs font-bold">+</button>
                               </>
                             ) : (
                               <>
-                                <button onClick={() => updateCartQty(i, item.quantity - 1)} className="w-6 h-6 rounded border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500 hover:border-zinc-400 text-sm font-bold">−</button>
-                                <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
-                                <button onClick={() => updateCartQty(i, item.quantity + 1)} className="w-6 h-6 rounded border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500 hover:border-zinc-400 text-sm font-bold">+</button>
+                                <button onClick={() => updateCartQty(i, item.quantity - 1)} className="w-5 h-5 sm:w-6 sm:h-6 rounded border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500 hover:border-zinc-400 text-xs font-bold">−</button>
+                                <span className="text-xs font-semibold w-5 text-center">{item.quantity}</span>
+                                <button onClick={() => updateCartQty(i, item.quantity + 1)} className="w-5 h-5 sm:w-6 sm:h-6 rounded border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500 hover:border-zinc-400 text-xs font-bold">+</button>
                               </>
                             )}
                           </div>
                         </div>
-                        <div className="text-right flex-shrink-0">
-                          <div className="flex items-center justify-end gap-1.5 mb-1">
+                        <div className="text-right flex-shrink-0 flex flex-col items-end justify-between">
+                          <div className="flex items-center gap-1 mb-1">
                             <button
                               onClick={e => { e.stopPropagation(); openPriceInfoFromCart(i); }}
-                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:border-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-400 text-[10px] font-medium transition-colors">
+                              className="w-6 h-6 flex items-center justify-center rounded border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-emerald-400 hover:text-emerald-600 transition-colors">
                               <Info className="w-3 h-3" />
-                              Info
                             </button>
                             {!item.useUnitIds && (
                               <button
                                 onClick={() => openPriceEdit(i)}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:border-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 text-[10px] font-medium transition-colors">
+                                className="w-6 h-6 flex items-center justify-center rounded border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors">
                                 <Pencil className="w-3 h-3" />
-                                Precio
                               </button>
                             )}
                           </div>
-                          <div className="flex items-center justify-end gap-1.5">
-                            <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400">{formatCOP(item.total)}</p>
-                          </div>
-                          <p className="text-[11px] text-zinc-400">× {item.useUnitIds ? (item.unitIds?.length ?? item.quantity) : item.quantity}</p>
-                          <button onClick={() => removeFromCart(i)} className="mt-1.5 text-zinc-300 hover:text-red-500 transition-colors">
-                            <X className="w-4 h-4" />
+                          <p className="text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400">{formatCOP(item.total)}</p>
+                          <p className="text-[10px] text-zinc-400">×{item.useUnitIds ? (item.unitIds?.length ?? item.quantity) : item.quantity}</p>
+                          <button onClick={() => removeFromCart(i)} className="mt-1 text-zinc-300 hover:text-red-500 transition-colors">
+                            <X className="w-3.5 h-3.5" />
                           </button>
                         </div>
                       </div>
                       {item.useUnitIds && (
-                        <div className="mt-2 ml-[52px]">
+                        <div className="mt-1.5 ml-0 sm:ml-[44px]">
                           {item.unitIds && item.unitIds.length > 0 ? (
                             <div className="flex flex-col gap-1.5">
                               <div className="flex flex-wrap gap-1">
