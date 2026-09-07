@@ -68,7 +68,7 @@ const STEPS = [
   { n: 4, title: 'Resumen', sub: 'Verificar y emitir' },
 ];
 
-const CATALOG_PER_PAGE = 12;
+const CATALOG_PER_PAGE = 6;
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -429,7 +429,7 @@ export function NewInvoice() {
   const removeFromCart = (index: number) => setCart(prev => prev.filter((_, i) => i !== index));
 
   const updateCartQty = (index: number, qty: number) => {
-    if (qty < 1) return;
+    if (qty < 0) return;
     setCart(prev => prev.map((item, i) =>
       i === index ? { ...item, quantity: qty, total: item.price * qty } : item
     ));
@@ -644,6 +644,9 @@ export function NewInvoice() {
     if (cart.length === 0) { toast.error('Agrega al menos un producto'); return; }
     if (invoiceType === 'credit' && !selectedCreditCustomer) { toast.error('Selecciona un cliente para la factura a crédito'); return; }
     for (const item of cart) {
+      if (!item.useUnitIds && (item.quantity === 0 || !item.quantity)) {
+        toast.error(`La cantidad de "${item.productName}" no puede estar vacía`); return;
+      }
       if (item.useUnitIds && (!item.unitIds || item.unitIds.length === 0)) {
         toast.error(`Asigná al menos una ID para ${item.productName}`); return;
       }
@@ -1318,7 +1321,7 @@ export function NewInvoice() {
       {step === 2 && (
         <div className="p-2 sm:p-4 lg:p-6">
           {/* Mobile tab switcher */}
-          <div className="flex lg:hidden mb-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5 gap-0.5">
+          <div className="hidden mb-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5 gap-0.5">
             <button
               onClick={() => setMobileView('catalog')}
               className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors flex items-center justify-center gap-1.5 ${mobileView === 'catalog' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400'}`}>
@@ -1336,10 +1339,10 @@ export function NewInvoice() {
             </button>
           </div>
 
-          <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 lg:gap-6 items-start">
+          <div className="flex flex-col gap-3 sm:gap-4">
 
             {/* ── Catálogo (izquierda) ──────────────────────────────────────────── */}
-            <div className={`${mobileView === 'cart' ? 'hidden lg:block' : 'block'} flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden`}>
+            <div className="order-2 w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
 
               {/* Tabs + search — header compacto */}
               <div className="border-b border-zinc-200 dark:border-zinc-700">
@@ -1475,7 +1478,7 @@ export function NewInvoice() {
                   </div>
 
                   {/* DESKTOP: grid de tarjetas (sm+) */}
-                  <div className="hidden sm:grid sm:grid-cols-2 gap-3 p-5">
+                  <div className="hidden sm:grid sm:grid-cols-3 gap-3 p-4">
                     {pagedProducts.map((product: any) => {
                       const cartCount = cart.filter(i => i.productId === product.id).length;
                       const stock = product.stock ?? 0;
@@ -1582,7 +1585,7 @@ export function NewInvoice() {
             </div>
 
             {/* ── Carrito (derecha) ─────────────────────────────────────────────── */}
-            <div className={`${mobileView === 'catalog' ? 'hidden lg:flex' : 'flex'} w-full lg:w-[500px] xl:w-[560px] flex-shrink-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 sm:p-5 flex-col lg:sticky lg:top-4`}>
+            <div className="order-1 w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 sm:p-5 flex flex-col">
 
               {/* Resumen del cliente */}
               {(invoiceType === 'credit' ? selectedCreditCustomer?.name : (isConsumerFinal ? 'Consumidor Final' : customerName)) && (
@@ -1607,7 +1610,7 @@ export function NewInvoice() {
               </div>
 
               {/* Cart items */}
-              <div className="flex-1 space-y-0 max-h-[52vh] lg:max-h-[560px] overflow-y-auto min-h-[80px]">
+              <div className="flex-1 space-y-0 max-h-[40vh] overflow-y-auto min-h-[80px]">
                 {cart.length === 0 ? (
                   <div className="flex flex-col items-center justify-center h-20 text-zinc-300 dark:text-zinc-600">
                     <Package className="w-7 h-7 mb-1" />
@@ -1644,7 +1647,7 @@ export function NewInvoice() {
                               </>
                             ) : (
                               <>
-                                <button onClick={() => updateCartQty(i, item.quantity - 1)} className="w-5 h-5 sm:w-6 sm:h-6 rounded border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500 hover:border-zinc-400 text-xs font-bold">−</button>
+                                <button onClick={() => updateCartQty(i, Math.max(0, item.quantity - 1))} className="w-5 h-5 sm:w-6 sm:h-6 rounded border border-zinc-200 dark:border-zinc-700 flex items-center justify-center text-zinc-500 hover:border-zinc-400 text-xs font-bold">−</button>
                                 <input
                                   type="number"
                                   value={item.quantity === 0 ? '' : item.quantity}
@@ -1672,8 +1675,10 @@ export function NewInvoice() {
                               </button>
                             )}
                           </div>
+                          <p className="text-[15px] text-zinc-400 text-right">
+                            {formatCOP(item.price)} × {item.useUnitIds ? (item.unitIds?.length ?? item.quantity) : item.quantity}
+                          </p>
                           <p className="text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400">{formatCOP(item.total)}</p>
-                          <p className="text-[10px] text-zinc-400">×{item.useUnitIds ? (item.unitIds?.length ?? item.quantity) : item.quantity}</p>
                           <button onClick={() => removeFromCart(i)} className="mt-1 text-zinc-300 hover:text-red-500 transition-colors">
                             <X className="w-3.5 h-3.5" />
                           </button>
@@ -1738,7 +1743,7 @@ export function NewInvoice() {
                       <span><span className="font-semibold text-zinc-700 dark:text-zinc-300">{cart.length}</span> {cart.length === 1 ? 'producto' : 'productos'}</span>
                     </div>
                     <div className="flex items-center gap-1.5 text-xs text-zinc-500 dark:text-zinc-400">
-                      <span><span className="font-semibold text-zinc-700 dark:text-zinc-300">{cart.reduce((s, i) => s + (i.useUnitIds ? (i.unitIds?.length ?? i.quantity) : i.quantity), 0)}</span> unidades</span>
+                      <span><span className="font-semibold text-zinc-800 dark:text-zinc-300">{cart.reduce((s, i) => s + (i.useUnitIds ? (i.unitIds?.length ?? i.quantity) : i.quantity), 0)}</span> unidades</span>
                       <Hash className="w-3.5 h-3.5" />
                     </div>
                   </div>
