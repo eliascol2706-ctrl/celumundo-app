@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { useNavigate, useBlocker } from 'react-router';
+import { useNavigate, useBlocker, useLocation } from 'react-router';
 import { useTaskQueue } from '../contexts/TaskQueueContext';
 import {
   ArrowLeft, Plus, Trash2, Receipt, CreditCard, Loader2, Scan, Search,
@@ -13,7 +13,7 @@ import {
   searchInvoiceCustomers, getInvoiceCustomerByName, addInvoiceCustomer,
   searchInvoiceCustomersByQuery,
   getCreditNotesByCustomer, applyCreditNoteBalance, addCreditPayment,
-  getColombiaDate, getCurrentCompany, supabase,
+  getColombiaDate, getCurrentCompany, supabase, updateInvoice,
   type Customer, type InvoiceCustomer, type CreditNote,
 } from '../lib/supabase';
 import { Button } from '../components/ui/button';
@@ -74,8 +74,13 @@ const CATALOG_PER_PAGE = 6;
 
 export function NewInvoice() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { addTask, updateTask } = useTaskQueue();
   const shouldProceedRef = useRef(false);
+
+  // Edit mode: pre-loaded invoice from pending_confirmation
+  const editInvoice = (location.state as any)?.editInvoice ?? null;
+  const [editInvoiceId, setEditInvoiceId] = useState<string | null>(editInvoice?.id ?? null);
 
   // Wizard
   const [step, setStep] = useState<WizardStep>(1);
@@ -182,6 +187,11 @@ export function NewInvoice() {
   const [priceEditIndex, setPriceEditIndex] = useState<number | null>(null);
   const [priceEditInput, setPriceEditInput] = useState('');
 
+  // Common product modal
+  const [commonProductOpen, setCommonProductOpen] = useState(false);
+  const [commonProductName, setCommonProductName] = useState('');
+  const [commonProductPrice, setCommonProductPrice] = useState('');
+
   // Price info modal
   const [priceInfoOpen, setPriceInfoOpen] = useState(false);
   const [priceInfoData, setPriceInfoData] = useState<{
@@ -211,6 +221,46 @@ export function NewInvoice() {
       setCreditCustomers(customers);
     };
     load();
+  }, []);
+
+  // ─── Pre-load invoice from edit mode ────────────────────────────────────────
+
+  useEffect(() => {
+    if (!editInvoice) return;
+    // Populate cart from invoice items
+    const preloadedCart: CartItem[] = (editInvoice.items ?? []).map((item: any) => ({
+      productId: item.productId,
+      productName: item.productName,
+      productCode: item.productCode,
+      quantity: item.quantity,
+      price: item.price,
+      total: item.total,
+      useUnitIds: item.useUnitIds ?? false,
+      unitIds: item.unitIds ?? [],
+      availableIds: [],
+      unitIdNotes: item.unitIdNotes ?? {},
+    }));
+    setCart(preloadedCart);
+
+    // Populate customer info
+    if (editInvoice.customer_name) setCustomerName(editInvoice.customer_name);
+    if (editInvoice.customer_document) setCustomerDocument(editInvoice.customer_document);
+    if (editInvoice.customer_phone) setCustomerPhone(editInvoice.customer_phone);
+    if (editInvoice.customer_address) setCustomerAddress(editInvoice.customer_address);
+    if (editInvoice.serie) setSerie(editInvoice.serie);
+    if (editInvoice.notes) setNotes(editInvoice.notes);
+    if (editInvoice.discount_value) setDiscountValue(editInvoice.discount_value);
+    if (editInvoice.discount_is_percent) setDiscountIsPercent(editInvoice.discount_is_percent);
+    if (editInvoice.include_iva !== undefined) setIncludeIVA(editInvoice.include_iva);
+    if (editInvoice.warranty_enabled) {
+      setWarrantyEnabled(true);
+      if (editInvoice.warranty_months) setWarrantyMonths(editInvoice.warranty_months);
+      if (editInvoice.warranty_category) setWarrantyCategory(editInvoice.warranty_category);
+    }
+
+    // Skip to step 2 (products) so user lands directly on the cart
+    setStep(2);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ─── Catalog DB search ────────────────────────────────────────────────────
@@ -401,16 +451,7 @@ export function NewInvoice() {
       return;
     }
 
-    // Non-unit-id product: merge with existing item
-    const existingIndex = cart.findIndex(i => i.productId === product.id && !i.useUnitIds);
-    if (existingIndex >= 0) {
-      setCart(prev => prev.map((item, i) => {
-        if (i !== existingIndex) return item;
-        const newQty = item.quantity + 1;
-        return { ...item, quantity: newQty, total: item.price * newQty };
-      }));
-      return;
-    }
+    // Non-unit-id product: always add as a separate line item
 
     setCart(prev => [...prev, {
       productId: product.id,
@@ -484,6 +525,32 @@ export function NewInvoice() {
   };
 
   const isAdmin = getCurrentUser()?.role === 'admin';
+  const currentCompany = getCurrentCompany() ?? '';
+  const isRepuestos = currentCompany.toLowerCase().includes('repuesto');
+
+  const addCommonProduct = (name: string, price: number) => {
+    const id = `common-${Date.now()}`;
+    setCart(prev => [...prev, {
+      productId: id,
+      productName: `[COMÚN] ${name}`,
+      productCode: 'COMUN',
+      quantity: 1,
+      price,
+      total: price,
+      useUnitIds: false,
+    }]);
+    toast.success(`${name} agregado al carrito`);
+  };
+
+  const handleCommonProductButton = () => {
+    if (isRepuestos) {
+      addCommonProduct('Servicio Técnico', 0);
+    } else {
+      setCommonProductName('');
+      setCommonProductPrice('');
+      setCommonProductOpen(true);
+    }
+  };
 
   // ─── Customer search (regular) ────────────────────────────────────────────
 
@@ -785,8 +852,15 @@ export function NewInvoice() {
         };
       }
 
-      const invoice = await addInvoice(invoiceData);
-      if (!invoice) { toast.error('Error al crear la factura'); setIsSubmitting(false); return; }
+      let invoice: any;
+      if (editInvoiceId) {
+        // Update existing pending_confirmation invoice
+        invoice = await updateInvoice(editInvoiceId, invoiceData);
+        if (!invoice) { toast.error('Error al actualizar la factura'); setIsSubmitting(false); return; }
+      } else {
+        invoice = await addInvoice(invoiceData);
+        if (!invoice) { toast.error('Error al crear la factura'); setIsSubmitting(false); return; }
+      }
 
       // Save common products
       const commonItems = cart.filter(i => i.productId.startsWith('common-'));
@@ -823,17 +897,20 @@ export function NewInvoice() {
         }
       }
 
-      const taskId = addTask({
-        type: invoiceType === 'credit' ? 'credit_invoice' : 'invoice',
-        message: `Procesando factura #${invoice.number}...`,
-        data: { invoiceId: invoice.id, invoiceNumber: invoice.number },
-      });
-
       localStorage.setItem('lastCreatedInvoice', JSON.stringify(invoice));
       shouldProceedRef.current = true;
       navigate('/sistema/facturacion');
 
-      processInventory(invoice, cart, invoiceType, invoiceStatus, taskId);
+      if (!editInvoiceId) {
+        const taskId = addTask({
+          type: invoiceType === 'credit' ? 'credit_invoice' : 'invoice',
+          message: `Procesando factura #${invoice.number}...`,
+          data: { invoiceId: invoice.id, invoiceNumber: invoice.number },
+        });
+        processInventory(invoice, cart, invoiceType, invoiceStatus, taskId);
+      } else {
+        toast.success(`Factura #${invoice.number} actualizada correctamente`);
+      }
     } catch (error) {
       console.error('Error creating invoice:', error);
       toast.error('Error al crear la factura');
@@ -1013,7 +1090,9 @@ export function NewInvoice() {
               <span className="hidden sm:inline">Facturación</span>
             </button>
             <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 hidden sm:block" />
-            <span className="text-zinc-900 dark:text-zinc-100 font-medium truncate hidden sm:block">Nueva Factura</span>
+            <span className="text-zinc-900 dark:text-zinc-100 font-medium truncate hidden sm:block">
+              {editInvoiceId ? `Editando ${editInvoice?.number ?? 'Factura'}` : 'Nueva Factura'}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-emerald-600 border-emerald-300 dark:border-emerald-700 dark:text-emerald-400 gap-1 text-xs px-2 py-0.5">
@@ -1320,8 +1399,15 @@ export function NewInvoice() {
       ════════════════════════════════════════════════════════════════════════ */}
       {step === 2 && (
         <div className="p-2 sm:p-4 lg:p-6">
+          {/* Edit mode banner */}
+          {editInvoiceId && (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
+              <Pencil className="w-4 h-4 flex-shrink-0" />
+              <span>Editando <span className="font-semibold">{editInvoice?.number}</span> — Modifica los productos y guarda los cambios.</span>
+            </div>
+          )}
           {/* Mobile tab switcher */}
-          <div className="hidden mb-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5 gap-0.5">
+          <div className="flex lg:hidden mb-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5 gap-0.5">
             <button
               onClick={() => setMobileView('catalog')}
               className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors flex items-center justify-center gap-1.5 ${mobileView === 'catalog' ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm' : 'text-zinc-500 dark:text-zinc-400'}`}>
@@ -1339,10 +1425,10 @@ export function NewInvoice() {
             </button>
           </div>
 
-          <div className="flex flex-col gap-3 sm:gap-4">
+          <div className="flex flex-col lg:flex-row gap-2 sm:gap-4 lg:gap-5 items-start">
 
             {/* ── Catálogo (izquierda) ──────────────────────────────────────────── */}
-            <div className="order-2 w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
+            <div className={`${mobileView === 'cart' ? 'hidden lg:block' : 'block'} w-full lg:w-[400px] xl:w-[440px] flex-shrink-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden lg:sticky lg:top-4`}>
 
               {/* Tabs + search — header compacto */}
               <div className="border-b border-zinc-200 dark:border-zinc-700">
@@ -1356,19 +1442,19 @@ export function NewInvoice() {
                     </button>
                   ))}
                 </div>
-                {/* Search bar — compacto en mobile */}
-                <div className="px-2 sm:px-3 pb-2 pt-1 flex items-center gap-1.5">
+                {/* Search bar */}
+                <div className="px-2 sm:px-3 pb-2.5 pt-1.5 flex items-center gap-2">
                   <div className="relative flex-1">
-                    <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400 pointer-events-none" />
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400 pointer-events-none" />
                     <Input
                       placeholder="Código o nombre..."
-                      className="pl-8 h-8 text-xs sm:text-sm"
+                      className="pl-9 h-9 text-sm"
                       value={catalogSearchInput}
                       onChange={e => { setCatalogSearchInput(e.target.value); setCatalogPage(1); }}
                     />
                   </div>
                   <Select value={selectedDept} onValueChange={v => { setSelectedDept(v); setCatalogPage(1); }}>
-                    <SelectTrigger className="h-8 w-[110px] sm:w-36 text-xs shrink-0">
+                    <SelectTrigger className="h-9 w-[100px] sm:w-32 text-xs shrink-0">
                       <Filter className="w-3 h-3 mr-1 text-zinc-400 shrink-0" />
                       <SelectValue placeholder="Dpto." />
                     </SelectTrigger>
@@ -1379,8 +1465,8 @@ export function NewInvoice() {
                       ))}
                     </SelectContent>
                   </Select>
-                  <button className="h-8 w-8 shrink-0 flex items-center justify-center border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 transition-colors" title="Escanear código">
-                    <Scan className="w-3.5 h-3.5" />
+                  <button className="h-9 w-9 shrink-0 flex items-center justify-center border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-500 hover:border-emerald-400 hover:text-emerald-600 transition-colors" title="Escanear código">
+                    <Scan className="w-4 h-4" />
                   </button>
                 </div>
               </div>
@@ -1398,7 +1484,7 @@ export function NewInvoice() {
                 </div>
               ) : (
                 <>
-                  {/* MOBILE: lista horizontal compacta (< sm) */}
+                  {/* MOBILE: lista compacta pero legible (< sm) */}
                   <div className="sm:hidden divide-y divide-zinc-100 dark:divide-zinc-800">
                     {pagedProducts.map((product: any) => {
                       const finalPrice = invoiceType === 'credit'
@@ -1409,40 +1495,37 @@ export function NewInvoice() {
                       const noStock = stock <= 0 && !product.use_unit_ids;
                       return (
                         <div key={product.id}
-                          className="flex items-center gap-2 px-3 py-2 active:bg-zinc-50 dark:active:bg-zinc-800/60 transition-colors">
+                          className="flex items-center gap-3 px-3 py-2.5 active:bg-zinc-50 dark:active:bg-zinc-800/60 transition-colors">
                           {/* Left: info */}
                           <div className="flex-1 min-w-0" onClick={() => addProductToCart(product)}>
-                            <div className="flex items-center gap-1 mb-0.5">
-                              <span className="text-[9px] font-mono text-zinc-400 shrink-0">{product.code}</span>
+                            <div className="flex items-center gap-1.5 mb-0.5">
+                              <span className="text-[10px] font-mono text-zinc-400 shrink-0">{product.code}</span>
                               {cartCount > 0 && (
-                                <span className="inline-flex items-center px-1 rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-[8px] font-bold">×{cartCount}</span>
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold leading-none">×{cartCount}</span>
                               )}
                               {product.use_unit_ids && (
-                                <span className="inline-flex items-center gap-0.5 px-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 text-[8px] font-bold"><Hash className="w-2 h-2" />ID</span>
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-600 dark:text-amber-400 text-[10px] font-bold leading-none"><Hash className="w-2.5 h-2.5" />ID</span>
                               )}
                             </div>
-                            <p className="text-xs font-semibold text-zinc-900 dark:text-zinc-100 leading-tight truncate">{product.name}</p>
-                            <div className="flex items-center gap-1.5 mt-0.5">
+                            <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 leading-tight truncate">{product.name}</p>
+                            <div className="flex items-center gap-2 mt-1">
                               <button
                                 onClick={e => { e.stopPropagation(); addProductToCart(product, product.price1 ?? 0); }}
-                                title="Agregar con P1"
-                                className="text-[9px] text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 active:scale-95 transition-all">
-                                P1 <span className="text-zinc-500">{formatCOP(product.price1 ?? 0)}</span>
+                                className="text-[10px] font-medium text-zinc-500 hover:text-emerald-600 dark:hover:text-emerald-400 active:scale-95 transition-all">
+                                P1 {formatCOP(product.price1 ?? 0)}
                               </button>
                               <span className="text-zinc-300 dark:text-zinc-600">·</span>
                               <button
                                 onClick={e => { e.stopPropagation(); addProductToCart(product, product.price2 ?? 0); }}
-                                title="Agregar con P2"
-                                className="text-[9px] text-zinc-400 hover:text-emerald-600 dark:hover:text-emerald-400 active:scale-95 transition-all">
-                                P2 <span className="text-zinc-500">{formatCOP(product.price2 ?? 0)}</span>
+                                className="text-[10px] font-medium text-zinc-500 hover:text-emerald-600 dark:hover:text-emerald-400 active:scale-95 transition-all">
+                                P2 {formatCOP(product.price2 ?? 0)}
                               </button>
                               {isAdmin && (product.current_cost ?? 0) > 0 && (
                                 <>
                                   <span className="text-zinc-300 dark:text-zinc-600">·</span>
                                   <button
                                     onClick={e => { e.stopPropagation(); addProductToCart(product, product.current_cost ?? 0); }}
-                                    title="Agregar con Costo"
-                                    className="text-[9px] text-amber-500 hover:text-amber-600 active:scale-95 transition-all">
+                                    className="text-[10px] font-medium text-amber-500 hover:text-amber-600 active:scale-95 transition-all">
                                     C {formatCOP(product.current_cost)}
                                   </button>
                                 </>
@@ -1450,25 +1533,22 @@ export function NewInvoice() {
                             </div>
                           </div>
                           {/* Right: price + actions */}
-                          <div className="flex items-center gap-1.5 shrink-0">
+                          <div className="flex items-center gap-2 shrink-0">
                             <div className="text-right">
-                              <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 leading-none">{formatCOP(finalPrice)}</p>
-                              <p className="text-[9px] leading-none mt-0.5">
-                                {noStock
-                                  ? <span className="text-orange-400">Stk:{stock}</span>
-                                  : <span className="text-zinc-400">Stk:{stock}</span>
-                                }
+                              <p className="text-sm font-bold text-emerald-600 dark:text-emerald-400 leading-none">{formatCOP(finalPrice)}</p>
+                              <p className={`text-[10px] leading-none mt-1 ${noStock ? 'text-orange-400' : 'text-zinc-400'}`}>
+                                Stk: {stock}
                               </p>
                             </div>
                             <button
                               onClick={e => { e.stopPropagation(); openPriceInfoFromCatalog(product); }}
-                              className="w-7 h-7 flex items-center justify-center rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:text-emerald-600 hover:border-emerald-400 transition-colors">
-                              <Info className="w-3.5 h-3.5" />
+                              className="w-8 h-8 flex items-center justify-center rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:text-emerald-600 hover:border-emerald-400 transition-colors">
+                              <Info className="w-4 h-4" />
                             </button>
                             <button
                               onClick={e => { e.stopPropagation(); addProductToCart(product); }}
                               disabled={product.use_unit_ids && (product.stock ?? 0) <= 0}
-                              className={`w-7 h-7 flex items-center justify-center rounded-lg border-2 transition-all font-bold text-base ${product.use_unit_ids && (product.stock ?? 0) <= 0 ? 'border-zinc-200 dark:border-zinc-700 text-zinc-300 cursor-not-allowed' : 'border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white active:scale-95'}`}>
+                              className={`w-8 h-8 flex items-center justify-center rounded-lg border-2 transition-all ${product.use_unit_ids && (product.stock ?? 0) <= 0 ? 'border-zinc-200 dark:border-zinc-700 text-zinc-300 cursor-not-allowed' : 'border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white active:scale-95'}`}>
                               <Plus className="w-4 h-4" />
                             </button>
                           </div>
@@ -1478,79 +1558,78 @@ export function NewInvoice() {
                   </div>
 
                   {/* DESKTOP: grid de tarjetas (sm+) */}
-                  <div className="hidden sm:grid sm:grid-cols-3 gap-3 p-4">
+                  <div className="hidden sm:grid sm:grid-cols-2 gap-3 p-3">
                     {pagedProducts.map((product: any) => {
                       const cartCount = cart.filter(i => i.productId === product.id).length;
                       const stock = product.stock ?? 0;
                       const noStock = stock <= 0 && !product.use_unit_ids;
                       return (
                         <div key={product.id}
-                          className="relative border rounded-xl p-3 flex flex-col gap-2 transition-all cursor-pointer border-zinc-200 dark:border-zinc-700 hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
+                          className="relative border rounded-xl p-3 flex flex-col gap-2.5 transition-all cursor-pointer border-zinc-200 dark:border-zinc-700 hover:border-emerald-300 dark:hover:border-emerald-700 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
                           onClick={() => addProductToCart(product)}>
+                          {/* Header: código + badges */}
                           <div className="flex items-start justify-between gap-1.5">
                             <div className="flex-1 min-w-0">
-                              <p className="text-[10px] text-zinc-400 font-mono">{product.code}</p>
-                              <p className="text-[13px] font-semibold text-zinc-900 dark:text-zinc-100 leading-snug line-clamp-2">{product.name}</p>
+                              <p className="text-[11px] text-zinc-400 font-mono leading-none mb-1">{product.code}</p>
+                              <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 leading-snug line-clamp-2">{product.name}</p>
                             </div>
-                            <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
+                            <div className="flex flex-col items-end gap-1 flex-shrink-0">
                               {cartCount > 0 && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/50 border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 text-[9px] font-bold leading-none">×{cartCount}</span>
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/50 border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-300 text-[10px] font-bold leading-none">×{cartCount}</span>
                               )}
                               {product.use_unit_ids && (
-                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 text-[9px] font-bold leading-none">
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700 text-amber-600 dark:text-amber-400 text-[10px] font-bold leading-none">
                                   <Hash className="w-2.5 h-2.5" />ID
                                 </span>
                               )}
                             </div>
                           </div>
+                          {/* Price buttons */}
                           <div className="flex flex-wrap gap-1.5">
                             <button
                               onClick={e => { e.stopPropagation(); addProductToCart(product, product.price1 ?? 0); }}
-                              title={`Agregar con Precio 1: ${formatCOP(product.price1 ?? 0)}`}
-                              className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 transition-all cursor-pointer">
-                              <span className="text-[9px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500 leading-none mb-0.5">P1</span>
-                              <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 leading-none">{formatCOP(product.price1 ?? 0)}</span>
+                              className="inline-flex flex-col items-center px-2 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 transition-all">
+                              <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500 leading-none mb-1">P1</span>
+                              <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 leading-none">{formatCOP(product.price1 ?? 0)}</span>
                             </button>
                             <button
                               onClick={e => { e.stopPropagation(); addProductToCart(product, product.price2 ?? 0); }}
-                              title={`Agregar con Precio 2: ${formatCOP(product.price2 ?? 0)}`}
-                              className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 transition-all cursor-pointer">
-                              <span className="text-[9px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500 leading-none mb-0.5">P2</span>
-                              <span className="text-[11px] font-semibold text-zinc-700 dark:text-zinc-300 leading-none">{formatCOP(product.price2 ?? 0)}</span>
+                              className="inline-flex flex-col items-center px-2 py-1.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:border-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700 active:scale-95 transition-all">
+                              <span className="text-[10px] font-bold uppercase tracking-wide text-zinc-400 dark:text-zinc-500 leading-none mb-1">P2</span>
+                              <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 leading-none">{formatCOP(product.price2 ?? 0)}</span>
                             </button>
                             <button
                               onClick={e => { e.stopPropagation(); addProductToCart(product, product.final_price ?? 0); }}
-                              title={`Agregar con Precio Final: ${formatCOP(product.final_price ?? 0)}`}
-                              className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 active:scale-95 transition-all cursor-pointer">
-                              <span className="text-[9px] font-bold uppercase tracking-wide text-emerald-500 leading-none mb-0.5">Final</span>
-                              <span className="text-[11px] font-bold text-emerald-700 dark:text-emerald-300 leading-none">{formatCOP(product.final_price ?? 0)}</span>
+                              className="inline-flex flex-col items-center px-2 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 active:scale-95 transition-all">
+                              <span className="text-[10px] font-bold uppercase tracking-wide text-emerald-500 leading-none mb-1">Final</span>
+                              <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 leading-none">{formatCOP(product.final_price ?? 0)}</span>
                             </button>
                             {isAdmin && (product.current_cost ?? 0) > 0 && (
                               <button
                                 onClick={e => { e.stopPropagation(); addProductToCart(product, product.current_cost ?? 0); }}
-                                title={`Agregar con Costo: ${formatCOP(product.current_cost)}`}
-                                className="inline-flex flex-col items-center px-2 py-1 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50 active:scale-95 transition-all cursor-pointer">
-                                <span className="text-[9px] font-bold uppercase tracking-wide text-amber-500 leading-none mb-0.5">Costo</span>
-                                <span className="text-[11px] font-semibold text-amber-700 dark:text-amber-400 leading-none">{formatCOP(product.current_cost)}</span>
+                                className="inline-flex flex-col items-center px-2 py-1.5 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 hover:bg-amber-100 dark:hover:bg-amber-900/50 active:scale-95 transition-all">
+                                <span className="text-[10px] font-bold uppercase tracking-wide text-amber-500 leading-none mb-1">Costo</span>
+                                <span className="text-xs font-semibold text-amber-700 dark:text-amber-400 leading-none">{formatCOP(product.current_cost)}</span>
                               </button>
                             )}
                           </div>
-                          <div className="flex items-center justify-between gap-2 mt-0.5">
-                            <p className={`text-[11px] ${noStock ? 'text-orange-400' : 'text-zinc-400'}`}>
+                          {/* Footer: stock + actions */}
+                          <div className="flex items-center justify-between gap-2">
+                            <p className={`text-xs font-medium ${noStock ? 'text-orange-400' : 'text-zinc-400'}`}>
                               Stock: {stock}
                             </p>
                             <div className="flex items-center gap-1.5">
                               <button
                                 onClick={e => { e.stopPropagation(); openPriceInfoFromCatalog(product); }}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:border-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-400 text-[10px] font-medium transition-colors">
+                                className="inline-flex items-center gap-1 px-2 py-1.5 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-400 hover:border-emerald-400 hover:text-emerald-600 dark:hover:text-emerald-400 text-xs font-medium transition-colors">
                                 <Info className="w-3 h-3" />
-                                Detalles
+                                Info
                               </button>
                               <button
                                 onClick={e => { e.stopPropagation(); addProductToCart(product); }}
                                 disabled={product.use_unit_ids && stock <= 0}
-                                className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-[10px] font-semibold transition-all flex-shrink-0 ${product.use_unit_ids && stock <= 0 ? 'border border-zinc-200 dark:border-zinc-700 text-zinc-300 cursor-not-allowed' : 'border-2 border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white'}`}>
-                                <Plus className="w-3 h-3" />
+                                className={`inline-flex items-center gap-1 px-2 py-1.5 rounded-md text-xs font-semibold transition-all flex-shrink-0 ${product.use_unit_ids && stock <= 0 ? 'border border-zinc-200 dark:border-zinc-700 text-zinc-300 cursor-not-allowed' : 'border-2 border-emerald-500 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 hover:text-white'}`}>
+                                <Plus className="w-3.5 h-3.5" />
                                 Agregar
                               </button>
                             </div>
@@ -1564,20 +1643,20 @@ export function NewInvoice() {
 
               {/* Pagination */}
               {catalogTab === 'catalog' && (
-                <div className="px-3 py-2 sm:px-5 sm:py-3 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2">
+                <div className="px-3 py-2.5 sm:px-4 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between gap-2">
                   <button
                     onClick={() => setCatalogPage(p => Math.max(1, p - 1))}
                     disabled={catalogPage === 1 || isCatalogLoading}
-                    className="h-7 px-2.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    className="h-8 px-3 text-xs font-medium border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                     ← Ant.
                   </button>
-                  <span className="text-[10px] sm:text-xs text-zinc-400 text-center">
-                    {isCatalogLoading ? 'Buscando...' : `${catalogPage} / ${Math.max(1, getTotalPages())} · ${catalogTotalCount} prod.`}
+                  <span className="text-xs text-zinc-400 text-center">
+                    {isCatalogLoading ? 'Buscando...' : `${catalogPage} / ${Math.max(1, getTotalPages())} · ${catalogTotalCount} prods.`}
                   </span>
                   <button
                     onClick={() => setCatalogPage(p => Math.min(getTotalPages(), p + 1))}
                     disabled={catalogPage >= getTotalPages() || isCatalogLoading}
-                    className="h-7 px-2.5 text-xs border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                    className="h-8 px-3 text-xs font-medium border border-zinc-200 dark:border-zinc-700 rounded-lg text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                     Sig. →
                   </button>
                 </div>
@@ -1585,7 +1664,7 @@ export function NewInvoice() {
             </div>
 
             {/* ── Carrito (derecha) ─────────────────────────────────────────────── */}
-            <div className="order-1 w-full bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 sm:p-5 flex flex-col">
+            <div className={`${mobileView === 'catalog' ? 'hidden lg:flex' : 'flex'} flex-1 min-w-0 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3 sm:p-5 flex-col`}>
 
               {/* Resumen del cliente */}
               {(invoiceType === 'credit' ? selectedCreditCustomer?.name : (isConsumerFinal ? 'Consumidor Final' : customerName)) && (
@@ -1598,15 +1677,23 @@ export function NewInvoice() {
                 </div>
               )}
 
-              <div className="flex items-center justify-between mb-2">
-                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+              <div className="flex items-center justify-between mb-2 gap-2">
+                <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100 flex-shrink-0">
                   Carrito{cart.length > 0 && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-900/50 text-emerald-700 dark:text-emerald-300 text-[10px] rounded-full font-bold">{cart.length}</span>}
                 </h2>
-                {cart.length > 0 && (
-                  <button onClick={() => setCart([])} className="text-zinc-400 hover:text-red-500 transition-colors" title="Limpiar carrito">
-                    <Trash2 className="w-4 h-4" />
+                <div className="flex items-center gap-2 ml-auto">
+                  <button
+                    onClick={handleCommonProductButton}
+                    className="flex items-center gap-1 px-2 py-1 rounded-lg border border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-400 text-[10px] font-semibold hover:bg-violet-100 dark:hover:bg-violet-950/50 transition-colors whitespace-nowrap">
+                    <Plus className="w-3 h-3" />
+                    {isRepuestos ? 'Servicio Técnico' : 'Producto Común'}
                   </button>
-                )}
+                  {cart.length > 0 && (
+                    <button onClick={() => setCart([])} className="text-zinc-400 hover:text-red-500 transition-colors flex-shrink-0" title="Limpiar carrito">
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Cart items */}
@@ -1617,7 +1704,7 @@ export function NewInvoice() {
                     <p className="text-xs">Agrega productos desde el catálogo</p>
                   </div>
                 ) : (
-                  cart.map((item, i) => (
+                  [...cart.map((item, i) => ({ item, i }))].reverse().map(({ item, i }) => (
                     <div key={i} className="py-2 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
                       <div className="flex gap-2">
                         {/* Sin el icono cuadrado en mobile — va directo al texto */}
@@ -1664,24 +1751,27 @@ export function NewInvoice() {
                           <div className="flex items-center gap-1 mb-1">
                             <button
                               onClick={e => { e.stopPropagation(); openPriceInfoFromCart(i); }}
-                              className="w-6 h-6 flex items-center justify-center rounded border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-emerald-400 hover:text-emerald-600 transition-colors">
-                              <Info className="w-3 h-3" />
+                              className="w-7 h-7 flex items-center justify-center rounded-md border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors"
+                              title="Info del producto">
+                              <Info className="w-3.5 h-3.5" />
                             </button>
-                            {!item.useUnitIds && (
-                              <button
-                                onClick={() => openPriceEdit(i)}
-                                className="w-6 h-6 flex items-center justify-center rounded border border-zinc-200 dark:border-zinc-700 text-zinc-400 hover:border-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 transition-colors">
-                                <Pencil className="w-3 h-3" />
-                              </button>
-                            )}
+                            <button
+                              onClick={() => openPriceEdit(i)}
+                              className="w-7 h-7 flex items-center justify-center rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors"
+                              title="Editar precio">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button
+                              onClick={() => removeFromCart(i)}
+                              className="w-7 h-7 flex items-center justify-center rounded-md border border-red-300 dark:border-red-800 bg-red-50 dark:bg-red-950/40 text-red-500 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors"
+                              title="Eliminar">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                           <p className="text-[15px] text-zinc-400 text-right">
                             {formatCOP(item.price)} × {item.useUnitIds ? (item.unitIds?.length ?? item.quantity) : item.quantity}
                           </p>
                           <p className="text-xs sm:text-sm font-bold text-emerald-600 dark:text-emerald-400">{formatCOP(item.total)}</p>
-                          <button onClick={() => removeFromCart(i)} className="mt-1 text-zinc-300 hover:text-red-500 transition-colors">
-                            <X className="w-3.5 h-3.5" />
-                          </button>
                         </div>
                       </div>
                       {item.useUnitIds && (
@@ -1697,31 +1787,19 @@ export function NewInvoice() {
                               </div>
                               <div className="flex items-center gap-2">
                                 <button
-                                  onClick={() => openPriceEdit(i)}
-                                  className="flex items-center gap-1 text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 transition-colors">
-                                  <Pencil className="w-3 h-3" />
-                                  Precio
-                                </button>
-                                <button
                                   onClick={() => { setCurrentItemIndex(i); setSelectedUnitIds(item.unitIds || []); setUnitIdNotes(item.unitIdNotes || {}); setUnitIdDialogOpen(true); }}
-                                  className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 hover:underline font-medium transition-colors text-left">
+                                  className="flex items-center gap-1 px-2 py-1 rounded-md border border-emerald-300 dark:border-emerald-700 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 text-[10px] font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors">
                                   <Hash className="w-3 h-3" />
-                                  Gestionar IDs ({item.unitIds.length} asignada{item.unitIds.length !== 1 ? 's' : ''})
+                                  IDs ({item.unitIds.length} asignada{item.unitIds.length !== 1 ? 's' : ''})
                                 </button>
                               </div>
                             </div>
                           ) : (
                             <div className="flex items-center gap-2">
                               <button
-                                onClick={() => openPriceEdit(i)}
-                                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 text-xs font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800 hover:border-zinc-300 transition-colors flex-shrink-0">
-                                <Pencil className="w-3.5 h-3.5" />
-                                Precio
-                              </button>
-                              <button
                                 onClick={() => { setCurrentItemIndex(i); setSelectedUnitIds([]); setUnitIdNotes({}); setUnitIdDialogOpen(true); }}
-                                className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 text-xs font-semibold hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors">
-                                <AlertTriangle className="w-3.5 h-3.5" />
+                                className="flex items-center gap-1 px-2 py-1 rounded-md border border-amber-300 dark:border-amber-700 bg-amber-50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 text-[10px] font-semibold hover:bg-amber-100 dark:hover:bg-amber-950/50 transition-colors">
+                                <AlertTriangle className="w-3 h-3" />
                                 Asignar IDs únicas
                               </button>
                             </div>
@@ -2238,9 +2316,9 @@ export function NewInvoice() {
                   disabled={isSubmitting || isValidating}
                   className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white">
                   {isSubmitting || isValidating ? (
-                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{isValidating ? 'Validando...' : 'Creando...'}</>
+                    <><Loader2 className="w-4 h-4 mr-2 animate-spin" />{isValidating ? 'Validando...' : (editInvoiceId ? 'Actualizando...' : 'Creando...')}</>
                   ) : (
-                    <><CheckCircle className="w-4 h-4 mr-2" />Emitir Factura</>
+                    <><CheckCircle className="w-4 h-4 mr-2" />{editInvoiceId ? 'Actualizar Factura' : 'Emitir Factura'}</>
                   )}
                 </Button>
               </div>
@@ -2458,50 +2536,93 @@ export function NewInvoice() {
       <Dialog open={unitIdDialogOpen} onOpenChange={open => {
         setUnitIdDialogOpen(open);
       }}>
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-2xl w-full">
           <DialogHeader>
-            <DialogTitle>Asignar IDs de unidad</DialogTitle>
+            <DialogTitle className="text-lg flex items-center gap-2">
+              <Hash className="w-5 h-5 text-emerald-500" />
+              Asignar IDs de unidad
+            </DialogTitle>
             {currentItemIndex !== null && cart[currentItemIndex] && (
               <DialogDescription>
-                Seleccioná las unidades a vender de <strong>{cart[currentItemIndex].productName}</strong>. La cantidad en el carrito se actualizará automáticamente.
+                Selecciona las unidades a vender de{' '}
+                <strong className="text-zinc-900 dark:text-zinc-100">{cart[currentItemIndex].productName}</strong>.
+                La cantidad en el carrito se actualizará automáticamente.
               </DialogDescription>
             )}
           </DialogHeader>
-          <div className="max-h-56 overflow-y-auto space-y-1.5">
-            {currentItemIndex !== null && (() => {
-              const currentItem = cart[currentItemIndex];
-              if (!currentItem) return null;
-              // Exclude IDs confirmed by OTHER items of the same product
-              const otherConfirmedIds = cart
-                .filter((ci, idx) => idx !== currentItemIndex && ci.productId === currentItem.productId)
-                .flatMap(ci => ci.unitIds || []);
-              const visibleIds = (currentItem.availableIds || []).filter(({ id }) => !otherConfirmedIds.includes(id));
-              return visibleIds.map(({ id, note }) => {
-                const isSelected = selectedUnitIds.includes(id);
-                return (
-                  <button key={id}
-                    onClick={() => setSelectedUnitIds(prev => isSelected ? prev.filter(x => x !== id) : [...prev, id])}
-                    className={`w-full text-left px-3 py-2.5 rounded-lg border text-sm transition-colors
-                      ${isSelected ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30' : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-600'}`}>
-                    <div className="flex items-center justify-between">
-                      <span className="font-mono text-xs">{id}</span>
-                      {isSelected && <Check className="w-4 h-4 text-emerald-500" />}
-                    </div>
-                    {note && <p className="text-xs text-zinc-400 mt-0.5">{note}</p>}
-                  </button>
-                );
-              });
-            })()}
+
+          {/* Contador */}
+          <div className="flex items-center justify-between px-1">
+            <p className="text-sm text-zinc-500 dark:text-zinc-400">
+              {currentItemIndex !== null && cart[currentItemIndex] && (() => {
+                const item = cart[currentItemIndex];
+                const otherConfirmed = cart
+                  .filter((ci, idx) => idx !== currentItemIndex && ci.productId === item.productId)
+                  .flatMap(ci => ci.unitIds || []);
+                const total = (item.availableIds || []).filter(({ id }) => !otherConfirmed.includes(id)).length;
+                return `${total} unidad${total !== 1 ? 'es' : ''} disponible${total !== 1 ? 's' : ''}`;
+              })()}
+            </p>
+            <span className={`text-sm font-semibold px-3 py-0.5 rounded-full ${selectedUnitIds.length > 0 ? 'bg-emerald-100 dark:bg-emerald-950/50 text-emerald-700 dark:text-emerald-400' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400'}`}>
+              {selectedUnitIds.length} seleccionada{selectedUnitIds.length !== 1 ? 's' : ''}
+            </span>
           </div>
-          <p className="text-xs text-zinc-500 text-center">
-            {selectedUnitIds.length} unidad{selectedUnitIds.length !== 1 ? 'es' : ''} seleccionada{selectedUnitIds.length !== 1 ? 's' : ''}
-          </p>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => {
-              setUnitIdDialogOpen(false);
-            }}>Cancelar</Button>
+
+          {/* Grid de IDs */}
+          <div className="max-h-[55vh] overflow-y-auto pr-1">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+              {currentItemIndex !== null && (() => {
+                const currentItem = cart[currentItemIndex];
+                if (!currentItem) return null;
+                const otherConfirmedIds = cart
+                  .filter((ci, idx) => idx !== currentItemIndex && ci.productId === currentItem.productId)
+                  .flatMap(ci => ci.unitIds || []);
+                const visibleIds = (currentItem.availableIds || []).filter(({ id }) => !otherConfirmedIds.includes(id));
+
+                if (visibleIds.length === 0) {
+                  return (
+                    <div className="col-span-3 text-center py-10 text-zinc-400">
+                      <Hash className="w-8 h-8 mx-auto mb-2 opacity-40" />
+                      <p className="text-sm">No hay unidades disponibles</p>
+                    </div>
+                  );
+                }
+
+                return visibleIds.map(({ id, note }) => {
+                  const isSelected = selectedUnitIds.includes(id);
+                  return (
+                    <button key={id}
+                      onClick={() => setSelectedUnitIds(prev => isSelected ? prev.filter(x => x !== id) : [...prev, id])}
+                      className={`relative text-left px-4 py-3 rounded-xl border-2 transition-all ${
+                        isSelected
+                          ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/40 shadow-sm'
+                          : 'border-zinc-200 dark:border-zinc-700 hover:border-zinc-300 dark:hover:border-zinc-500 bg-white dark:bg-zinc-800/50'
+                      }`}>
+                      <div className="flex items-start justify-between gap-2">
+                        <span className={`font-mono text-sm font-bold ${isSelected ? 'text-emerald-700 dark:text-emerald-300' : 'text-zinc-700 dark:text-zinc-200'}`}>
+                          #{id}
+                        </span>
+                        {isSelected && (
+                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-emerald-500 flex items-center justify-center">
+                            <Check className="w-3 h-3 text-white" />
+                          </span>
+                        )}
+                      </div>
+                      {note && <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1 leading-tight truncate">{note}</p>}
+                    </button>
+                  );
+                });
+              })()}
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setUnitIdDialogOpen(false)}>
+              Cancelar
+            </Button>
             <Button onClick={handleUnitIdsConfirm} className="bg-emerald-600 hover:bg-emerald-700 text-white">
-              Confirmar
+              <Check className="w-4 h-4 mr-2" />
+              Confirmar {selectedUnitIds.length > 0 ? `(${selectedUnitIds.length})` : ''}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -2531,6 +2652,69 @@ export function NewInvoice() {
           usedCredit={creditAnalysis.usedCredit}
         />
       )}
+
+      {/* ── Modal: Producto Común (solo Celumundo) ─────────────────────────── */}
+      <Dialog open={commonProductOpen} onOpenChange={setCommonProductOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-violet-700 dark:text-violet-400">
+              <Package className="w-4 h-4" />
+              Agregar Producto Común
+            </DialogTitle>
+            <DialogDescription>
+              Ingresa el nombre y el precio del producto no catalogado.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <div>
+              <Label className="text-xs text-zinc-500 mb-1.5 block">Nombre del producto</Label>
+              <Input
+                placeholder="Ej: Cable USB, Funda, Accesorio..."
+                value={commonProductName}
+                onChange={e => setCommonProductName(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && commonProductName.trim()) {
+                    addCommonProduct(commonProductName.trim(), parseFloat(commonProductPrice) || 0);
+                    setCommonProductOpen(false);
+                  }
+                }}
+                autoFocus
+              />
+            </div>
+            <div>
+              <Label className="text-xs text-zinc-500 mb-1.5 block">Precio</Label>
+              <Input
+                type="number"
+                min="0"
+                placeholder="0"
+                value={commonProductPrice}
+                onChange={e => setCommonProductPrice(e.target.value)}
+                onWheel={e => e.currentTarget.blur()}
+                className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && commonProductName.trim()) {
+                    addCommonProduct(commonProductName.trim(), parseFloat(commonProductPrice) || 0);
+                    setCommonProductOpen(false);
+                  }
+                }}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setCommonProductOpen(false)}>Cancelar</Button>
+            <Button
+              disabled={!commonProductName.trim()}
+              onClick={() => {
+                addCommonProduct(commonProductName.trim(), parseFloat(commonProductPrice) || 0);
+                setCommonProductOpen(false);
+              }}
+              className="bg-violet-600 hover:bg-violet-700 text-white">
+              <Plus className="w-3.5 h-3.5 mr-1" />
+              Agregar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

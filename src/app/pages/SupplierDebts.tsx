@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { FileText, Plus, DollarSign, Calendar, AlertCircle, CheckCircle, XCircle, Clock, History, Search, Building2, Pencil, FileDown } from 'lucide-react';
+import { FileText, Plus, DollarSign, Calendar, AlertCircle, CheckCircle, XCircle, Clock, History, Search, Building2, Pencil, FileDown, ArrowUpDown } from 'lucide-react';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -54,6 +54,8 @@ export default function SupplierDebts() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [supplierFilter, setSupplierFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'overdue' | 'paid' | 'cancelled'>('all');
+  const [sortOrder, setSortOrder] = useState<'none' | 'asc' | 'desc'>('none');
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
 
   // Modal editar valor de deuda
@@ -336,13 +338,20 @@ export default function SupplierDebts() {
     }
   };
 
-  const filteredDebts = debts.filter(debt => {
-    const matchesSearch =
-      debt.invoice_reference.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      debt.supplier_name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesSupplier = supplierFilter === 'all' || debt.supplier_id === supplierFilter;
-    return matchesSearch && matchesSupplier;
-  });
+  const filteredDebts = debts
+    .filter(debt => {
+      const matchesSearch =
+        debt.invoice_reference.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        debt.supplier_name.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesSupplier = supplierFilter === 'all' || debt.supplier_id === supplierFilter;
+      const matchesStatus = statusFilter === 'all' || debt.status === statusFilter;
+      return matchesSearch && matchesSupplier && matchesStatus;
+    })
+    .sort((a, b) => {
+      if (sortOrder === 'desc') return b.pending_amount - a.pending_amount;
+      if (sortOrder === 'asc') return a.pending_amount - b.pending_amount;
+      return 0;
+    });
 
   // Calcular estadísticas
   const activeDebts = debts.filter(d => d.status === 'active' || d.status === 'overdue');
@@ -577,9 +586,9 @@ export default function SupplierDebts() {
         </Card>
       </div>
 
-      {/* Buscador */}
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1">
+      {/* Buscador y filtros */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <Input
             type="text"
@@ -589,6 +598,36 @@ export default function SupplierDebts() {
             className="pl-10"
           />
         </div>
+
+        {/* Filtro por estado */}
+        <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+          <SelectTrigger className="w-44">
+            <SelectValue placeholder="Todos los estados" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">Todos los estados</SelectItem>
+            <SelectItem value="active">Activas</SelectItem>
+            <SelectItem value="overdue">Atrasadas</SelectItem>
+            <SelectItem value="paid">Pagadas</SelectItem>
+            <SelectItem value="cancelled">Anuladas</SelectItem>
+          </SelectContent>
+        </Select>
+
+        {/* Ordenar por monto pendiente */}
+        <Select value={sortOrder} onValueChange={(v) => setSortOrder(v as typeof sortOrder)}>
+          <SelectTrigger className="w-48">
+            <div className="flex items-center gap-2 min-w-0">
+              <ArrowUpDown className="h-4 w-4 text-muted-foreground shrink-0" />
+              <SelectValue placeholder="Sin ordenar" />
+            </div>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="none">Sin ordenar</SelectItem>
+            <SelectItem value="desc">Mayor a menor (monto)</SelectItem>
+            <SelectItem value="asc">Menor a mayor (monto)</SelectItem>
+          </SelectContent>
+        </Select>
+
         {suppliers.length > 0 && (
           <Select value={supplierFilter} onValueChange={setSupplierFilter}>
             <SelectTrigger className="w-56">

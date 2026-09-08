@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
-import { Plus, Search, Eye, FileText, Printer, Download, X, Info, Scan, Hash, RotateCcw, CreditCard, Trash2, Receipt, Calendar, Loader2, Check, Package } from 'lucide-react';
+import { useNavigate } from 'react-router';
+import { Plus, Search, Eye, FileText, Printer, Download, X, Info, Scan, Hash, RotateCcw, CreditCard, Trash2, Receipt, Calendar, Loader2, Check, Package, Pencil } from 'lucide-react';
 import {
   getInvoices,
   getProducts,
@@ -17,6 +18,7 @@ import {
   extractColombiaDate,
   confirmInvoicePayment,
   getCustomers,
+  updateInvoice,
   type CreditPayment,
   supabase
 } from '../lib/supabase';
@@ -99,6 +101,7 @@ interface Product {
 }
 
 export function Invoices() {
+  const navigate = useNavigate();
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -198,6 +201,12 @@ export function Invoices() {
     price: '',
     quantity: '1'
   });
+
+  // Estados para añadir unidades a item de factura existente
+  const [addUnitsDialogOpen, setAddUnitsDialogOpen] = useState(false);
+  const [addUnitsItemIndex, setAddUnitsItemIndex] = useState<number | null>(null);
+  const [addUnitsQty, setAddUnitsQty] = useState('1');
+  const [isAddingUnits, setIsAddingUnits] = useState(false);
 
   // Manejar entrada de código de barras
   useEffect(() => {
@@ -1674,6 +1683,92 @@ export function Invoices() {
     }
   };
 
+  const handleAddUnitsToItem = async () => {
+    if (!selectedInvoice || addUnitsItemIndex === null) return;
+    const qty = parseInt(addUnitsQty, 10);
+    if (isNaN(qty) || qty <= 0) {
+      toast.error('Ingresa una cantidad válida');
+      return;
+    }
+    setIsAddingUnits(true);
+    try {
+      const item = selectedInvoice.items[addUnitsItemIndex] as any;
+
+      // Buscar producto en supabase para verificar stock
+      const { data: productData, error: productError } = await supabase
+        .from('products')
+        .select('*')
+        .eq('id', item.productId)
+        .single();
+
+      if (productError || !productData) {
+        toast.error('No se pudo obtener el producto del inventario');
+        return;
+      }
+
+      if (productData.stock < qty) {
+        toast.error(`Stock insuficiente. Disponible: ${productData.stock} unidades`);
+        return;
+      }
+
+      // Actualizar items de la factura
+      const updatedItems = selectedInvoice.items.map((inv_item: any, idx: number) => {
+        if (idx !== addUnitsItemIndex) return inv_item;
+        const newQty = inv_item.quantity + qty;
+        return {
+          ...inv_item,
+          quantity: newQty,
+          total: newQty * inv_item.price,
+        };
+      });
+
+      const newTotal = updatedItems.reduce((sum: number, it: any) => sum + it.total, 0);
+
+      // Actualizar factura en la base de datos
+      const updatedInvoice = await updateInvoice(selectedInvoice.id, {
+        items: updatedItems,
+        subtotal: newTotal,
+        total: newTotal,
+        ...(selectedInvoice.is_credit ? { credit_balance: (selectedInvoice.credit_balance ?? selectedInvoice.total) + qty * (item.price as number) } : {}),
+      });
+
+      if (!updatedInvoice) {
+        toast.error('Error al actualizar la factura');
+        return;
+      }
+
+      // Descontar stock
+      await updateProduct(item.productId, { stock: productData.stock - qty });
+
+      // Registrar movimiento
+      await addMovement({
+        type: 'sale',
+        productId: item.productId,
+        productName: item.productName,
+        productCode: item.productCode || '',
+        quantity: qty,
+        price: item.price,
+        total: qty * item.price,
+        reference: `Unidades añadidas a factura ${selectedInvoice.number}`,
+        date: getColombiaDate(),
+        registeredBy: getCurrentUser() || 'Usuario',
+      });
+
+      toast.success(`+${qty} unidad(es) añadida(s) a la factura y stock descontado`);
+      setAddUnitsDialogOpen(false);
+      setAddUnitsItemIndex(null);
+      setAddUnitsQty('1');
+      await loadData();
+      // Actualizar selectedInvoice con los nuevos datos
+      setSelectedInvoice({ ...selectedInvoice, items: updatedItems, total: newTotal, subtotal: newTotal });
+    } catch (err) {
+      console.error('Error adding units:', err);
+      toast.error('Error inesperado al añadir unidades');
+    } finally {
+      setIsAddingUnits(false);
+    }
+  };
+
   const handlePrint = async () => {
     if (!invoiceToPrint) return;
 
@@ -2353,6 +2448,17 @@ export function Invoices() {
                             >
                               <Check className="h-4 w-4 mr-1" />
                               Aprobar
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => navigate('/sistema/facturacion/nueva', {
+                                state: { editInvoice: invoice }
+                              })}
+                              className="border-blue-600 text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950"
+                              title="Cargar y editar factura"
+                            >
+                              <Pencil className="h-4 w-4" />
                             </Button>
                             <Button
                               variant="outline"
@@ -3304,7 +3410,10 @@ export function Invoices() {
       </Dialog>
 
       {/* Dialog ver factura */}
-      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
+      <Dialog open={isViewDialogOpen} onOpenChange={(open) => {
+        setIsViewDialogOpen(open);
+        if (!open) { setAddUnitsDialogOpen(false); setAddUnitsItemIndex(null); }
+      }}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Detalles de Factura</DialogTitle>
@@ -3341,11 +3450,78 @@ export function Invoices() {
                 <div className="space-y-3">
                   {selectedInvoice.items.map((item: any, index: number) => (
                     <div key={index} className="p-3 bg-muted rounded">
-                      <p className="font-medium">{item.productName}</p>
-                      <p className="text-sm text-muted-foreground">
-                        {item.quantity} x {formatCOP(item.price)} ={' '}
-                        {formatCOP(item.total)}
-                      </p>
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium">{item.productName}</p>
+                          <p className="text-sm text-muted-foreground">
+                            {item.quantity} x {formatCOP(item.price)} ={' '}
+                            {formatCOP(item.total)}
+                          </p>
+                        </div>
+                        {/* Solo mostrar para items con productId real (no productos comunes sin ID) */}
+                        {item.productId && (
+                          <button
+                            title="Añadir más unidades a este ítem"
+                            onClick={() => {
+                              setAddUnitsItemIndex(index);
+                              setAddUnitsQty('1');
+                              setAddUnitsDialogOpen(true);
+                            }}
+                            className="flex-shrink-0 flex items-center gap-1 px-2 py-1 text-xs font-semibold rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900 dark:text-emerald-300 dark:hover:bg-emerald-800 transition-colors"
+                          >
+                            <Plus className="w-3 h-3" />
+                            Añadir unidades
+                          </button>
+                        )}
+                      </div>
+                      {/* Inline mini-form para añadir unidades */}
+                      {addUnitsDialogOpen && addUnitsItemIndex === index && (
+                        <div className="mt-3 p-3 border border-emerald-300 dark:border-emerald-700 rounded-lg bg-emerald-50 dark:bg-emerald-950 space-y-2">
+                          <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-300">
+                            ¿Cuántas unidades adicionales se llevó el cliente?
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="number"
+                              min="1"
+                              value={addUnitsQty}
+                              onChange={(e) => setAddUnitsQty(e.target.value)}
+                              className="w-24 h-8 text-sm"
+                              autoFocus
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter') handleAddUnitsToItem();
+                                if (e.key === 'Escape') {
+                                  setAddUnitsDialogOpen(false);
+                                  setAddUnitsItemIndex(null);
+                                }
+                              }}
+                            />
+                            <Button
+                              size="sm"
+                              onClick={handleAddUnitsToItem}
+                              disabled={isAddingUnits}
+                              className="h-8 bg-emerald-600 hover:bg-emerald-700 text-white text-xs"
+                            >
+                              {isAddingUnits ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                              Confirmar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => {
+                                setAddUnitsDialogOpen(false);
+                                setAddUnitsItemIndex(null);
+                              }}
+                              className="h-8 text-xs"
+                            >
+                              Cancelar
+                            </Button>
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Esto descontará el stock del producto inmediatamente.
+                          </p>
+                        </div>
+                      )}
                       {item.unitIds && item.unitIds.length > 0 && (
                         <div className="mt-2">
                           <p className="text-xs font-medium text-blue-600 mb-1">

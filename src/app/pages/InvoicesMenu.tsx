@@ -2364,6 +2364,15 @@ export function InvoicesMenu() {
                         <Button
                           variant="outline"
                           size="sm"
+                          onClick={() => navigate('/sistema/facturacion/nueva', { state: { editInvoice: invoice } })}
+                          className="border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950 text-blue-700 dark:text-blue-400"
+                        >
+                          <FileText className="w-4 h-4 mr-1" />
+                          Cargar
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
                           onClick={() => handleApproveInvoice(invoice)}
                           className="border-green-300 dark:border-green-700 hover:bg-green-50 dark:hover:bg-green-950 text-green-700 dark:text-green-400"
                         >
