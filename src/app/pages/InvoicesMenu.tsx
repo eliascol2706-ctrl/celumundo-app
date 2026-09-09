@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router';
-import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2, ChevronLeft, ChevronRight, Edit, Minus, FileX, History, RefreshCw, Package, ArrowLeftRight } from 'lucide-react';
+import { Receipt, CreditCard, TrendingUp, DollarSign, Calendar, FileText, Clock, CheckCircle, Eye, Loader2, Banknote, ArrowRightLeft, RotateCcw, AlertTriangle, X, Trash2, Smartphone, Printer, Search, Filter, Download, FileBarChart2, Undo2, ChevronLeft, ChevronRight, Edit, Minus, FileX, History, RefreshCw, Package, ArrowLeftRight, FolderOpen } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
@@ -94,6 +94,13 @@ export function InvoicesMenu() {
   const [showProductSalesReport, setShowProductSalesReport] = useState(false);
   const [allInvoicesForReport, setAllInvoicesForReport] = useState<Invoice[]>([]);
   const [loadingReport, setLoadingReport] = useState(false);
+
+  // Cargar Factura modal
+  const [showLoadInvoiceModal, setShowLoadInvoiceModal] = useState(false);
+  const [loadInvoiceNumber, setLoadInvoiceNumber] = useState('');
+  const [loadInvoiceResult, setLoadInvoiceResult] = useState<Invoice | null>(null);
+  const [loadInvoiceError, setLoadInvoiceError] = useState('');
+  const [isSearchingInvoice, setIsSearchingInvoice] = useState(false);
 
   // Filtros del modal de facturas en confirmación
   const [pendingSearch, setPendingSearch] = useState('');
@@ -1452,6 +1459,19 @@ export function InvoicesMenu() {
           
           {/* Botones de creación de facturas */}
           <div className="flex items-center gap-3">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setLoadInvoiceNumber('');
+                setLoadInvoiceResult(null);
+                setLoadInvoiceError('');
+                setShowLoadInvoiceModal(true);
+              }}
+              className="border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950"
+            >
+              <FolderOpen className="w-4 h-4 mr-2" />
+              Cargar Factura
+            </Button>
             <Button
               onClick={handleNavigateToNew}
               disabled={isValidating}
@@ -3733,6 +3753,166 @@ export function InvoicesMenu() {
         invoices={allInvoicesForReport}
         products={products}
       />
+
+      {/* ── Modal: Cargar Factura ─────────────────────────────────────────────── */}
+      <Dialog open={showLoadInvoiceModal} onOpenChange={open => {
+        setShowLoadInvoiceModal(open);
+        if (!open) { setLoadInvoiceResult(null); setLoadInvoiceError(''); setLoadInvoiceNumber(''); }
+      }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-lg">
+              <FolderOpen className="w-5 h-5 text-blue-500" />
+              Cargar Factura
+            </DialogTitle>
+            <DialogDescription>
+              Ingresa el número de factura para cargar sus productos y datos. Se creará una factura completamente nueva.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            {/* Buscador */}
+            <div className="flex gap-2">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-zinc-400" />
+                <Input
+                  placeholder="Ej: FV-0042, FC-0010..."
+                  value={loadInvoiceNumber}
+                  onChange={e => {
+                    setLoadInvoiceNumber(e.target.value);
+                    setLoadInvoiceResult(null);
+                    setLoadInvoiceError('');
+                  }}
+                  onKeyDown={async e => {
+                    if (e.key === 'Enter') {
+                      if (!loadInvoiceNumber.trim()) return;
+                      setIsSearchingInvoice(true);
+                      setLoadInvoiceResult(null);
+                      setLoadInvoiceError('');
+                      try {
+                        const company = getCurrentCompany();
+                        const { data } = await supabase
+                          .from('invoices')
+                          .select('*')
+                          .eq('company', company)
+                          .ilike('number', loadInvoiceNumber.trim())
+                          .limit(1)
+                          .single();
+                        if (data) setLoadInvoiceResult(data);
+                        else setLoadInvoiceError('No se encontró ninguna factura con ese número.');
+                      } catch {
+                        setLoadInvoiceError('No se encontró ninguna factura con ese número.');
+                      } finally {
+                        setIsSearchingInvoice(false);
+                      }
+                    }
+                  }}
+                  className="pl-9"
+                  autoFocus
+                />
+              </div>
+              <Button
+                onClick={async () => {
+                  if (!loadInvoiceNumber.trim()) return;
+                  setIsSearchingInvoice(true);
+                  setLoadInvoiceResult(null);
+                  setLoadInvoiceError('');
+                  try {
+                    const company = getCurrentCompany();
+                    const { data } = await supabase
+                      .from('invoices')
+                      .select('*')
+                      .eq('company', company)
+                      .ilike('number', loadInvoiceNumber.trim())
+                      .limit(1)
+                      .single();
+                    if (data) setLoadInvoiceResult(data);
+                    else setLoadInvoiceError('No se encontró ninguna factura con ese número.');
+                  } catch {
+                    setLoadInvoiceError('No se encontró ninguna factura con ese número.');
+                  } finally {
+                    setIsSearchingInvoice(false);
+                  }
+                }}
+                disabled={isSearchingInvoice || !loadInvoiceNumber.trim()}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+              >
+                {isSearchingInvoice ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+              </Button>
+            </div>
+
+            {/* Error */}
+            {loadInvoiceError && (
+              <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm">
+                <AlertTriangle className="w-4 h-4 flex-shrink-0" />
+                {loadInvoiceError}
+              </div>
+            )}
+
+            {/* Resultado */}
+            {loadInvoiceResult && (
+              <div className="rounded-xl border-2 border-blue-200 dark:border-blue-800 bg-blue-50/50 dark:bg-blue-950/20 p-4 space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-lg font-mono font-bold text-zinc-900 dark:text-zinc-100">
+                    #{loadInvoiceResult.number}
+                  </span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    loadInvoiceResult.status === 'paid' ? 'bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400' :
+                    loadInvoiceResult.status === 'pending_confirmation' ? 'bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-400' :
+                    loadInvoiceResult.status === 'pending' ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-950 dark:text-yellow-400' :
+                    'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
+                  }`}>
+                    {loadInvoiceResult.status === 'paid' ? 'Pagada' :
+                     loadInvoiceResult.status === 'pending_confirmation' ? 'En Confirmación' :
+                     loadInvoiceResult.status === 'pending' ? 'Crédito Pendiente' : 'Anulada'}
+                  </span>
+                </div>
+                {loadInvoiceResult.customer_name && (
+                  <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                    <span className="font-medium">Cliente:</span> {loadInvoiceResult.customer_name}
+                    {loadInvoiceResult.customer_document && ` (${loadInvoiceResult.customer_document})`}
+                  </p>
+                )}
+                <div className="space-y-1">
+                  <p className="text-xs font-semibold text-zinc-500 dark:text-zinc-400 uppercase tracking-wide">Productos ({loadInvoiceResult.items?.length ?? 0})</p>
+                  <div className="space-y-1 max-h-36 overflow-y-auto">
+                    {(loadInvoiceResult.items ?? []).map((item: any, idx: number) => (
+                      <div key={idx} className="flex justify-between items-center text-sm py-1 border-b border-blue-100 dark:border-blue-900/50 last:border-0">
+                        <span className="text-zinc-700 dark:text-zinc-300 truncate flex-1 mr-2">{item.productName}</span>
+                        <span className="text-zinc-500 dark:text-zinc-400 text-xs flex-shrink-0">{item.quantity} × {formatCOP(item.price)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex justify-between items-center pt-1 border-t border-blue-200 dark:border-blue-800">
+                  <span className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Total original</span>
+                  <span className="text-base font-bold text-emerald-600 dark:text-emerald-400">{formatCOP(loadInvoiceResult.total)}</span>
+                </div>
+                <p className="text-xs text-blue-600 dark:text-blue-400 bg-blue-100 dark:bg-blue-950/40 rounded-lg px-3 py-2">
+                  Los productos se cargarán en una <strong>factura nueva</strong>. La factura original no será modificada.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowLoadInvoiceModal(false)}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={!loadInvoiceResult}
+              onClick={() => {
+                setShowLoadInvoiceModal(false);
+                navigate('/sistema/facturacion/nueva', { state: { cloneInvoice: loadInvoiceResult } });
+              }}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              <FolderOpen className="w-4 h-4 mr-2" />
+              Cargar en Nueva Factura
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -82,6 +82,9 @@ export function NewInvoice() {
   const editInvoice = (location.state as any)?.editInvoice ?? null;
   const [editInvoiceId, setEditInvoiceId] = useState<string | null>(editInvoice?.id ?? null);
 
+  // Clone mode: pre-loaded invoice to duplicate as a brand-new invoice
+  const cloneInvoice = (location.state as any)?.cloneInvoice ?? null;
+
   // Wizard
   const [step, setStep] = useState<WizardStep>(1);
   const [invoiceType, setInvoiceType] = useState<InvoiceType>('regular');
@@ -223,42 +226,43 @@ export function NewInvoice() {
     load();
   }, []);
 
-  // ─── Pre-load invoice from edit mode ────────────────────────────────────────
+  // ─── Pre-load invoice from edit or clone mode ───────────────────────────────
 
   useEffect(() => {
-    if (!editInvoice) return;
-    // Populate cart from invoice items
-    const preloadedCart: CartItem[] = (editInvoice.items ?? []).map((item: any) => ({
+    const source = editInvoice ?? cloneInvoice;
+    if (!source) return;
+
+    // Strip unit IDs when cloning (stock availability unknown for new invoice)
+    const isClone = !!cloneInvoice && !editInvoice;
+    const preloadedCart: CartItem[] = (source.items ?? []).map((item: any) => ({
       productId: item.productId,
       productName: item.productName,
       productCode: item.productCode,
       quantity: item.quantity,
       price: item.price,
       total: item.total,
-      useUnitIds: item.useUnitIds ?? false,
-      unitIds: item.unitIds ?? [],
+      useUnitIds: isClone ? false : (item.useUnitIds ?? false),
+      unitIds: isClone ? [] : (item.unitIds ?? []),
       availableIds: [],
-      unitIdNotes: item.unitIdNotes ?? {},
+      unitIdNotes: isClone ? {} : (item.unitIdNotes ?? {}),
     }));
     setCart(preloadedCart);
 
-    // Populate customer info
-    if (editInvoice.customer_name) setCustomerName(editInvoice.customer_name);
-    if (editInvoice.customer_document) setCustomerDocument(editInvoice.customer_document);
-    if (editInvoice.customer_phone) setCustomerPhone(editInvoice.customer_phone);
-    if (editInvoice.customer_address) setCustomerAddress(editInvoice.customer_address);
-    if (editInvoice.serie) setSerie(editInvoice.serie);
-    if (editInvoice.notes) setNotes(editInvoice.notes);
-    if (editInvoice.discount_value) setDiscountValue(editInvoice.discount_value);
-    if (editInvoice.discount_is_percent) setDiscountIsPercent(editInvoice.discount_is_percent);
-    if (editInvoice.include_iva !== undefined) setIncludeIVA(editInvoice.include_iva);
-    if (editInvoice.warranty_enabled) {
+    if (source.customer_name) setCustomerName(source.customer_name);
+    if (source.customer_document) setCustomerDocument(source.customer_document);
+    if (source.customer_phone) setCustomerPhone(source.customer_phone);
+    if (source.customer_address) setCustomerAddress(source.customer_address);
+    if (source.serie) setSerie(source.serie);
+    if (source.notes) setNotes(source.notes);
+    if (source.discount_value) setDiscountValue(source.discount_value);
+    if (source.discount_is_percent) setDiscountIsPercent(source.discount_is_percent);
+    if (source.include_iva !== undefined) setIncludeIVA(source.include_iva);
+    if (source.warranty_enabled) {
       setWarrantyEnabled(true);
-      if (editInvoice.warranty_months) setWarrantyMonths(editInvoice.warranty_months);
-      if (editInvoice.warranty_category) setWarrantyCategory(editInvoice.warranty_category);
+      if (source.warranty_months) setWarrantyMonths(source.warranty_months);
+      if (source.warranty_category) setWarrantyCategory(source.warranty_category);
     }
 
-    // Skip to step 2 (products) so user lands directly on the cart
     setStep(2);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1091,7 +1095,7 @@ export function NewInvoice() {
             </button>
             <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 hidden sm:block" />
             <span className="text-zinc-900 dark:text-zinc-100 font-medium truncate hidden sm:block">
-              {editInvoiceId ? `Editando ${editInvoice?.number ?? 'Factura'}` : 'Nueva Factura'}
+              {editInvoiceId ? `Editando ${editInvoice?.number ?? 'Factura'}` : cloneInvoice ? `Cargada de ${cloneInvoice.number}` : 'Nueva Factura'}
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -1399,13 +1403,18 @@ export function NewInvoice() {
       ════════════════════════════════════════════════════════════════════════ */}
       {step === 2 && (
         <div className="p-2 sm:p-4 lg:p-6">
-          {/* Edit mode banner */}
-          {editInvoiceId && (
+          {/* Edit / Clone mode banner */}
+          {editInvoiceId ? (
             <div className="mb-3 px-3 py-2 rounded-lg bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800 flex items-center gap-2 text-sm text-blue-700 dark:text-blue-300">
               <Pencil className="w-4 h-4 flex-shrink-0" />
               <span>Editando <span className="font-semibold">{editInvoice?.number}</span> — Modifica los productos y guarda los cambios.</span>
             </div>
-          )}
+          ) : cloneInvoice ? (
+            <div className="mb-3 px-3 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-300">
+              <Receipt className="w-4 h-4 flex-shrink-0" />
+              <span>Productos cargados de <span className="font-semibold">{cloneInvoice.number}</span> — Se creará una factura completamente nueva.</span>
+            </div>
+          ) : null}
           {/* Mobile tab switcher */}
           <div className="flex lg:hidden mb-2 bg-zinc-100 dark:bg-zinc-800 rounded-lg p-0.5 gap-0.5">
             <button
