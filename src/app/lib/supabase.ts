@@ -1205,54 +1205,49 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
       console.log('[canCreateInvoice] ℹ️ Existen', anyClosures.length, 'cierres previos en BD');
     }
 
-    // PASO 3: Obtener TODAS las facturas y todos los cierres para validar fechas pendientes
-    const [{ data: allInvoices }, { data: allDailyClosures }] = await Promise.all([
-      supabase.from('invoices').select('id, date, number').eq('company', company),
-      supabase.from('daily_closures').select('id, date').eq('company', company)
-    ]);
+    // PASO 3: Traer solo cierres diarios + la factura pasada más antigua sin cierre
+    // (evita descargar TODAS las facturas de la historia)
+    const { data: allDailyClosures } = await supabase
+      .from('daily_closures')
+      .select('date')
+      .eq('company', company);
 
-    console.log('[canCreateInvoice] Total facturas en BD:', allInvoices?.length || 0);
-    console.log('[canCreateInvoice] Total cierres diarios en BD:', allDailyClosures?.length || 0);
-
-    // Debug: Mostrar todas las fechas únicas de facturas
-    const uniqueDates = [...new Set((allInvoices || []).map(inv => extractColombiaDate(inv.date)))];
-    console.log('[canCreateInvoice] Fechas únicas en BD:', uniqueDates.sort().reverse().slice(0, 10));
-
-    // Construir set de fechas con cierre diario
     const closureDateSet = new Set(
       (allDailyClosures || []).map(c => extractColombiaDate(c.date)).filter(Boolean)
     );
 
-    // Obtener fechas pasadas únicas (antes de hoy) de facturas, ordenadas de más antigua a más reciente
-    const pastInvoiceDates = [...new Set(
-      (allInvoices || [])
-        .filter(inv => inv.date && extractColombiaDate(inv.date) < today)
-        .map(inv => extractColombiaDate(inv.date))
-    )].sort();
+    // Buscar la factura más antigua cuya fecha (antes de hoy) no tenga cierre
+    // Solo necesitamos 1 fila — limit(1) + order es muy rápido con índice en date
+    const { data: oldestUnclosed } = await supabase
+      .from('invoices')
+      .select('date')
+      .eq('company', company)
+      .lt('date', today + 'T00:00:00')
+      .order('date', { ascending: true })
+      .limit(60); // máximo 60 filas para revisar fechas únicas sin traer toda la tabla
 
-    console.log('[canCreateInvoice] Fechas pasadas con facturas:', pastInvoiceDates);
+    const pastInvoiceDates = [...new Set(
+      (oldestUnclosed || []).map(inv => extractColombiaDate(inv.date)).filter(Boolean)
+    )].sort();
 
     // PASO 4: Buscar la fecha más antigua sin cierre
     const oldestUnclosedDate = pastInvoiceDates.find(date => !closureDateSet.has(date));
 
     if (!oldestUnclosedDate) {
-      console.log('[canCreateInvoice] ℹ️ No hay fechas pasadas sin cierre');
-
       // Verificar si es un nuevo mes y requiere cierre mensual
       const currentMonth = today.substring(0, 7);
       const yesterdayMonth = yesterdayStr.substring(0, 7);
 
       if (currentMonth !== yesterdayMonth) {
-        console.log('[canCreateInvoice] Es un nuevo mes, verificar cierre mensual del mes anterior');
+        const { data: prevMonthInvoice } = await supabase
+          .from('invoices')
+          .select('id')
+          .eq('company', company)
+          .gte('date', yesterdayMonth + '-01T00:00:00')
+          .lt('date', currentMonth + '-01T00:00:00')
+          .limit(1);
 
-        const previousMonthInvoices = (allInvoices || []).filter(inv => {
-          const invDate = extractColombiaDate(inv.date);
-          return invDate.startsWith(yesterdayMonth);
-        });
-
-        console.log('[canCreateInvoice] Facturas del mes anterior:', previousMonthInvoices.length);
-
-        if (previousMonthInvoices.length > 0) {
+        if (prevMonthInvoice && prevMonthInvoice.length > 0) {
           const { data: monthlyClosures } = await supabase
             .from('monthly_closures')
             .select('id')
@@ -1263,8 +1258,6 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
           if (!monthlyClosures || monthlyClosures.length === 0) {
             const previousMonthDate = new Date(yesterdayStr + 'T12:00:00');
             const monthName = previousMonthDate.toLocaleDateString('es-ES', { month: 'long', year: 'numeric', timeZone: 'America/Bogota' });
-
-            console.log('[canCreateInvoice] ❌ Falta cierre mensual del mes anterior');
             return {
               canCreate: false,
               requiresMonthlyClose: true,
@@ -1274,22 +1267,16 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
         }
       }
 
-      console.log('[canCreateInvoice] ✅ Sin fechas pendientes, permitir facturar');
       return { canCreate: true };
     }
 
-    // PASO 5: Hay una fecha sin cierre — bloquear y mostrar qué día pendiente
+    // PASO 5: Hay una fecha sin cierre — bloquear
     const unclosedDateObj = new Date(oldestUnclosedDate + 'T12:00:00');
     const unclosedFormatted = unclosedDateObj.toLocaleDateString('es-ES', { timeZone: 'America/Bogota', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-
-    console.log('[canCreateInvoice] ❌ Fecha sin cierre encontrada:', oldestUnclosedDate);
     return {
       canCreate: false,
       message: `⚠️ Debes realizar el CIERRE DEL DÍA del ${unclosedFormatted} antes de continuar facturando.\n\nVe a la sección "Cierres" y realiza el cierre diario.`
     };
-
-    console.log('[canCreateInvoice] ✅ Todas las validaciones pasaron, permitir facturar');
-    return { canCreate: true };
   } catch (error) {
     console.error('[canCreateInvoice] Error:', error);
     return { canCreate: false, message: 'Error al verificar permisos de facturación' };
@@ -1565,27 +1552,8 @@ export const addInvoice = async (invoice: Omit<Invoice, 'id' | 'number' | 'compa
     return null;
   }
   
-  // NOTA: La actualización de stock se maneja en el frontend para manejar correctamente
-  // las unit_ids y agrupar items del mismo producto. Aquí solo registramos movimientos
-  // si la factura está pagada (las facturas en confirmación no registran movimiento aún)
-  if (invoice.status === 'paid') {
-    for (const item of invoice.items) {
-      // Saltar productos comunes (no están en inventario)
-      if (item.productId.startsWith('common-')) continue;
-
-      await addMovement({
-        type: 'exit',
-        product_id: item.productId,
-        product_name: item.productName,
-        quantity: item.quantity,
-        reason: 'Venta - Factura',
-        reference: nextNumber || '',
-        user_name: getCurrentUser()?.username || 'Sistema',
-        unit_ids: item.unitIds || []
-      });
-    }
-  }
-  
+  // Stock updates and movements are handled by processInventory in the frontend
+  // after navigation, so the user doesn't wait for them here.
   return data;
 };
 

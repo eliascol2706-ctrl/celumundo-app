@@ -178,6 +178,7 @@ export function NewInvoice() {
   // Submission
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isValidating, setIsValidating] = useState(false);
+  const [prefetchedValidation, setPrefetchedValidation] = useState<{ canCreate: boolean; message?: string } | null>(null);
 
   // Unit ID dialog
   const [unitIdDialogOpen, setUnitIdDialogOpen] = useState(false);
@@ -214,6 +215,7 @@ export function NewInvoice() {
 
   useEffect(() => {
     const load = async () => {
+      // Pre-fetch validation in parallel with data so it's ready when user hits "Emitir"
       const [prods, depts, customers] = await Promise.all([
         getAllProducts(),
         getDepartments(),
@@ -224,6 +226,8 @@ export function NewInvoice() {
       setCreditCustomers(customers);
     };
     load();
+    // Kick off validation silently in background
+    canCreateInvoice().then(result => setPrefetchedValidation(result));
   }, []);
 
   // ─── Pre-load invoice from edit or clone mode ───────────────────────────────
@@ -735,6 +739,8 @@ export function NewInvoice() {
       }
     }
     setStep(4);
+    // Refresh validation silently so it's fresh when user hits "Emitir"
+    canCreateInvoice().then(result => setPrefetchedValidation(result));
   };
 
   const handleFinalSubmit = async () => {
@@ -749,9 +755,13 @@ export function NewInvoice() {
   // ─── Invoice creation ─────────────────────────────────────────────────────
 
   const createInvoice = async () => {
-    setIsValidating(true);
-    const validation = await canCreateInvoice();
-    setIsValidating(false);
+    // Use pre-fetched result if available; otherwise fetch now (fallback)
+    let validation = prefetchedValidation;
+    if (!validation) {
+      setIsValidating(true);
+      validation = await canCreateInvoice();
+      setIsValidating(false);
+    }
 
     if (!validation.canCreate) {
       toast.error(validation.message || 'No se puede crear factura en este momento', {
@@ -940,6 +950,13 @@ export function NewInvoice() {
       if (!prods) throw new Error('Error al obtener productos');
 
       updateTask(taskId, { progress: 50 });
+
+      // Pre-load unit-id utils once (avoids repeated dynamic imports inside the loop)
+      const [{ markIdsAsSold }, { disableIds }] = await Promise.all([
+        import('../lib/unit-ids-utils'),
+        import('../lib/unit-ids-utils'),
+      ]);
+
       const productsMap = new Map(prods.map((p: any) => [p.id, p]));
       const productUpdates: any[] = [];
       const allMovements: any[] = [];
@@ -954,10 +971,8 @@ export function NewInvoice() {
         for (const item of groupItems) {
           if (item.useUnitIds && item.unitIds && item.unitIds.length > 0) {
             if (type === 'regular' && status === 'paid') {
-              const { markIdsAsSold } = await import('../lib/unit-ids-utils');
               newRegisteredIds = markIdsAsSold(newRegisteredIds, item.unitIds);
             } else {
-              const { disableIds } = await import('../lib/unit-ids-utils');
               newRegisteredIds = disableIds(newRegisteredIds, item.unitIds, invoice.id);
             }
           }
@@ -984,10 +999,13 @@ export function NewInvoice() {
       }
 
       updateTask(taskId, { progress: 70 });
-      await Promise.all(productUpdates.map(u =>
-        supabase.from('products').update({ stock: u.stock, registered_ids: u.registered_ids }).eq('id', u.id).eq('company', u.company)
-      ));
-      if (allMovements.length > 0) await supabase.from('movements').insert(allMovements);
+      // Update stock and insert movements in parallel
+      await Promise.all([
+        ...productUpdates.map(u =>
+          supabase.from('products').update({ stock: u.stock, registered_ids: u.registered_ids }).eq('id', u.id).eq('company', u.company)
+        ),
+        ...(allMovements.length > 0 ? [supabase.from('movements').insert(allMovements)] : []),
+      ]);
 
       updateTask(taskId, { status: 'completed', progress: 100, message: `Factura #${invoice.number} procesada exitosamente` });
       toast.success(`Factura #${invoice.number} creada exitosamente`);
