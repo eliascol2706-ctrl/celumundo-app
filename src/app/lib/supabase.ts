@@ -1487,11 +1487,17 @@ export const addInvoice = async (invoice: Omit<Invoice, 'id' | 'number' | 'compa
   const maxRetries = 5;
 
   for (let attempt = 0; attempt < maxRetries; attempt++) {
-    // Si es el primer intento, usar el RPC
+    nextNumber = '';
+    // Si es el primer intento, usar el RPC; si falla/retorna null, caer al cálculo manual
     if (attempt === 0) {
       const { data: invoiceNumber } = await supabase.rpc('get_next_invoice_number', { company_name: company });
-      nextNumber = invoiceNumber;
-    } else {
+      if (invoiceNumber) {
+        nextNumber = invoiceNumber;
+      }
+    }
+
+    // Fallback: calcular desde el MAX actual si el RPC no devolvió nada
+    if (!nextNumber) {
       // En reintentos, calcular manualmente desde el MAX actual
       const { data: maxInvoice } = await supabase
         .from('invoices')
@@ -2242,17 +2248,34 @@ export const deleteExpense = async (id: string): Promise<boolean> => {
 
 export const getDailyClosures = async (): Promise<DailyClosure[]> => {
   const company = getCurrentCompany();
-  const { data, error } = await supabase
-    .from('daily_closures')
-    .select('*')
-    .eq('company', company)
-    .order('date', { ascending: false });
+  const pageSize = 1000;
+  let allData: DailyClosure[] = [];
+  let page = 0;
+  let hasMore = true;
 
-  if (error) {
-    console.error('Error fetching daily closures:', error);
-    return [];
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from('daily_closures')
+      .select('*')
+      .eq('company', company)
+      .order('date', { ascending: false })
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error) {
+      console.error('Error fetching daily closures:', error);
+      break;
+    }
+
+    if (!data || data.length < pageSize) {
+      if (data) allData = allData.concat(data);
+      hasMore = false;
+    } else {
+      allData = allData.concat(data);
+      page++;
+    }
   }
-  return data || [];
+
+  return allData;
 };
 
 export const addDailyClosure = async (closure: Omit<DailyClosure, 'id' | 'company' | 'created_at'>): Promise<DailyClosure | null> => {
@@ -2311,17 +2334,34 @@ export const updateClosureDate = async (closureId: string, newDate: string): Pro
 
 export const getMonthlyClosures = async (): Promise<MonthlyClosure[]> => {
   const company = getCurrentCompany();
-  const { data, error } = await supabase
-    .from('monthly_closures')
-    .select('*')
-    .eq('company', company)
-    .order('month', { ascending: false });
-  
-  if (error) {
-    console.error('Error fetching monthly closures:', error);
-    return [];
+  const pageSize = 1000;
+  let allData: MonthlyClosure[] = [];
+  let page = 0;
+  let hasMore = true;
+
+  while (hasMore) {
+    const { data, error } = await supabase
+      .from('monthly_closures')
+      .select('*')
+      .eq('company', company)
+      .order('month', { ascending: false })
+      .range(page * pageSize, (page + 1) * pageSize - 1);
+
+    if (error) {
+      console.error('Error fetching monthly closures:', error);
+      break;
+    }
+
+    if (!data || data.length < pageSize) {
+      if (data) allData = allData.concat(data);
+      hasMore = false;
+    } else {
+      allData = allData.concat(data);
+      page++;
+    }
   }
-  return data || [];
+
+  return allData;
 };
 
 export const addMonthlyClosure = async (closure: Omit<MonthlyClosure, 'id' | 'company' | 'created_at'>): Promise<MonthlyClosure | null> => {
@@ -2920,12 +2960,13 @@ export const addCustomer = async (customer: Omit<Customer, 'id' | 'company' | 'c
 
   if (error) {
     console.error('Error adding customer:', error);
-    return null;
+    if (error.code === '23505') {
+      throw new Error('duplicate_document');
+    }
+    throw new Error(error.message);
   }
 
-  // Invalidar caché de clientes para forzar recarga
   invalidateCache.customers(company);
-
   return data;
 };
 
