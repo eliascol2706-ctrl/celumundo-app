@@ -3,31 +3,26 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
 import { formatCOP } from '../lib/currency';
-import type { Customer } from '../lib/supabase';
 
 interface CreditWarningModalProps {
   isOpen: boolean;
   onClose: () => void;
-  customer: Customer;
+  onProceed: () => void;
+  customerName: string;
   totalDebt: number;
   overdueDays: number;
-  onRegisterPayment: () => void;
-  onContinueAnyway: () => void;
-  userRole: 'admin' | 'seller';
+  isBlocked: boolean;
 }
 
 export function CreditWarningModal({
   isOpen,
   onClose,
-  customer,
+  onProceed,
+  customerName,
   totalDebt,
   overdueDays,
-  onRegisterPayment,
-  onContinueAnyway,
-  userRole
+  isBlocked
 }: CreditWarningModalProps) {
-  const isBlocked = customer.blocked;
-
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="max-w-md">
@@ -62,8 +57,7 @@ export function CreditWarningModal({
                 </Badge>
               )}
             </div>
-            <p className="font-semibold text-zinc-900">{customer.name}</p>
-            <p className="text-sm text-zinc-500">{customer.document}</p>
+            <p className="font-semibold text-zinc-900">{customerName}</p>
           </div>
 
           {/* Detalles de Deuda */}
@@ -99,18 +93,10 @@ export function CreditWarningModal({
 
         <DialogFooter className="flex-col sm:flex-col gap-2">
           {!isBlocked && (
-            <Button onClick={onRegisterPayment} className="w-full bg-emerald-600 hover:bg-emerald-700" autoFocus>
-              <DollarSign className="w-4 h-4 mr-2" />
-              Registrar Pago
-            </Button>
-          )}
-
-          {!isBlocked && userRole === 'admin' && (
-            <Button onClick={onContinueAnyway} variant="outline" className="w-full border-amber-300 text-amber-700 hover:bg-amber-50">
+            <Button onClick={onProceed} className="w-full bg-amber-600 hover:bg-amber-700" autoFocus>
               Continuar de Todos Modos
             </Button>
           )}
-
           <Button onClick={onClose} variant="outline" className="w-full">
             Cancelar Venta
           </Button>

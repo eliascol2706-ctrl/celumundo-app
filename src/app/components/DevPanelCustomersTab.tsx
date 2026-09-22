@@ -127,9 +127,7 @@ export function DevPanelCustomersTab() {
         notes: notes.trim() || undefined,
       });
 
-      if (!customer) { toast.error('Error al crear el cliente'); return; }
-
-      await createInvoicesForCustomer(customer.name, customer.document, newInvoices);
+      await createInvoicesForCustomer(customer!.name, customer!.document, newInvoices);
 
       toast.success(`Cliente "${customer.name}" creado con ${newInvoices.length} factura(s)`);
       setName(''); setDocument(''); setPhone(''); setEmail('');
@@ -137,9 +135,12 @@ export function DevPanelCustomersTab() {
       setNewInvoices([]);
       // Refrescar lista de clientes
       getCustomers().then(setCustomers).catch(() => {});
-    } catch (err) {
-      console.error(err);
-      toast.error('Error al guardar');
+    } catch (err: any) {
+      if (err.message === 'duplicate_document') {
+        toast.error(`Ya existe un cliente con el documento "${document.trim()}"`);
+      } else {
+        toast.error('Error al guardar');
+      }
     } finally {
       setSaving(false);
     }

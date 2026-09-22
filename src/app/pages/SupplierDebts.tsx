@@ -269,8 +269,18 @@ export default function SupplierDebts() {
 
       // Actualizar la deuda
       const newPaidAmount = selectedDebt.paid_amount + paymentData.amount;
+      const newPendingAmount = selectedDebt.pending_amount - paymentData.amount;
+      const isFullyPaid = newPendingAmount <= 0;
+      const updatePayload: Record<string, unknown> = {
+        paid_amount: newPaidAmount,
+        pending_amount: Math.max(0, newPendingAmount),
+      };
+      if (isFullyPaid) {
+        updatePayload.status = 'paid';
+        updatePayload.paid_date = getColombiaDate();
+      }
       const { error: updateError } = await supabase.from('supplier_debts')
-        .update({ paid_amount: newPaidAmount })
+        .update(updatePayload)
         .eq('id', selectedDebt.id);
 
       if (updateError) throw updateError;

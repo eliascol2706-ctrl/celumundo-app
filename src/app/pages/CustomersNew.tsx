@@ -124,11 +124,10 @@ export function CustomersNew() {
       notes: customerForm.notes || undefined
     };
 
-    const result = await addCustomer(newCustomer);
-    if (result) {
-      // Registrar en historial
+    try {
+      const result = await addCustomer(newCustomer);
       await addCreditHistory({
-        customer_document: result.document,
+        customer_document: result!.document,
         event_type: 'note',
         description: 'Cliente registrado en el sistema',
         registered_by: getCurrentUser()?.username || 'Sistema'
@@ -136,7 +135,7 @@ export function CustomersNew() {
 
       if (creditLimit > 0) {
         await addCreditHistory({
-          customer_document: result.document,
+          customer_document: result!.document,
           event_type: 'credit_limit_change',
           description: `Cupo de crédito asignado: ${formatCOP(creditLimit)}`,
           amount: creditLimit,
@@ -148,8 +147,12 @@ export function CustomersNew() {
       setIsAddDialogOpen(false);
       resetForm();
       loadCustomers();
-    } else {
-      toast.error('Error al registrar el cliente');
+    } catch (err: any) {
+      if (err.message === 'duplicate_document') {
+        toast.error(`Ya existe un cliente con el documento "${customerForm.document}"`);
+      } else {
+        toast.error('Error al registrar el cliente');
+      }
     }
     setIsSubmitting(false);
   };
