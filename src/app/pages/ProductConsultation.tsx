@@ -36,15 +36,18 @@ export function ProductConsultation() {
     try {
       const company = getCurrentCompany();
 
-      // Buscar producto por código
-      const { data, error } = await supabase
+      // Quitar A's del inicio y fin para buscar solo el núcleo numérico
+      const core = code.trim().replace(/^A+|A+$/gi, '');
+      const pattern = `%${core}%`;
+
+      const { data } = await supabase
         .from('products')
         .select('*')
         .eq('company', company)
-        .eq('code', code)
-        .single();
+        .ilike('code', pattern)
+        .maybeSingle();
 
-      if (error || !data) {
+      if (!data) {
         toast.error('Producto no encontrado');
         setProduct(null);
         return;
@@ -275,9 +278,8 @@ export function ProductConsultation() {
                 onChange={e => setManualCode(e.target.value)}
                 onKeyDown={e => {
                   if (e.key === 'Enter' && manualCode.trim()) {
-                    const cleaned = manualCode.trim().replace(/A/g, '');
                     setProduct(null);
-                    searchProduct(cleaned);
+                    searchProduct(manualCode.trim());
                     setManualCode('');
                   }
                 }}
@@ -287,9 +289,8 @@ export function ProductConsultation() {
               <Button
                 onClick={() => {
                   if (manualCode.trim()) {
-                    const cleaned = manualCode.trim().replace(/A/g, '');
                     setProduct(null);
-                    searchProduct(cleaned);
+                    searchProduct(manualCode.trim());
                     setManualCode('');
                   }
                 }}
