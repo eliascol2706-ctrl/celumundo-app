@@ -20,7 +20,8 @@ import {
   getCustomers,
   updateInvoice,
   type CreditPayment,
-  supabase
+  supabase,
+  logActivity
 } from '../lib/supabase';
 import { isElectron, onGlobalShortcut, removeGlobalShortcutListener } from '../lib/electron-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
@@ -1426,6 +1427,14 @@ export function Invoices() {
           });
         }
 
+        logActivity({
+          type: 'factura_confirmada',
+          reference: `FAC-${invoiceToConfirm.number}`,
+          description: `Factura #${invoiceToConfirm.number} confirmada — ${invoiceToConfirm.customer_name || 'Consumidor Final'}`,
+          entity_name: invoiceToConfirm.customer_name || 'Consumidor Final',
+          amount: invoiceToConfirm.total,
+          metadata: { invoice_id: invoiceToConfirm.id },
+        });
         toast.success('Pago confirmado exitosamente');
         setIsConfirmPaymentDialogOpen(false);
         setInvoiceToConfirm(null);

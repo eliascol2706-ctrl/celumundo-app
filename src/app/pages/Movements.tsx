@@ -31,6 +31,7 @@ import {
   searchProductsForInvoice,
   supabase,
   addMovementReceipt,
+  logActivity,
   type Movement,
   type Product,
   type MovementReceipt,
@@ -740,6 +741,13 @@ export default function Movements() {
       setCurrentReceipt(savedReceipt);
       setShowCompletionModal(true);
 
+      logActivity({
+        type: type === 'entry' ? 'cargo_inventario' : 'descargo_inventario',
+        reference: reference,
+        description: `${type === 'entry' ? 'Cargo' : 'Descargo'} de inventario — ${reference} — ${totalProducts} producto(s), ${totalUnits} unidad(es)`,
+        amount: totalCost,
+        metadata: { receipt_id: savedReceipt.id, total_products: totalProducts, total_units: totalUnits, reason },
+      });
       toast.success(
         `${type === "entry" ? "Entrada" : "Salida"} registrada correctamente`,
       );

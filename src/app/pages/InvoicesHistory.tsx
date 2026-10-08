@@ -11,7 +11,9 @@ import {
   getExpenses,
   type CreditPayment,
   type Return,
-  type Exchange
+  type Exchange,
+  getCurrentUser,
+  logActivity
 } from '../lib/supabase';
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router';
@@ -312,6 +314,14 @@ export function InvoicesHistory() {
         }
       }
 
+      logActivity({
+        type: 'factura_confirmada',
+        reference: `FAC-${invoice.number}`,
+        description: `Factura #${invoice.number} aprobada — ${invoice.customer_name || 'Consumidor Final'}`,
+        entity_name: invoice.customer_name || 'Consumidor Final',
+        amount: invoice.total,
+        metadata: { invoice_id: invoice.id },
+      });
       toast.success('Factura aprobada exitosamente');
       await loadInvoices();
     } catch (error) {

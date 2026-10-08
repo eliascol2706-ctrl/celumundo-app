@@ -5,7 +5,7 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Label } from './ui/label';
 import { Textarea } from './ui/textarea';
-import { addCreditPayment, addCreditHistory, uploadPaymentProof, type Invoice, type CreditPayment, getCurrentUser } from '../lib/supabase';
+import { addCreditPayment, addCreditHistory, uploadPaymentProof, type Invoice, type CreditPayment, getCurrentUser, logActivity } from '../lib/supabase';
 import { toast } from 'sonner';
 import { formatCOP } from '../lib/currency';
 import { printThermalPayment } from '../lib/thermal-printer';
@@ -73,6 +73,14 @@ export function PaymentDialog({ isOpen, onClose, invoice, onPaymentSuccess }: Pa
         registered_by: getCurrentUser()?.username || 'Sistema'
       });
 
+      logActivity({
+        type: 'abono',
+        reference: `FAC-${invoice.number}`,
+        description: `Abono de ${formatCOP(paymentAmount)} a factura #${invoice.number} — ${invoice.customer_name || invoice.customer_document || 'Cliente'}`,
+        entity_name: invoice.customer_name || invoice.customer_document || 'Cliente',
+        amount: paymentAmount,
+        metadata: { invoice_id: invoice.id, payment_method: paymentMethod },
+      });
       toast.success('Pago registrado exitosamente');
       setAmount('');
       setNotes('');

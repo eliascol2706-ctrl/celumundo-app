@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Plus, Search, Pencil, Trash2, DollarSign, Filter, Calendar } from 'lucide-react';
-import { getExpenses, addExpense, updateExpense, deleteExpense, type Expense } from '../lib/supabase';
+import { getExpenses, addExpense, updateExpense, deleteExpense, getCurrentUser, type Expense, logActivity } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -104,6 +104,14 @@ export function Expenses() {
         status: formData.status,
       });
 
+      logActivity({
+        type: 'gasto',
+        reference: formData.reference || `GASTO-${Date.now()}`,
+        description: `Gasto registrado: ${formData.description} — ${formData.category}`,
+        entity_name: formData.supplier || formData.category,
+        amount: parseFloat(formData.amount),
+        metadata: { category: formData.category, payment_method: formData.paymentMethod, status: formData.status },
+      });
       toast.success('Gasto registrado correctamente');
       setIsDialogOpen(false);
       setFormData({

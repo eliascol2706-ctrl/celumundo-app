@@ -26,7 +26,8 @@ import {
   getAllInvoices,
   type Customer,
   type Invoice,
-  getCurrentUser
+  getCurrentUser,
+  logActivity
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -143,6 +144,14 @@ export function CustomersNew() {
         });
       }
 
+      logActivity({
+        type: 'nuevo_cliente',
+        reference: `CLI-${newCustomer.document}`,
+        description: `Nuevo cliente registrado: ${newCustomer.name} (${newCustomer.document})`,
+        entity_name: newCustomer.name,
+        amount: creditLimit > 0 ? creditLimit : undefined,
+        metadata: { document: newCustomer.document, credit_limit: creditLimit },
+      });
       toast.success('Cliente registrado exitosamente');
       setIsAddDialogOpen(false);
       resetForm();
@@ -195,6 +204,14 @@ export function CustomersNew() {
           description: `Cupo de crédito modificado de ${formatCOP(previousCreditLimit)} a ${formatCOP(creditLimit)}`,
           amount: creditLimit,
           registered_by: getCurrentUser()?.username || 'Sistema'
+        });
+        logActivity({
+          type: 'aumento_credito',
+          reference: `CLI-${result.document}`,
+          description: `Cupo de crédito de ${result.name} modificado: ${formatCOP(previousCreditLimit)} → ${formatCOP(creditLimit)}`,
+          entity_name: result.name,
+          amount: creditLimit,
+          metadata: { document: result.document, previous_limit: previousCreditLimit, new_limit: creditLimit },
         });
       }
 

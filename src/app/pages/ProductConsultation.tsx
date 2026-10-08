@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
-import { ArrowLeft, Camera, QrCode, X, Package } from 'lucide-react';
+import { ArrowLeft, Camera, QrCode, X, Package, Search } from 'lucide-react';
 import { useNavigate } from 'react-router';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '../components/ui/dialog';
 import { toast } from 'sonner';
 import { supabase, getCurrentCompany } from '../lib/supabase';
@@ -27,6 +28,7 @@ export function ProductConsultation() {
   const [scannerType, setScannerType] = useState<'barcode' | 'qr' | null>(null);
   const [product, setProduct] = useState<Product | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [manualCode, setManualCode] = useState('');
   const scannerRef = useRef<Html5QrcodeScanner | Html5Qrcode | null>(null);
 
   const searchProduct = async (code: string) => {
@@ -196,143 +198,170 @@ export function ProductConsultation() {
   }, [isScannerOpen, scannerType]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 dark:from-gray-900 dark:to-gray-800 p-4">
-      <div className="max-w-4xl mx-auto">
+    <div className="min-h-screen bg-gradient-to-br from-green-50 to-emerald-100 dark:from-gray-900 dark:to-gray-800 p-3 sm:p-6">
+      <div className="max-w-2xl mx-auto">
         {/* Header */}
-        <div className="mb-8">
+        <div className="mb-6">
           <Button
             variant="outline"
             onClick={() => navigate('/')}
-            className="mb-4"
+            className="mb-4 h-10"
           >
             <ArrowLeft className="h-4 w-4 mr-2" />
             Volver
           </Button>
 
           <div className="text-center">
-            <h1 className="text-3xl md:text-4xl font-bold text-gray-900 dark:text-white mb-2">
+            <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white mb-1">
               Consulta de Productos
             </h1>
-            <p className="text-gray-600 dark:text-gray-300">
-              Escanea el código para consultar precios y disponibilidad
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              Escanea o escribe el código para consultar precios y disponibilidad
             </p>
           </div>
         </div>
 
         {/* Scanner Buttons */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <div className="grid grid-cols-2 gap-3 mb-6">
           <Card
-            className="cursor-pointer transition-all hover:shadow-xl hover:scale-105 border-2 hover:border-blue-500"
+            className="cursor-pointer transition-all active:scale-95 hover:shadow-lg border-2 hover:border-blue-500"
             onClick={() => startScanner('barcode')}
           >
-            <CardContent className="p-6 text-center">
-              <div className="flex justify-center mb-4">
+            <CardContent className="p-4 text-center">
+              <div className="flex justify-center mb-3">
                 <div className="p-3 bg-blue-100 dark:bg-blue-900 rounded-full">
-                  <Camera className="h-8 w-8 text-blue-600 dark:text-blue-400" />
+                  <Camera className="h-7 w-7 text-blue-600 dark:text-blue-400" />
                 </div>
               </div>
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-                Escanear Código de Barras
+              <h3 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white mb-1">
+                Código de Barras
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Usa la cámara para escanear códigos de barras
+              <p className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">
+                Escanear con cámara
               </p>
             </CardContent>
           </Card>
 
           <Card
-            className="cursor-pointer transition-all hover:shadow-xl hover:scale-105 border-2 hover:border-green-500"
+            className="cursor-pointer transition-all active:scale-95 hover:shadow-lg border-2 hover:border-green-500"
             onClick={() => startScanner('qr')}
           >
-            <CardContent className="p-6 text-center">
-              <div className="flex justify-center mb-4">
+            <CardContent className="p-4 text-center">
+              <div className="flex justify-center mb-3">
                 <div className="p-3 bg-green-100 dark:bg-green-900 rounded-full">
-                  <QrCode className="h-8 w-8 text-green-600 dark:text-green-400" />
+                  <QrCode className="h-7 w-7 text-green-600 dark:text-green-400" />
                 </div>
               </div>
-              <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
-                Escanear Código QR
+              <h3 className="text-sm sm:text-base font-bold text-gray-900 dark:text-white mb-1">
+                Código QR
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Usa la cámara para escanear códigos QR
+              <p className="text-xs text-gray-500 dark:text-gray-400 hidden sm:block">
+                Escanear con cámara
               </p>
             </CardContent>
           </Card>
         </div>
 
+        {/* Búsqueda manual por código */}
+        <div className="mb-6">
+          <div className="max-w-lg mx-auto">
+            <p className="text-sm text-gray-500 dark:text-gray-400 text-center mb-3">
+              O escribe el código del producto
+            </p>
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                value={manualCode}
+                onChange={e => setManualCode(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && manualCode.trim()) {
+                    const cleaned = manualCode.trim().replace(/A/g, '');
+                    setProduct(null);
+                    searchProduct(cleaned);
+                    setManualCode('');
+                  }
+                }}
+                placeholder="Ingresa el código..."
+                className="bg-white dark:bg-gray-800 text-base h-12"
+              />
+              <Button
+                onClick={() => {
+                  if (manualCode.trim()) {
+                    const cleaned = manualCode.trim().replace(/A/g, '');
+                    setProduct(null);
+                    searchProduct(cleaned);
+                    setManualCode('');
+                  }
+                }}
+                disabled={isLoading || !manualCode.trim()}
+                className="bg-green-600 hover:bg-green-700 text-white shrink-0 h-12 px-5"
+              >
+                {isLoading
+                  ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-r-transparent" />
+                  : <Search className="h-5 w-5" />
+                }
+              </Button>
+            </div>
+          </div>
+        </div>
+
         {/* Product Information */}
         {product && (
           <Card className="border-2 border-green-500 shadow-xl">
-            <CardHeader className="bg-gradient-to-r from-green-500 to-emerald-600 text-white">
+            <CardHeader className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4 sm:p-6">
               <div className="flex items-center gap-3">
-                <Package className="h-8 w-8" />
-                <div>
-                  <CardTitle className="text-2xl">{product.name}</CardTitle>
-                  <p className="text-sm opacity-90">Código: {product.code}</p>
+                <Package className="h-6 w-6 sm:h-8 sm:w-8 shrink-0" />
+                <div className="min-w-0">
+                  <CardTitle className="text-lg sm:text-2xl leading-tight truncate">{product.name}</CardTitle>
+                  <p className="text-xs sm:text-sm opacity-90 font-mono mt-0.5">Código: {product.code}</p>
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-6 space-y-4">
+            <CardContent className="p-4 sm:p-6 space-y-4">
               {product.description && (
-                <div>
-                  <h4 className="font-semibold text-gray-700 dark:text-gray-300 mb-1">
-                    Descripción
-                  </h4>
-                  <p className="text-gray-600 dark:text-gray-400">
-                    {product.description}
-                  </p>
-                </div>
+                <p className="text-sm text-gray-600 dark:text-gray-400 border-b border-gray-100 dark:border-gray-700 pb-3">
+                  {product.description}
+                </p>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="bg-blue-50 dark:bg-blue-950 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-                    Stock Disponible
-                  </p>
-                  <p className={`text-2xl font-bold ${
-                    product.stock > 0
-                      ? 'text-green-600 dark:text-green-400'
-                      : 'text-red-600 dark:text-red-400'
+              {/* Stock */}
+              <div className={`flex items-center justify-between rounded-lg px-4 py-3 ${
+                product.stock > 0
+                  ? 'bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800'
+                  : 'bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800'
+              }`}>
+                <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Disponibilidad</p>
+                <div className="text-right">
+                  <span className={`text-xl font-bold ${
+                    product.stock > 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'
                   }`}>
-                    {product.stock} unidades
-                  </p>
+                    {product.stock > 0 ? `${product.stock} en stock` : 'Sin stock'}
+                  </span>
                 </div>
+              </div>
 
-                <div className="bg-orange-50 dark:bg-orange-950 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-                    Costo
-                  </p>
-                  <p className="text-2xl font-bold text-orange-600 dark:text-orange-400">
-                    {formatCOP(product.current_cost)}
-                  </p>
-                </div>
-
-                <div className="bg-purple-50 dark:bg-purple-950 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-                    Precio 1
-                  </p>
-                  <p className="text-2xl font-bold text-purple-600 dark:text-purple-400">
+              {/* Precios */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wide">Precio 1</p>
+                  <p className="text-lg font-bold text-gray-800 dark:text-gray-100">
                     {formatCOP(product.price1)}
                   </p>
                 </div>
-
-                <div className="bg-indigo-50 dark:bg-indigo-950 p-4 rounded-lg">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-                    Precio 2 (Al Mayor)
-                  </p>
-                  <p className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">
+                <div className="bg-gray-50 dark:bg-gray-800 rounded-lg p-4 text-center">
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-2 uppercase tracking-wide">Precio 2</p>
+                  <p className="text-lg font-bold text-gray-800 dark:text-gray-100">
                     {formatCOP(product.price2)}
                   </p>
                 </div>
+              </div>
 
-                <div className="bg-green-50 dark:bg-green-950 p-4 rounded-lg col-span-2">
-                  <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">
-                    Precio Final
-                  </p>
-                  <p className="text-2xl font-bold text-green-600 dark:text-green-400">
-                    {formatCOP(product.final_price)}
-                  </p>
-                </div>
+              {/* Precio Final destacado */}
+              <div className="bg-green-600 rounded-xl p-5 text-center text-white shadow-md">
+                <p className="text-xs uppercase tracking-widest opacity-80 mb-1">Precio Final</p>
+                <p className="text-3xl sm:text-4xl font-bold">
+                  {formatCOP(product.final_price)}
+                </p>
               </div>
             </CardContent>
           </Card>

@@ -5448,3 +5448,47 @@ export const updateInvoiceCustomer = async (
   if (error) { console.error('Error updating invoice customer:', error); return null; }
   return result;
 };
+
+// ─── Registro del Sistema ─────────────────────────────────────────────────────
+
+export type LogType =
+  | 'factura_contado'
+  | 'factura_credito'
+  | 'factura_confirmada'
+  | 'factura_pagada'
+  | 'abono'
+  | 'cargo_inventario'
+  | 'descargo_inventario'
+  | 'modificacion_producto'
+  | 'nuevo_cliente'
+  | 'aumento_credito'
+  | 'gasto'
+  | 'cierre'
+  | 'devolucion'
+  | 'cambio';
+
+export const logActivity = async (opts: {
+  type: LogType;
+  reference: string;
+  description: string;
+  entity_name?: string;
+  amount?: number;
+  metadata?: Record<string, unknown>;
+}): Promise<void> => {
+  try {
+    const company = getCurrentCompany();
+    const user = getCurrentUser();
+    await supabase.from('system_logs').insert({
+      company,
+      reference: opts.reference,
+      type: opts.type,
+      user_name: user?.username || 'Sistema',
+      entity_name: opts.entity_name ?? null,
+      amount: opts.amount ?? null,
+      description: opts.description,
+      metadata: opts.metadata ?? null,
+    });
+  } catch (err) {
+    console.error('[logActivity] Error writing system log:', err);
+  }
+};

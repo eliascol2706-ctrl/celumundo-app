@@ -7,7 +7,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { formatCOP } from '../lib/currency';
-import { addMonthlyClosure, getCurrentUser, getColombiaDate, extractColombiaDate } from '../lib/supabase';
+import { addMonthlyClosure, getCurrentUser, getColombiaDate, extractColombiaDate, logActivity } from '../lib/supabase';
 import { toast } from 'sonner';
 
 type Phase = 1 | 2;
@@ -149,6 +149,14 @@ export function MonthlyClosureDialog({
           closed_at: closedAtISO,
         });
 
+        logActivity({
+          type: 'cierre',
+          reference: `CIERRE-M-${currentMonth}-${currentYear}`,
+          description: `Cierre mensual ${currentMonth}/${currentYear} realizado por ${closedByName.trim()}`,
+          entity_name: closedByName.trim(),
+          amount: totalClosuresIncome,
+          metadata: { month: currentMonth, year: currentYear, type: 'monthly' },
+        });
         setIsLoading(false);
         setIsSuccess(true);
 

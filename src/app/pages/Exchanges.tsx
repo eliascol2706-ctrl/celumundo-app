@@ -22,7 +22,8 @@ import {
   type Exchange,
   type ExchangeProduct,
   type Product,
-  type Invoice
+  type Invoice,
+  logActivity,
 } from '../lib/supabase';
 import { type UnitIdWithNote } from '../lib/unit-ids-utils';
 import { toast } from 'sonner';
@@ -600,6 +601,14 @@ export default function Exchanges() {
 
       if (result) {
         console.log('✅ [Exchanges] Cambio creado:', result);
+        logActivity({
+          type: 'cambio',
+          reference: result.exchange_number || `CAM-${Date.now()}`,
+          description: `Cambio registrado — ${exchangeData.original_product_name} → ${newProducts[0]?.productName || 'Sin producto nuevo'} (${(exchangeData as any).customer_name || 'Cliente general'})`,
+          entity_name: (exchangeData as any).customer_name || 'Cliente general',
+          amount: Math.abs(exchangeData.price_difference ?? 0) || undefined,
+          metadata: { exchange_id: result.id, invoice_number: (exchangeData as any).invoice_number, type: exchangeType },
+        });
         toast.success('Cambio registrado exitosamente');
         setIsDialogOpen(false);
         loadData();

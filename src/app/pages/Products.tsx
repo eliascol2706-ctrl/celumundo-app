@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { Plus, Search, Pencil, Trash2, AlertCircle, Percent, List, X, Printer, Eye, Loader2, FileText } from 'lucide-react';
-import { getProducts, getAllProducts, searchProducts, addProduct, updateProduct, deleteProduct, getDepartments, type Product, type Department, supabase } from '../lib/supabase';
+import { getProducts, getAllProducts, searchProducts, addProduct, updateProduct, deleteProduct, getDepartments, getCurrentUser, type Product, type Department, supabase, logActivity } from '../lib/supabase';
 import { extractIds, type UnitIdWithNote } from '../lib/unit-ids-utils';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -623,9 +623,25 @@ export function Products() {
 
       if (editingProduct) {
         await updateProduct(editingProduct.id, productData);
+        logActivity({
+          type: 'modificacion_producto',
+          reference: `PROD-${productData.code}`,
+          description: `Producto "${productData.name}" modificado`,
+          entity_name: productData.name,
+          amount: productData.final_price,
+          metadata: { product_id: editingProduct.id, code: productData.code },
+        });
         toast.success('Producto actualizado correctamente');
       } else {
         await addProduct(productData);
+        logActivity({
+          type: 'modificacion_producto',
+          reference: `PROD-${productData.code}`,
+          description: `Producto "${productData.name}" agregado al catálogo`,
+          entity_name: productData.name,
+          amount: productData.final_price,
+          metadata: { code: productData.code },
+        });
         toast.success('Producto agregado correctamente');
       }
 

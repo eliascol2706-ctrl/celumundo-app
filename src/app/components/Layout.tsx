@@ -34,7 +34,8 @@ import {
   Edit,
   Calendar,
   AlertTriangle,
-  Fingerprint
+  Fingerprint,
+  BookOpen
 } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { getCurrentUser, logoutUser, getSession, searchProductsForInvoice, type Product, type User, getUsersFromDB, updateUserCredentials, checkUsernameExists, addUser, deleteUser, saveSession, canCreateInvoice, supabase } from '../lib/supabase';
@@ -83,6 +84,7 @@ const adminNavigation = [
       { name: 'Gastos', href: '/sistema/gastos', icon: Receipt },
       { name: 'Cierres', href: '/sistema/cierres', icon: DoorOpen },
       { name: 'Reportes', href: '/sistema/reportes', icon: BarChart3 },
+      { name: 'Registro', href: '/sistema/registro', icon: BookOpen },
     ]
   }
 ];

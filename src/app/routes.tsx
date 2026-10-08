@@ -34,6 +34,7 @@ const CustomerTracking = React.lazy(() => import('./pages/CustomerTracking').the
 const SupplierDebts = React.lazy(() => import('./pages/SupplierDebts').then(m => ({ default: m.default || m.SupplierDebts })));
 const Suppliers = React.lazy(() => import('./pages/Suppliers').then(m => ({ default: m.Suppliers })));
 const PublicInvoice = React.lazy(() => import('./pages/PublicInvoice'));
+const Registro = React.lazy(() => import('./pages/Registro').then(m => ({ default: m.Registro })));
 
 // Componente Suspense Wrapper
 function SuspenseWrapper({ children }: { children: React.ReactNode }) {
@@ -298,6 +299,16 @@ export const router = createBrowserRouter([
           <ProtectedRoute allowedRoles={['admin', 'seller']}>
             <SuspenseWrapper>
               <CommonProducts />
+            </SuspenseWrapper>
+          </ProtectedRoute>
+        )
+      },
+      {
+        path: 'registro',
+        element: (
+          <ProtectedRoute allowedRoles={['admin']}>
+            <SuspenseWrapper>
+              <Registro />
             </SuspenseWrapper>
           </ProtectedRoute>
         )

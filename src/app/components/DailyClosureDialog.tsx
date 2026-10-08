@@ -7,7 +7,7 @@ import { Label } from './ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { formatCOP } from '../lib/currency';
-import { addDailyClosure, getCurrentUser, getColombiaDate } from '../lib/supabase';
+import { addDailyClosure, getCurrentUser, getColombiaDate, logActivity } from '../lib/supabase';
 import { toast } from 'sonner';
 
 type Phase = 1 | 2 | 3;
@@ -528,6 +528,14 @@ export function DailyClosureDialog({
 
         console.log('✅ CIERRE GUARDADO Y VERIFICADO:', closureResult);
 
+        logActivity({
+          type: 'cierre',
+          reference: `CIERRE-D-${closureResult.date || getColombiaDate()}`,
+          description: `Cierre diario realizado por ${closedByName.trim()}`,
+          entity_name: closedByName.trim(),
+          amount: closureResult.total,
+          metadata: { closure_id: closureResult.id, date: closureResult.date, type: 'daily' },
+        });
         setIsLoading(false);
         setIsSuccess(true);
 

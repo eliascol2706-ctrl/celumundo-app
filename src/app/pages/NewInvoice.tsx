@@ -13,7 +13,7 @@ import {
   searchInvoiceCustomers, getInvoiceCustomerByName, addInvoiceCustomer,
   searchInvoiceCustomersByQuery,
   getCreditNotesByCustomer, applyCreditNoteBalance, addCreditPayment,
-  getColombiaDate, getCurrentCompany, supabase, updateInvoice,
+  getColombiaDate, getCurrentCompany, supabase, updateInvoice, logActivity,
   type Customer, type InvoiceCustomer, type CreditNote,
 } from '../lib/supabase';
 import { Button } from '../components/ui/button';
@@ -205,8 +205,8 @@ export function NewInvoice() {
   // Mobile view toggle (Step 2: catalog vs cart)
   const [mobileView, setMobileView] = useState<'catalog' | 'cart'>('catalog');
 
-  // Barcode scanner
-  const [barcodeBuffer, setBarcodeBuffer] = useState('');
+  // Barcode scanner — ref to avoid re-renders on every keypress
+  const barcodeBufferRef = useRef('');
   const barcodeTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const blocker = useBlocker(() => !shouldProceedRef.current && cart.length > 0);
@@ -336,9 +336,9 @@ export function NewInvoice() {
       if (document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA') return;
       if (barcodeTimeoutRef.current) clearTimeout(barcodeTimeoutRef.current);
 
-      if (e.key === 'Enter' && barcodeBuffer.length > 0) {
-        const code = barcodeBuffer.trim();
-        setBarcodeBuffer('');
+      if (e.key === 'Enter' && barcodeBufferRef.current.length > 0) {
+        const code = barcodeBufferRef.current.trim();
+        barcodeBufferRef.current = '';
         const cleanCode = code.replace(/A/g, '');
         let productCode = cleanCode;
         let scannedUnitId: string | null = null;
@@ -368,8 +368,8 @@ export function NewInvoice() {
       }
 
       if (e.key.length === 1) {
-        setBarcodeBuffer(prev => prev + e.key);
-        barcodeTimeoutRef.current = setTimeout(() => setBarcodeBuffer(''), 100);
+        barcodeBufferRef.current += e.key;
+        barcodeTimeoutRef.current = setTimeout(() => { barcodeBufferRef.current = ''; }, 100);
       }
     };
 
@@ -378,7 +378,7 @@ export function NewInvoice() {
       window.removeEventListener('keypress', handleKeyPress);
       if (barcodeTimeoutRef.current) clearTimeout(barcodeTimeoutRef.current);
     };
-  }, [barcodeBuffer, allProducts, cart]);
+  }, [allProducts, cart]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -874,6 +874,14 @@ export function NewInvoice() {
       } else {
         invoice = await addInvoice(invoiceData);
         if (!invoice) { toast.error('Error al crear la factura'); setIsSubmitting(false); return; }
+        logActivity({
+          type: invoiceType === 'credit' ? 'factura_credito' : 'factura_contado',
+          reference: `FAC-${invoice.number}`,
+          description: `Factura #${invoice.number} ${invoiceType === 'credit' ? 'a crédito' : 'de contado'} creada — ${invoiceData.customer_name || 'Consumidor Final'}`,
+          entity_name: invoiceData.customer_name || 'Consumidor Final',
+          amount: invoiceData.total,
+          metadata: { invoice_id: invoice.id, items_count: cart.length, status: invoiceData.status },
+        });
       }
 
       // Save common products
@@ -1715,11 +1723,6 @@ export function NewInvoice() {
                     <Plus className="w-3 h-3" />
                     {isRepuestos ? 'Servicio Técnico' : 'Producto Común'}
                   </button>
-                  {cart.length > 0 && (
-                    <button onClick={() => setCart([])} className="text-zinc-400 hover:text-red-500 transition-colors flex-shrink-0" title="Limpiar carrito">
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
                 </div>
               </div>
 

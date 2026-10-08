@@ -1,5 +1,4 @@
 import { motion } from 'motion/react';
-import logo from '../../imports/ChatGPT_Image_19_abr_2026,_03_43_27_p.m..png';
 import { getCurrentCompany } from '../lib/supabase';
 
 interface SplashScreenProps {
@@ -51,11 +50,25 @@ export function SplashScreen({ onComplete }: SplashScreenProps) {
               ease: "easeInOut",
             }}
           >
-            <img
-              src={logo}
-              alt="Logo"
-              className="w-56 h-56 object-contain"
-            />
+            <svg
+              viewBox="0 0 200 200"
+              className="w-48 h-48"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              {/* Phone / device shape */}
+              <rect x="60" y="30" width="80" height="130" rx="12" ry="12" fill="#16a34a" />
+              <rect x="68" y="44" width="64" height="90" rx="4" ry="4" fill="white" />
+              {/* Screen content lines */}
+              <rect x="76" y="56" width="48" height="6" rx="3" fill="#16a34a" opacity="0.7" />
+              <rect x="76" y="68" width="36" height="4" rx="2" fill="#d1fae5" />
+              <rect x="76" y="78" width="42" height="4" rx="2" fill="#d1fae5" />
+              <rect x="76" y="88" width="30" height="4" rx="2" fill="#d1fae5" />
+              {/* Dollar sign badge */}
+              <circle cx="140" cy="60" r="22" fill="#facc15" />
+              <text x="140" y="68" textAnchor="middle" fontSize="24" fontWeight="bold" fill="#1a1a1a">$</text>
+              {/* Home button */}
+              <circle cx="100" cy="148" r="6" fill="white" opacity="0.6" />
+            </svg>
           </motion.div>
 
           {/* Anillo decorativo */}

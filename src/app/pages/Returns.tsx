@@ -13,6 +13,7 @@ import {
   type Invoice,
   type Return,
   type Product,
+  logActivity,
 } from '../lib/supabase';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Button } from '../components/ui/button';
@@ -270,6 +271,14 @@ export function Returns() {
 
       await addReturn(newReturn);
 
+      logActivity({
+        type: 'devolucion',
+        reference: returnNumber,
+        description: `Devolución ${returnType === 'full' ? 'total' : 'parcial'} de factura #${selectedInvoice.number} — ${selectedInvoice.customer_name || 'Cliente'}`,
+        entity_name: selectedInvoice.customer_name || selectedInvoice.customer_document || 'Cliente',
+        amount: returnTotal,
+        metadata: { invoice_id: selectedInvoice.id, invoice_number: selectedInvoice.number, return_type: returnType, reason: returnReason },
+      });
       toast.success(`Devolución ${returnNumber} registrada correctamente`);
       setIsReturnDialogOpen(false);
       await loadData();

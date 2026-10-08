@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { useEffect, useState } from 'react';
-import { getInvoicesByDate, getPendingCreditInvoices, getPendingConfirmationInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, type HistoryMovement, type HistoryMovementProduct, getAllProducts, getAllInvoices, deleteInvoice, supabase, getCreditPaymentsByInvoice, getCreditPayments, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges, getReturns, updateInvoice, updateProduct, addCreditNote, getCreditNotes, getCreditNotesByInvoice, type CreditNote, type CreditNoteItem, addCreditPayment, addMovement, addHistoryMovement, getDepartments, type Department } from '../lib/supabase';
+import { getInvoicesByDate, getPendingCreditInvoices, getPendingConfirmationInvoices, getColombiaDate, extractColombiaDate, extractColombiaDateTime, canCreateInvoice, type Invoice, type HistoryMovement, type HistoryMovementProduct, getAllProducts, getAllInvoices, deleteInvoice, supabase, getCreditPaymentsByInvoice, getCreditPayments, type CreditPayment, getCurrentUser, getCurrentCompany, getExchanges, getReturns, updateInvoice, updateProduct, addCreditNote, getCreditNotes, getCreditNotesByInvoice, type CreditNote, type CreditNoteItem, addCreditPayment, addMovement, addHistoryMovement, getDepartments, type Department, logActivity } from '../lib/supabase';
 import { formatCOP } from '../lib/currency';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '../components/ui/dialog';
@@ -882,6 +882,14 @@ export function InvoicesMenu() {
         });
       }
 
+      logActivity({
+        type: 'factura_confirmada',
+        reference: `FAC-${selectedInvoice.number}`,
+        description: `Factura #${selectedInvoice.number} confirmada y aprobada — ${selectedInvoice.customer_name || 'Consumidor Final'}`,
+        entity_name: selectedInvoice.customer_name || 'Consumidor Final',
+        amount: selectedInvoice.total,
+        metadata: { invoice_id: selectedInvoice.id },
+      });
       toast.success('Factura aprobada exitosamente');
       setShowPaymentMethodModal(false);
       setShowPendingModal(false);
@@ -2380,15 +2388,6 @@ export function InvoicesMenu() {
                         >
                           <Edit className="w-4 h-4 mr-1" />
                           Editar
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => navigate('/sistema/facturacion/nueva', { state: { editInvoice: invoice } })}
-                          className="border-blue-300 dark:border-blue-700 hover:bg-blue-50 dark:hover:bg-blue-950 text-blue-700 dark:text-blue-400"
-                        >
-                          <FileText className="w-4 h-4 mr-1" />
-                          Cargar
                         </Button>
                         <Button
                           variant="outline"
