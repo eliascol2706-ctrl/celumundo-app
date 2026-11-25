@@ -28,6 +28,7 @@ export function Products() {
   const [searchName, setSearchName] = useState('');
   const [searchDescription, setSearchDescription] = useState('');
   const [searchCategory, setSearchCategory] = useState('all');
+  const [vipFilter, setVipFilter] = useState<'all' | 'vip' | 'general'>('all');
 
   // Estados para paginación
   const [currentPage, setCurrentPage] = useState(1);
@@ -74,6 +75,7 @@ export function Products() {
     margin2: '',
     marginFinal: '',
     useUnitIds: false,
+    isVip: false,
   });
 
   useEffect(() => {
@@ -98,7 +100,7 @@ export function Products() {
       return;
     }
     loadProducts();
-  }, [currentPage]);
+  }, [currentPage, vipFilter]);
 
   const loadDepartments = async () => {
     const data = await getDepartments();
@@ -113,6 +115,7 @@ export function Products() {
         name: searchName,
         description: searchDescription,
         category: searchCategory,
+        vip: vipFilter,
         page: currentPage - 1, // searchProducts usa índice 0
         pageSize: itemsPerPage
       });
@@ -520,6 +523,7 @@ export function Products() {
         margin2: margin2.toFixed(2),
         marginFinal: marginFinal.toFixed(2),
         useUnitIds: product.use_unit_ids || false,
+        isVip: product.is_vip === true,
       });
     } else {
       // Nuevo producto: abrir modal inmediatamente con código vacío
@@ -540,6 +544,7 @@ export function Products() {
         margin2: '',
         marginFinal: '',
         useUnitIds: false,
+        isVip: false,
       });
     }
     setIsDialogOpen(true);
@@ -619,10 +624,12 @@ export function Products() {
         margin2: parseFloat(formData.margin2),
         margin_final: parseFloat(formData.marginFinal),
         use_unit_ids: formData.useUnitIds,
+        is_vip: formData.isVip,
       };
 
       if (editingProduct) {
-        await updateProduct(editingProduct.id, productData);
+        const saved = await updateProduct(editingProduct.id, productData);
+        if (!saved) throw new Error('No se pudo guardar el producto. Verifica la migración de Línea VIP en Supabase.');
         logActivity({
           type: 'modificacion_producto',
           reference: `PROD-${productData.code}`,
@@ -633,7 +640,8 @@ export function Products() {
         });
         toast.success('Producto actualizado correctamente');
       } else {
-        await addProduct(productData);
+        const saved = await addProduct({ ...productData, registered_ids: [] });
+        if (!saved) throw new Error('No se pudo guardar el producto. Verifica la migración de Línea VIP en Supabase.');
         logActivity({
           type: 'modificacion_producto',
           reference: `PROD-${productData.code}`,
@@ -657,9 +665,14 @@ export function Products() {
 
   const handleDelete = async (id: string, name: string) => {
     if (confirm(`¿Estás seguro de eliminar el producto "${name}"?`)) {
-      await deleteProduct(id);
-      toast.success('Producto eliminado');
-      loadProducts();
+      try {
+        const deleted = await deleteProduct(id);
+        if (!deleted) throw new Error('No fue posible eliminar el producto.');
+        toast.success('Producto eliminado');
+        loadProducts();
+      } catch (error) {
+        toast.error(error instanceof Error ? error.message : 'No fue posible eliminar el producto.');
+      }
     }
   };
 
@@ -832,6 +845,19 @@ export function Products() {
             </div>
           </div>
           <div className="mt-4 flex gap-2">
+            <Select value={vipFilter} onValueChange={(value) => {
+              setVipFilter(value as 'all' | 'vip' | 'general');
+              setCurrentPage(1);
+            }}>
+              <SelectTrigger aria-label="Filtrar por línea de productos" className="min-h-11 w-44">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las líneas</SelectItem>
+                <SelectItem value="vip">Línea VIP</SelectItem>
+                <SelectItem value="general">Línea general</SelectItem>
+              </SelectContent>
+            </Select>
             <Button
               onClick={handleSearch}
               className="flex-1"
@@ -847,6 +873,7 @@ export function Products() {
                 setSearchName('');
                 setSearchDescription('');
                 setSearchCategory('all');
+                setVipFilter('all');
                 setCurrentPage(1);
                 loadProducts();
               }}
@@ -924,6 +951,11 @@ export function Products() {
                         <span className="px-2 py-1 bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-xs rounded-full">
                           {product.category}
                         </span>
+                        {product.is_vip && (
+                          <span className="ml-2 inline-block rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-900">
+                            Línea VIP
+                          </span>
+                        )}
                       </td>
                       <td className="py-3 px-4 text-right">
                         <p className="font-medium text-gray-900 dark:text-gray-100">
@@ -1050,6 +1082,18 @@ export function Products() {
               </div>
 
               {/* Nombre y Descripción */}
+              <label className="col-span-full flex min-h-11 cursor-pointer items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-950">
+                <input
+                  type="checkbox"
+                  checked={formData.isVip}
+                  onChange={(event) => setFormData({ ...formData, isVip: event.target.checked })}
+                  className="mt-1 h-5 w-5 shrink-0 accent-amber-700 focus-visible:ring-2"
+                />
+                <span className="text-sm">
+                  <span className="block font-semibold">Participa en la Línea VIP</span>
+                  Este producto y sus existencias se venderán únicamente desde Factura VIP.
+                </span>
+              </label>
               <div className="col-span-2 space-y-2">
                 <Label htmlFor="name">Nombre del Producto</Label>
                 <Input

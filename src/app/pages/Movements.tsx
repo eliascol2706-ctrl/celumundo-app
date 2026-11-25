@@ -19,6 +19,7 @@ import {
   PackageX,
   Loader2,
   FileText,
+  FileSpreadsheet,
 } from "lucide-react";
 import { useTaskQueue } from "../contexts/TaskQueueContext";
 import {
@@ -36,6 +37,7 @@ import {
   type Product,
   type MovementReceipt,
 } from "../lib/supabase";
+import { BulkImportModule } from "../components/bulk-import/BulkImportModule";
 import { MovementReceiptsModal } from "../components/MovementReceiptsModal";
 import { MovementCompletionModal } from "../components/MovementCompletionModal";
 import { MovementReceiptDetailsModal } from "../components/MovementReceiptDetailsModal";
@@ -100,6 +102,7 @@ export default function Movements() {
   const [searchTerm, setSearchTerm] = useState("");
   const [filterType, setFilterType] = useState<"all" | "entry" | "exit">("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [showBulkImport, setShowBulkImport] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [movementItems, setMovementItems] = useState<MovementItem[]>([]);
   const [receiptDialogOpen, setReceiptDialogOpen] = useState(false);
@@ -2236,6 +2239,10 @@ export default function Movements() {
     }
   };
 
+  if (showBulkImport) {
+    return <BulkImportModule onBack={() => setShowBulkImport(false)} />;
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -2276,6 +2283,14 @@ export default function Movements() {
           }}>
             <Plus className="h-4 w-4 mr-2" />
             Nuevo Movimiento
+          </Button>
+          <Button
+            variant="outline"
+            className="border-emerald-600 text-emerald-700 hover:bg-emerald-50"
+            onClick={() => setShowBulkImport(true)}
+          >
+            <FileSpreadsheet className="h-4 w-4 mr-2" />
+            Carga Masiva
           </Button>
         </div>
       </div>

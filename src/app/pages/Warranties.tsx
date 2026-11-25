@@ -22,6 +22,7 @@ export default function Warranties() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [currentPage, setCurrentPage] = useState(1);
+  const [pendingValue, setPendingValue] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
 
   // Modal de selección de productos
@@ -87,6 +88,16 @@ export default function Warranties() {
       ]);
       setWarranties(warrantiesData);
       setStats(statsData);
+      // Valor de garantías pendientes = suma de (costo actual del producto x cantidad)
+      const pending = warrantiesData.filter((w) => w.status === 'pending');
+      const ids = [...new Set(pending.map((w) => w.product_id))];
+      if (ids.length) {
+        const { data: costs } = await supabase.from('products').select('id, current_cost').in('id', ids);
+        const costMap = new Map((costs ?? []).map((p: any) => [p.id, Number(p.current_cost) || 0]));
+        setPendingValue(pending.reduce((sum, w) => sum + (costMap.get(w.product_id) ?? 0) * w.quantity, 0));
+      } else {
+        setPendingValue(0);
+      }
       setSuppliers(suppliersData);
     } catch (error) {
       console.error('Error loading data:', error);
@@ -540,6 +551,10 @@ export default function Warranties() {
           <CardContent>
             <div className="text-2xl font-bold text-yellow-600 dark:text-yellow-400">
               {stats.pendingWarranties}
+            </div>
+            <div className="mt-2 border-t pt-2">
+              <div className="text-xs text-muted-foreground">Valor a costo</div>
+              <div className="text-sm font-semibold">{formatCOP(pendingValue)}</div>
             </div>
           </CardContent>
         </Card>

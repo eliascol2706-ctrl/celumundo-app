@@ -18,6 +18,7 @@ export interface Department {
 }
 
 export interface Product {
+  is_vip?: boolean;
   id: string;
   company: 'celumundo' | 'repuestos';
   code: string; // Código base: A10001A
@@ -43,6 +44,7 @@ export interface Product {
 }
 
 export interface InvoiceItem {
+  costAtSale?: number | null;
   productId: string;
   productName: string;
   quantity: number;
@@ -56,6 +58,7 @@ export interface InvoiceItem {
 }
 
 export interface Invoice {
+  is_vip?: boolean;
   id: string;
   company: 'celumundo' | 'repuestos';
   number: string;
@@ -654,7 +657,7 @@ export const getAllProducts = async (): Promise<Product[]> => {
         while (hasMore) {
           const { data, error } = await supabase
             .from('products')
-            .select('id, code, name, description, price1, price2, final_price, stock, min_stock, category, registered_ids, created_at, updated_at, company, current_cost, use_unit_ids')
+            .select('*')
             .eq('company', company)
             .order('name')
             .range(page * pageSize, (page + 1) * pageSize - 1);
@@ -689,6 +692,7 @@ export const getAllProducts = async (): Promise<Product[]> => {
 
 // NUEVA FUNCIÓN: Búsqueda de productos con filtros y paginación del lado del servidor
 export const searchProducts = async (filters: {
+  vip?: 'all' | 'vip' | 'general';
   code?: string;
   name?: string;
   description?: string;
@@ -707,6 +711,9 @@ export const searchProducts = async (filters: {
       .eq('company', company);
 
     // Aplicar filtros
+    if (filters.vip && filters.vip !== 'all') {
+      query = query.eq('is_vip', filters.vip === 'vip');
+    }
     if (filters.code) {
       query = query.ilike('code', `%${filters.code}%`);
     }
@@ -750,7 +757,8 @@ export const searchProductsForInvoice = async (searchTerm: string): Promise<Prod
     let query = supabase
       .from('products')
       .select('*')
-      .eq('company', company);
+      .eq('company', company)
+      .eq('is_vip', false);
 
     // Si hay término de búsqueda, aplicar filtros
     if (searchTerm && searchTerm.trim() !== '') {
@@ -872,14 +880,56 @@ export const updateProduct = async (id: string, updates: Partial<Product>): Prom
 
 export const deleteProduct = async (id: string): Promise<boolean> => {
   const company = getCurrentCompany();
+
+  // Los movimientos conservan product_name y el resto de sus datos históricos.
+  // Desvincularlos evita que la FK impida borrar un producto ya utilizado.
+  const { data: linkedMovements, error: linkedError } = await supabase
+    .from('movements')
+    .select('id')
+    .eq('product_id', id);
+
+  if (linkedError) {
+    console.error('Error reading product movements:', linkedError);
+    throw new Error('No fue posible consultar el historial de movimientos del producto.');
+  }
+
+  const movementIds = (linkedMovements ?? []).map((movement) => movement.id);
+  const { error: unlinkError } = await supabase
+    .from('movements')
+    .update({ product_id: null })
+    .eq('product_id', id);
+
+  if (unlinkError) {
+    console.error('Error unlinking product movements:', unlinkError);
+    throw new Error(
+      unlinkError.code === '23502'
+        ? 'No se puede eliminar el producto porque la columna movements.product_id no permite valores vacíos. Aplica la migración de eliminación de productos.'
+        : 'No fue posible desvincular el historial de movimientos del producto.'
+    );
+  }
+
   const { error } = await supabase
     .from('products')
     .delete()
     .eq('id', id);
 
   if (error) {
+    // Restaurar la relación si otra dependencia impide completar el borrado.
+    const { error: restoreError } = movementIds.length
+      ? await supabase
+          .from('movements')
+          .update({ product_id: id })
+          .in('id', movementIds)
+      : { error: null };
+
+    if (restoreError) {
+      console.error('Error restoring product movements:', restoreError);
+    }
     console.error('Error deleting product:', error);
-    return false;
+    if (error.code === '23503') {
+      throw new Error('No se puede eliminar el producto porque todavía está relacionado con otros registros.');
+    }
+    throw new Error('No fue posible eliminar el producto.');
   }
 
   // Invalidar caché de productos
@@ -1144,7 +1194,9 @@ export const extractColombiaDateTime = (timestamp: string): string => {
 };
 
 // Función para verificar si se puede facturar (validar cierre pendiente)
-export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?: string; requiresMonthlyClose?: boolean }> => {
+export const canCreateInvoice = async (vip = false): Promise<{ canCreate: boolean; message?: string; requiresMonthlyClose?: boolean }> => {
+  // VIP is not governed by the general cash register's daily/monthly closures.
+  if (vip) return { canCreate: true };
   const company = getCurrentCompany();
   const colombiaTime = getColombiaDateTime();
   const today = getColombiaDate(); // YYYY-MM-DD en zona Colombia
@@ -1219,7 +1271,7 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
     // Buscar la factura más antigua cuya fecha (antes de hoy) no tenga cierre
     // Solo necesitamos 1 fila — limit(1) + order es muy rápido con índice en date
     const { data: oldestUnclosed } = await supabase
-      .from('invoices')
+      .from('general_invoices')
       .select('date')
       .eq('company', company)
       .lt('date', today + 'T00:00:00')
@@ -1240,7 +1292,7 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
 
       if (currentMonth !== yesterdayMonth) {
         const { data: prevMonthInvoice } = await supabase
-          .from('invoices')
+          .from('general_invoices')
           .select('id')
           .eq('company', company)
           .gte('date', yesterdayMonth + '-01T00:00:00')
@@ -1283,7 +1335,11 @@ export const canCreateInvoice = async (): Promise<{ canCreate: boolean; message?
   }
 };
 
-export const getInvoices = async (): Promise<Invoice[]> => {
+export type AccountingLine = 'general' | 'vip' | 'all';
+const accountingTable = (table: string, line: AccountingLine) =>
+  line === 'all' ? table : `${line}_${table}`;
+
+export const getInvoices = async (line: AccountingLine = 'general'): Promise<Invoice[]> => {
   const company = getCurrentCompany();
   const pageSize = 1000;
   let allData: Invoice[] = [];
@@ -1292,7 +1348,7 @@ export const getInvoices = async (): Promise<Invoice[]> => {
 
   while (hasMore) {
     const { data, error } = await supabase
-      .from('invoices')
+      .from(accountingTable('invoices', line))
       .select('*')
       .eq('company', company)
       .order('date', { ascending: false })
@@ -1322,7 +1378,7 @@ export const getInvoicesByMonthRange = async (monthsBack: number = 2): Promise<I
   // Inicio del mes hace N meses en Colombia (UTC-5) = 05:00 UTC
   const startDate = new Date(Date.UTC(now.getFullYear(), now.getMonth() - monthsBack, 1) + 5 * 3600000);
   const { data, error } = await supabase
-    .from('invoices')
+    .from('general_invoices')
     .select('*')
     .eq('company', company)
     .gte('date', startDate.toISOString())
@@ -1335,14 +1391,14 @@ export const getInvoicesByMonthRange = async (monthsBack: number = 2): Promise<I
 };
 
 // Obtiene facturas de un día específico (Colombia date YYYY-MM-DD)
-export const getInvoicesByDate = async (dateStr: string): Promise<Invoice[]> => {
+export const getInvoicesByDate = async (dateStr: string, line: AccountingLine = 'general'): Promise<Invoice[]> => {
   const company = getCurrentCompany();
   // date column is stored as timestamptz — filter by Colombia day range
   const startUTC = new Date(`${dateStr}T05:00:00Z`); // midnight Colombia = 05:00 UTC
   const endUTC = new Date(`${dateStr}T05:00:00Z`);
   endUTC.setDate(endUTC.getDate() + 1);
   const { data, error } = await supabase
-    .from('invoices')
+    .from(accountingTable('invoices', line))
     .select('*')
     .eq('company', company)
     .gte('date', startUTC.toISOString())
@@ -1356,10 +1412,10 @@ export const getInvoicesByDate = async (dateStr: string): Promise<Invoice[]> => 
 };
 
 // Obtiene facturas en estado pending_confirmation
-export const getPendingConfirmationInvoices = async (): Promise<Invoice[]> => {
+export const getPendingConfirmationInvoices = async (line: AccountingLine = 'general'): Promise<Invoice[]> => {
   const company = getCurrentCompany();
   const { data, error } = await supabase
-    .from('invoices')
+    .from(accountingTable('invoices', line))
     .select('*')
     .eq('company', company)
     .eq('status', 'pending_confirmation')
@@ -1375,7 +1431,7 @@ export const getPendingConfirmationInvoices = async (): Promise<Invoice[]> => {
 export const getPendingCreditInvoices = async (): Promise<Invoice[]> => {
   const company = getCurrentCompany();
   const { data, error } = await supabase
-    .from('invoices')
+    .from('general_invoices')
     .select('id, number, customer_name, customer_document, customer_id, credit_balance, total, is_credit, status, date, due_date')
     .eq('company', company)
     .eq('is_credit', true)
@@ -1394,7 +1450,7 @@ export const getInvoicesByCustomer = async (customerDocument: string, customerNa
 
   // Buscar directamente por documento en la DB para evitar el límite de 1000 filas
   const { data: byDoc, error: docError } = await supabase
-    .from('invoices')
+    .from('general_invoices')
     .select('*')
     .eq('company', company)
     .eq('is_credit', true)
@@ -1410,7 +1466,7 @@ export const getInvoicesByCustomer = async (customerDocument: string, customerNa
   // Fallback: buscar por nombre si no se encontró por documento
   if (customerName) {
     const { data: byName, error: nameError } = await supabase
-      .from('invoices')
+      .from('general_invoices')
       .select('*')
       .eq('company', company)
       .eq('is_credit', true)
@@ -1428,7 +1484,7 @@ export const getInvoicesByCustomer = async (customerDocument: string, customerNa
 };
 
 // NUEVA FUNCIÓN: Obtiene TODAS las facturas sin límite (paginación automática)
-export const getAllInvoices = async (): Promise<Invoice[]> => {
+export const getAllInvoices = async (line: AccountingLine = 'general'): Promise<Invoice[]> => {
   const company = getCurrentCompany();
   const pageSize = 1000;
   let allInvoices: Invoice[] = [];
@@ -1438,7 +1494,7 @@ export const getAllInvoices = async (): Promise<Invoice[]> => {
   try {
     while (hasMore) {
       const { data, error } = await supabase
-        .from('invoices')
+        .from(accountingTable('invoices', line))
         .select('*')
         .eq('company', company)
         .order('date', { ascending: false })
@@ -1472,10 +1528,14 @@ export const addInvoice = async (invoice: Omit<Invoice, 'id' | 'number' | 'compa
   const company = getCurrentCompany();
   
   // Validar si se puede crear la factura
-  const validation = await canCreateInvoice();
+  const validation = await canCreateInvoice(invoice.is_vip === true);
   if (!validation.canCreate) {
     console.error('Cannot create invoice:', validation.message);
     throw new Error(validation.message || 'No se puede crear la factura');
+  }
+  if (invoice.is_vip) {
+    const { error } = await supabase.from('vip_invoices').select('id').limit(1);
+    if (error) throw new Error('Ejecuta migration_vip_accounting.sql en Supabase antes de emitir facturas VIP.');
   }
   
   // Usar la fecha proporcionada o la fecha y hora actual de Colombia
@@ -1624,6 +1684,9 @@ export const deleteInvoice = async (id: string): Promise<boolean> => {
     if (invoiceError || !invoice) {
       console.error('Error fetching invoice:', invoiceError);
       return false;
+    }
+    if (invoice.is_vip) {
+      throw new Error('Las facturas VIP deben anularse, no eliminarse.');
     }
 
     console.log(`[DeleteInvoice] Eliminando factura ${invoice.number}, estado: ${invoice.status}`);
@@ -2429,7 +2492,7 @@ export const getReturns = async (): Promise<Return[]> => {
   try {
     const company = getCurrentCompany();
     const { data, error } = await supabase
-      .from('returns')
+      .from('general_returns')
       .select('*')
       .eq('company', company)
       .order('date', { ascending: false });
@@ -3011,7 +3074,7 @@ export const deleteCustomer = async (id: string): Promise<boolean> => {
 export const getCreditPayments = async (): Promise<CreditPayment[]> => {
   const company = getCurrentCompany();
   const { data, error } = await supabase
-    .from('credit_payments')
+    .from('general_credit_payments')
     .select('*')
     .eq('company', company)
     .order('date', { ascending: false });
@@ -3047,12 +3110,20 @@ export const calculateInvoiceProfit = async (invoiceId: string): Promise<number>
   // Obtener la factura con sus items
   const { data: invoice } = await supabase
     .from('invoices')
-    .select('items, total')
+    .select('items, total, tax, is_vip')
     .eq('id', invoiceId)
     .single();
 
   if (!invoice || !invoice.items) {
     return 0;
+  }
+  if (invoice.is_vip) {
+    if (invoice.items.some((item: InvoiceItem) => typeof item.costAtSale !== 'number')) {
+      throw new Error('Costo histórico VIP no disponible');
+    }
+    return invoice.total - (invoice.tax || 0) - invoice.items.reduce(
+      (sum: number, item: InvoiceItem) => sum + item.costAtSale! * item.quantity, 0,
+    );
   }
 
   let totalCost = 0;
@@ -3127,7 +3198,7 @@ export const addCreditPayment = async (payment: Omit<CreditPayment, 'id' | 'comp
   // Actualizar el balance de la factura
   const { data: invoice } = await supabase
     .from('invoices')
-    .select('credit_balance, total')
+    .select('credit_balance, total, is_vip')
     .eq('id', payment.invoice_id)
     .single();
   
@@ -3143,7 +3214,7 @@ export const addCreditPayment = async (payment: Omit<CreditPayment, 'id' | 'comp
     });
 
     // Si la factura acaba de ser completamente pagada, sumar ganancia al cierre mensual actual
-    if (wasUnpaid && isNowPaid) {
+    if (wasUnpaid && isNowPaid && !invoice.is_vip) {
       const profit = await calculateInvoiceProfit(payment.invoice_id);
 
       // Obtener o crear cierre del mes actual
@@ -3176,7 +3247,7 @@ export const addCreditPayment = async (payment: Omit<CreditPayment, 'id' | 'comp
   
   // Actualizar totales del cliente
   const customer = await getCustomerByDocument(payment.customer_document);
-  if (customer) {
+  if (customer && invoice && !invoice.is_vip) {
     await updateCustomer(customer.id, {
       total_paid: customer.total_paid + payment.amount
     });
@@ -3212,7 +3283,7 @@ export const deleteCreditPayment = async (id: string): Promise<boolean> => {
   
   // Revertir totales del cliente
   const customer = await getCustomerByDocument(payment.customer_document);
-  if (customer) {
+  if (customer && !payment.is_vip) {
     await updateCustomer(customer.id, {
       total_paid: customer.total_paid - payment.amount
     });
@@ -3508,7 +3579,7 @@ export interface DebitNotePayment {
 export const getCreditNotes = async (): Promise<CreditNote[]> => {
   const company = getCurrentCompany();
   const { data, error } = await supabase
-    .from('credit_notes')
+    .from('general_credit_notes')
     .select('*')
     .eq('company', company)
     .order('date', { ascending: false })
@@ -3535,13 +3606,13 @@ export const getCreditNotesByInvoice = async (invoiceId: string): Promise<Credit
   return data || [];
 };
 
-export const getCreditNotesByCustomer = async (customerDocument: string): Promise<CreditNote[]> => {
+export const getCreditNotesByCustomer = async (customerDocument: string, line: AccountingLine = 'general'): Promise<CreditNote[]> => {
   const company = getCurrentCompany();
   // Normalizar documento: eliminar espacios en blanco
   const normalizedDocument = customerDocument.trim().replace(/\s+/g, '');
 
   const { data, error } = await supabase
-    .from('credit_notes')
+    .from(accountingTable('credit_notes', line))
     .select('*')
     .eq('company', company)
     .eq('status', 'issued')
@@ -3590,7 +3661,7 @@ export const getDebitNotesByCustomer = async (customerDocument: string): Promise
 export const getCreditNotesByDate = async (dateStr: string): Promise<CreditNote[]> => {
   const company = getCurrentCompany();
   const { data, error } = await supabase
-    .from('credit_notes')
+    .from('general_credit_notes')
     .select('*')
     .eq('company', company)
     .eq('status', 'issued')
@@ -3612,7 +3683,7 @@ export const getCreditNotesByDate = async (dateStr: string): Promise<CreditNote[
 export const getCreditNotesByMonth = async (monthStr: string): Promise<CreditNote[]> => {
   const company = getCurrentCompany();
   const { data, error } = await supabase
-    .from('credit_notes')
+    .from('general_credit_notes')
     .select('*')
     .eq('company', company)
     .eq('status', 'issued')
@@ -3754,7 +3825,7 @@ export const getExchanges = async (): Promise<Exchange[]> => {
   try {
     const company = getCurrentCompany();
     const { data, error } = await supabase
-      .from('exchanges')
+      .from('general_exchanges')
       .select('*')
       .eq('company', company)
       .order('date', { ascending: false });

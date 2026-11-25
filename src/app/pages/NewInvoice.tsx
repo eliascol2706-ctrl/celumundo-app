@@ -84,6 +84,8 @@ export function NewInvoice() {
 
   // Clone mode: pre-loaded invoice to duplicate as a brand-new invoice
   const cloneInvoice = (location.state as any)?.cloneInvoice ?? null;
+  const isVip = editInvoice?.is_vip ?? cloneInvoice?.is_vip ??
+    (new URLSearchParams(location.search).get('linea') === 'vip');
 
   // Wizard
   const [step, setStep] = useState<WizardStep>(1);
@@ -221,13 +223,13 @@ export function NewInvoice() {
         getDepartments(),
         getCustomers(),
       ]);
-      setAllProducts(prods);
+      setAllProducts(prods.filter(product => Boolean(product.is_vip) === isVip));
       setDepartments(Array.isArray(depts) ? depts : []);
       setCreditCustomers(customers);
     };
     load();
     // Kick off validation silently in background
-    canCreateInvoice().then(result => setPrefetchedValidation(result));
+    canCreateInvoice(isVip).then(result => setPrefetchedValidation(result));
   }, []);
 
   // ─── Pre-load invoice from edit or clone mode ───────────────────────────────
@@ -279,9 +281,16 @@ export function NewInvoice() {
       const company = getCurrentCompany();
       let query = supabase
         .from('products')
-        .select('id, code, name, price1, price2, final_price, current_cost, stock, use_unit_ids, registered_ids, category', { count: 'exact' })
+        .select('id, code, name, price1, price2, final_price, current_cost, stock, use_unit_ids, registered_ids, category, is_vip', { count: 'exact' })
         .eq('company', company)
         .order('name');
+
+      // General invoices cannot consume the inventory classified as VIP.
+      if (isVip) {
+        query = query.eq('is_vip', true);
+      } else {
+        query = query.or('is_vip.eq.false,is_vip.is.null');
+      }
 
       if (search.trim()) {
         query = query.or(`name.ilike.%${search.trim()}%,code.ilike.%${search.trim()}%`);
@@ -297,11 +306,15 @@ export function NewInvoice() {
       if (!error && data) {
         setCatalogProducts(data);
         setCatalogTotalCount(count ?? 0);
+      } else if (error) {
+        setCatalogProducts([]);
+        setCatalogTotalCount(0);
+        toast.error('No se pudo cargar el catálogo. Verifica la migración de Línea VIP en Supabase.');
       }
     } finally {
       setIsCatalogLoading(false);
     }
-  }, []);
+  }, [isVip]);
 
   useEffect(() => {
     if (catalogTab !== 'catalog') return;
@@ -315,13 +328,13 @@ export function NewInvoice() {
   }, [catalogSearchInput, selectedDept, catalogPage, catalogTab, fetchCatalogProducts]);
 
   useEffect(() => {
-    setSerie(invoiceType === 'credit' ? 'FC' : 'FV');
-  }, [invoiceType]);
+    setSerie(isVip ? 'VIP' : invoiceType === 'credit' ? 'FC' : 'FV');
+  }, [invoiceType, isVip]);
 
   useEffect(() => {
     if (invoiceType === 'credit' && selectedCreditCustomer) {
       analyzeCreditStatus();
-      getCreditNotesByCustomer(selectedCreditCustomer.document).then(cns => {
+      getCreditNotesByCustomer(selectedCreditCustomer.document, isVip ? 'vip' : 'general').then(cns => {
         setAvailableCreditNotes(cns);
         setSelectedCreditNoteId(cns.length > 0 ? cns[0].id : '');
         setApplyBalance(false);
@@ -416,6 +429,10 @@ export function NewInvoice() {
   // ─── Cart operations ───────────────────────────────────────────────────────
 
   const addProductToCart = async (product: any, overridePrice?: number) => {
+    if (Boolean(product.is_vip) !== isVip) {
+      toast.error('Este producto no pertenece a la línea de esta factura.');
+      return;
+    }
     const price = overridePrice !== undefined
       ? overridePrice
       : invoiceType === 'credit'
@@ -551,6 +568,10 @@ export function NewInvoice() {
   };
 
   const handleCommonProductButton = () => {
+    if (isVip) {
+      toast.info('Factura VIP solo admite productos registrados en la Línea VIP.');
+      return;
+    }
     if (isRepuestos) {
       addCommonProduct('Servicio Técnico', 0);
     } else {
@@ -677,7 +698,7 @@ export function NewInvoice() {
   const analyzeCreditStatus = async () => {
     if (!selectedCreditCustomer) return;
     try {
-      const allInvoices = await getInvoices();
+      const allInvoices = await getInvoices(isVip ? 'vip' : 'general');
       const customerInvoices = allInvoices.filter(
         inv => inv.customer_document === selectedCreditCustomer.document && inv.is_credit && inv.status === 'pending'
       );
@@ -740,7 +761,7 @@ export function NewInvoice() {
     }
     setStep(4);
     // Refresh validation silently so it's fresh when user hits "Emitir"
-    canCreateInvoice().then(result => setPrefetchedValidation(result));
+    canCreateInvoice(isVip).then(result => setPrefetchedValidation(result));
   };
 
   const handleFinalSubmit = async () => {
@@ -759,7 +780,7 @@ export function NewInvoice() {
     let validation = prefetchedValidation;
     if (!validation) {
       setIsValidating(true);
-      validation = await canCreateInvoice();
+      validation = await canCreateInvoice(isVip);
       setIsValidating(false);
     }
 
@@ -773,6 +794,25 @@ export function NewInvoice() {
 
     setIsSubmitting(true);
     try {
+      const productIds = cart.filter(item => !item.productId.startsWith('common-')).map(item => item.productId);
+      if (isVip && productIds.length !== cart.length) {
+        throw new Error('Factura VIP solo admite productos registrados en la Línea VIP.');
+      }
+      if (productIds.length > 0) {
+        const { data: currentProducts, error } = await supabase
+          .from('products').select('id, is_vip, stock')
+          .eq('company', getCurrentCompany()).in('id', productIds);
+        if (error || !currentProducts) throw new Error('No se pudo verificar el inventario. Verifica la migración de Línea VIP.');
+        for (const productId of new Set(productIds)) {
+          const product = currentProducts.find(p => p.id === productId);
+          const quantity = cart.filter(item => item.productId === productId)
+            .reduce((sum, item) => sum + item.quantity, 0);
+          if (!product || Boolean(product.is_vip) !== isVip) {
+            throw new Error('Un producto ya no pertenece a esta línea. Retíralo y revisa el catálogo.');
+          }
+          if (!editInvoiceId && product.stock < quantity) throw new Error('Existencias insuficientes para confirmar la factura.');
+        }
+      }
       const user = getCurrentUser();
       const company = getCurrentCompany();
       const subtotal = calculateSubtotal();
@@ -793,6 +833,7 @@ export function NewInvoice() {
       let invoiceData: any;
 
       const sharedFields = {
+        is_vip: isVip,
         serie,
         emission_date: emissionDate,
         notes: notes || undefined,
@@ -935,7 +976,7 @@ export function NewInvoice() {
       }
     } catch (error) {
       console.error('Error creating invoice:', error);
-      toast.error('Error al crear la factura');
+      toast.error(error instanceof Error ? error.message : 'Error al crear la factura');
       setIsSubmitting(false);
     }
   };
@@ -1121,7 +1162,7 @@ export function NewInvoice() {
             </button>
             <ChevronRight className="w-3.5 h-3.5 flex-shrink-0 hidden sm:block" />
             <span className="text-zinc-900 dark:text-zinc-100 font-medium truncate hidden sm:block">
-              {editInvoiceId ? `Editando ${editInvoice?.number ?? 'Factura'}` : cloneInvoice ? `Cargada de ${cloneInvoice.number}` : 'Nueva Factura'}
+              {editInvoiceId ? `Editando ${editInvoice?.number ?? 'Factura'}` : cloneInvoice ? `Cargada de ${cloneInvoice.number}` : isVip ? 'Factura VIP' : 'Nueva Factura'}
             </span>
           </div>
           <div className="flex items-center gap-2">

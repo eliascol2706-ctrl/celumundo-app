@@ -29,6 +29,9 @@ export function ProductConsultation() {
   const [product, setProduct] = useState<Product | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [manualCode, setManualCode] = useState('');
+  const [nameQuery, setNameQuery] = useState('');
+  const [nameResults, setNameResults] = useState<Product[]>([]);
+  const [isSearchingName, setIsSearchingName] = useState(false);
   const scannerRef = useRef<Html5QrcodeScanner | Html5Qrcode | null>(null);
 
   const searchProduct = async (code: string) => {
@@ -60,6 +63,29 @@ export function ProductConsultation() {
       toast.error('Error al buscar producto');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const searchByName = async (query: string) => {
+    if (!query.trim()) return;
+    setIsSearchingName(true);
+    setProduct(null);
+    try {
+      const company = getCurrentCompany();
+      const pattern = `%${query.trim()}%`;
+      const { data } = await supabase
+        .from('products')
+        .select('*')
+        .eq('company', company)
+        .or(`name.ilike.${pattern},description.ilike.${pattern}`)
+        .order('name')
+        .limit(20);
+      setNameResults(data || []);
+      if (!data || data.length === 0) toast.error('No se encontraron productos');
+    } catch {
+      toast.error('Error al buscar productos');
+    } finally {
+      setIsSearchingName(false);
     }
   };
 
@@ -304,6 +330,76 @@ export function ProductConsultation() {
               </Button>
             </div>
           </div>
+        </div>
+
+        {/* Búsqueda por nombre o descripción */}
+        <div className="mb-6">
+          <div className="max-w-lg mx-auto">
+            <p className="text-sm text-gray-500 dark:text-gray-400 text-center mb-3">
+              O busca por nombre o descripción
+            </p>
+            <div className="flex gap-2">
+              <Input
+                type="text"
+                value={nameQuery}
+                onChange={e => setNameQuery(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && nameQuery.trim()) {
+                    setNameResults([]);
+                    searchByName(nameQuery.trim());
+                  }
+                }}
+                placeholder="Nombre o descripción del producto..."
+                className="bg-white dark:bg-gray-800 text-base h-12"
+              />
+              <Button
+                onClick={() => {
+                  if (nameQuery.trim()) {
+                    setNameResults([]);
+                    searchByName(nameQuery.trim());
+                  }
+                }}
+                disabled={isSearchingName || !nameQuery.trim()}
+                className="bg-blue-600 hover:bg-blue-700 text-white shrink-0 h-12 px-5"
+              >
+                {isSearchingName
+                  ? <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-r-transparent" />
+                  : <Search className="h-5 w-5" />
+                }
+              </Button>
+            </div>
+          </div>
+
+          {/* Resultados por nombre */}
+          {nameResults.length > 0 && (
+            <div className="mt-4 space-y-2 max-w-lg mx-auto">
+              <p className="text-xs text-gray-500 dark:text-gray-400 text-center mb-2">
+                {nameResults.length} resultado{nameResults.length !== 1 ? 's' : ''} — toca uno para ver detalles
+              </p>
+              {nameResults.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => { setProduct(p); setNameResults([]); setNameQuery(''); }}
+                  className="w-full text-left bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg px-4 py-3 hover:border-green-400 active:scale-98 transition-all shadow-sm"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-semibold text-gray-900 dark:text-white text-sm truncate">{p.name}</p>
+                      {p.description && (
+                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate mt-0.5">{p.description}</p>
+                      )}
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className="text-sm font-bold text-green-600 dark:text-green-400">{formatCOP(p.final_price)}</p>
+                      <p className={`text-xs mt-0.5 ${p.stock > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                        {p.stock > 0 ? `${p.stock} en stock` : 'Sin stock'}
+                      </p>
+                    </div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Product Information */}

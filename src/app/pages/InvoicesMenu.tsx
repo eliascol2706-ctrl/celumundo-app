@@ -18,10 +18,15 @@ import { printThermalInvoice as printThermalDirect } from '../lib/thermal-printe
 import { printPDFInvoice, generatePDFBlob } from '../lib/pdf-printer';
 import { isPrintingAvailable } from '../lib/platform-detector';
 import { revertInvoice, canRevertInvoice, getRevertTimeRemaining } from '../lib/revert-invoice';
+import { Star } from 'lucide-react';
+import { loadVipLedger, summarizeVip } from '../lib/vip-accounting';
 
 export function InvoicesMenu() {
   const navigate = useNavigate();
   const currentUser = getCurrentUser();
+  const [vipSummary, setVipSummary] = useState<ReturnType<typeof summarizeVip> | null>(null);
+  const [vipError, setVipError] = useState(false);
+  const [lineFilter, setLineFilter] = useState<'all' | 'general' | 'vip'>('all');
   const [stats, setStats] = useState({
     regularToday: 0,
     creditToday: 0,
@@ -50,6 +55,12 @@ export function InvoicesMenu() {
   const [todayInvoices, setTodayInvoices] = useState<Invoice[]>([]);
   const [products, setProducts] = useState<any[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [showVipModal, setShowVipModal] = useState(false);
+  const [showVipInvoicesModal, setShowVipInvoicesModal] = useState(false);
+  const [vipInvoices, setVipInvoices] = useState<any[]>([]);
+  const [vipInvoicesLoading, setVipInvoicesLoading] = useState(false);
+  const [vipInvoicesError, setVipInvoicesError] = useState(false);
+  const [vipInvoiceSearch, setVipInvoiceSearch] = useState('');
   const [showPendingModal, setShowPendingModal] = useState(false);
   const [pendingInvoices, setPendingInvoices] = useState<Invoice[]>([]);
   const [pendingCosts, setPendingCosts] = useState<Record<string, number>>({});
@@ -273,7 +284,7 @@ export function InvoicesMenu() {
 
   const runDbFilter = async (overrides: {
     period?: string; sort?: string; payment?: string;
-    status?: string; type?: string; custom?: string; term?: string;
+    status?: string; type?: string; custom?: string; term?: string; line?: 'all' | 'general' | 'vip';
   } = {}) => {
     const period = overrides.period ?? periodFilter;
     const sort = overrides.sort ?? sortBy;
@@ -282,11 +293,13 @@ export function InvoicesMenu() {
     const type = overrides.type ?? invoiceTypeFilter;
     const custom = overrides.custom ?? customDate;
     const term = overrides.term ?? searchTerm;
+    const line = overrides.line ?? lineFilter;
 
     setIsSearching(true);
     try {
       const company = getCurrentCompany();
       let query = supabase.from('invoices').select('*').eq('company', company);
+      if (line !== 'all') query = query.eq('is_vip', line === 'vip');
 
       if (term.trim()) {
         query = query.or(`number.ilike.%${term}%,customer_name.ilike.%${term}%`);
@@ -325,6 +338,29 @@ export function InvoicesMenu() {
     }
   };
 
+  const openVipInvoices = async () => {
+    setShowVipModal(false);
+    setVipInvoiceSearch('');
+    setShowVipInvoicesModal(true);
+    setVipInvoicesLoading(true);
+    setVipInvoicesError(false);
+    try {
+      let query = supabase.from('invoices').select('*')
+        .eq('company', getCurrentCompany()).eq('is_vip', true)
+        .order('date', { ascending: false }).limit(500);
+      if (currentUser?.role === 'seller') query = query.eq('attended_by', currentUser.username);
+      const { data, error } = await query;
+      if (error) throw error;
+      setVipInvoices(data || []);
+    } catch (e) {
+      console.error('Error cargando facturas VIP:', e);
+      setVipInvoices([]);
+      setVipInvoicesError(true);
+    } finally {
+      setVipInvoicesLoading(false);
+    }
+  };
+
   const runDbSearch = async (term: string) => {
     if (!term.trim()) {
       setSearchTerm('');
@@ -337,12 +373,16 @@ export function InvoicesMenu() {
 
   const loadStats = async () => {
     setLoading(true);
+    setVipError(false);
+    loadVipLedger(currentUser?.role === 'seller' ? currentUser.username : undefined)
+      .then(ledger => setVipSummary(summarizeVip(ledger)))
+      .catch(() => { setVipError(true); setVipSummary(null); });
     try {
       const todayStr = getColombiaDate();
-      const [invoices, pendingCredits, pendingConfirmations, products, exchanges, creditPayments, creditNotes, returns, depts] = await Promise.all([
-        getInvoicesByDate(todayStr),
+      const [allTodayInvoices, pendingCredits, pendingConfirmations, products, exchanges, creditPayments, creditNotes, returns, depts] = await Promise.all([
+        getInvoicesByDate(todayStr, 'all'),
         getPendingCreditInvoices(),
-        getPendingConfirmationInvoices(),
+        getPendingConfirmationInvoices('all'),
         getAllProducts(),
         getExchanges(),
         getCreditPayments(),
@@ -350,6 +390,7 @@ export function InvoicesMenu() {
         getReturns(),
         getDepartments(),
       ]);
+      const invoices = allTodayInvoices.filter(invoice => !invoice.is_vip);
       setDepartments(depts);
 
       // DEBUG: Verificar facturas con cambios
@@ -524,7 +565,7 @@ export function InvoicesMenu() {
       setStats({
         regularToday,
         creditToday,
-        pendingConfirmation: pendingConfirmations.length,
+        pendingConfirmation: pendingConfirmations.filter(invoice => !invoice.is_vip).length,
         totalCreditPending,
         totalSalesToday: totalSalesToday + todayPayments - creditNotesToday, // Incluir abonos y restar notas de crédito
         cashToday,
@@ -547,11 +588,11 @@ export function InvoicesMenu() {
 
       // Sellers only see their own invoices
       const filteredInvoices = currentUser?.role === 'seller'
-        ? invoices.filter(inv => inv.attended_by === currentUser.username)
-        : invoices;
+        ? allTodayInvoices.filter(inv => inv.attended_by === currentUser.username)
+        : allTodayInvoices;
 
       setTodayInvoices(filteredInvoices);
-      setPendingInvoices(pendingConfirmations);
+      setPendingInvoices(pendingConfirmations.filter(invoice => !invoice.is_vip));
       setProducts(products);
     } catch (error) {
       console.error('Error loading stats:', error);
@@ -566,6 +607,9 @@ export function InvoicesMenu() {
     let filtered = dbSearchResults !== null
       ? [...dbSearchResults]
       : [...todayInvoices];
+    if (lineFilter !== 'all') {
+      filtered = filtered.filter(invoice => Boolean(invoice.is_vip) === (lineFilter === 'vip'));
+    }
 
     // Filtrar por periodo (solo cuando no hay búsqueda DB activa)
     if (!searchTerm.trim() && periodFilter !== 'all') {
@@ -641,10 +685,10 @@ export function InvoicesMenu() {
     return Math.ceil(filtered.length / itemsPerPage);
   };
 
-  const handleNavigateToNew = async () => {
+  const handleNavigateToNew = async (vip = false) => {
     setIsValidating(true);
     try {
-      const validation = await canCreateInvoice();
+      const validation = await canCreateInvoice(vip);
       if (!validation.canCreate) {
         toast.error(validation.message || 'No se puede crear factura en este momento', {
           duration: validation.requiresMonthlyClose ? 10000 : 8000,
@@ -655,7 +699,7 @@ export function InvoicesMenu() {
         });
         return;
       }
-      navigate('/sistema/facturacion/nueva');
+      navigate(vip ? '/sistema/facturacion/nueva?linea=vip' : '/sistema/facturacion/nueva');
     } catch (error) {
       console.error('Error validating invoice creation:', error);
       toast.error('Error al validar permisos de facturación');
@@ -772,7 +816,7 @@ export function InvoicesMenu() {
     try {
       // ✅ VALIDAR CIERRES ANTES DE CONFIRMAR
       const { canCreateInvoice } = await import('../lib/supabase');
-      const validation = await canCreateInvoice();
+      const validation = await canCreateInvoice(selectedInvoice.is_vip === true);
 
       if (!validation.canCreate) {
         toast.error(validation.message || 'No se pueden confirmar facturas en este momento.');
@@ -904,6 +948,10 @@ export function InvoicesMenu() {
   };
 
   const handleDeleteInvoice = async (invoice: Invoice) => {
+    if (invoice.is_vip) {
+      toast.error('Las facturas VIP deben anularse, no eliminarse, para conservar su contabilidad.');
+      return;
+    }
     if (!confirm(`¿Está seguro de eliminar la factura #${invoice.number}?`)) {
       return;
     }
@@ -946,6 +994,10 @@ export function InvoicesMenu() {
 
   const handleRemoveProductFromInvoice = async (productIndex: number) => {
     if (!editingInvoice) return;
+    if (editingInvoice.is_vip && editingInvoice.items.length === 1) {
+      toast.error('No elimines el último producto de una factura VIP. Anula el comprobante para conservar su historial.');
+      return;
+    }
 
     const productToRemove = editingInvoice.items[productIndex];
 
@@ -1303,6 +1355,7 @@ export function InvoicesMenu() {
 
     // Facturas a crédito pendientes del mismo cliente (excluye la factura actual)
     const pending = todayInvoices.filter(inv =>
+      Boolean(inv.is_vip) === Boolean(invoice.is_vip) &&
       inv.is_credit &&
       inv.status === 'pending' &&
       inv.id !== invoice.id &&
@@ -1466,7 +1519,7 @@ export function InvoicesMenu() {
           </div>
           
           {/* Botones de creación de facturas */}
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <Button
               variant="outline"
               onClick={() => {
@@ -1481,7 +1534,7 @@ export function InvoicesMenu() {
               Cargar Factura
             </Button>
             <Button
-              onClick={handleNavigateToNew}
+              onClick={() => handleNavigateToNew()}
               disabled={isValidating}
               className="bg-emerald-600 hover:bg-emerald-700 dark:bg-emerald-700 dark:hover:bg-emerald-600 text-white"
             >
@@ -1496,6 +1549,15 @@ export function InvoicesMenu() {
                   Nueva Factura
                 </>
               )}
+            </Button>
+
+            <Button
+              onClick={() => handleNavigateToNew(true)}
+              disabled={isValidating}
+              className="min-h-11 bg-amber-200 text-amber-950 hover:bg-amber-300 focus-visible:ring-2"
+            >
+              <Receipt className="mr-2 h-4 w-4 shrink-0" aria-hidden="true" />
+              Factura VIP
             </Button>
 
             <Button
@@ -1524,9 +1586,30 @@ export function InvoicesMenu() {
 
       {/* Content */}
       <div className="p-6">
+        <p className="mb-4 text-sm text-zinc-700 dark:text-zinc-300">
+          Las tarjetas generales y los cierres excluyen las operaciones VIP. El listado permite consultar ambas líneas sin consolidar sus cuentas.
+        </p>
         {/* Stats - Primera fila */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
-          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 items-stretch gap-4 mb-4">
+          <Card className="h-full min-w-0 border-amber-300 bg-amber-50 text-amber-950 shadow-sm dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-sm font-semibold">
+                <Star className="h-5 w-5 shrink-0 fill-current" aria-hidden="true" />
+                Factura VIP
+              </CardTitle>
+              <p className="text-sm">Histórico · contabilidad independiente</p>
+            </CardHeader>
+            <CardContent>
+              <Button
+                variant="outline"
+                className="min-h-11 w-full border-amber-700 bg-transparent text-inherit hover:bg-amber-200 dark:hover:bg-amber-900"
+                onClick={() => setShowVipModal(true)}
+              >
+                Ver contabilidad VIP
+              </Button>
+            </CardContent>
+          </Card>
+          <Card className="h-full border-zinc-200 dark:border-zinc-800 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Regulares Hoy</CardTitle>
             </CardHeader>
@@ -1536,7 +1619,7 @@ export function InvoicesMenu() {
             </CardContent>
           </Card>
 
-          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+          <Card className="h-full border-zinc-200 dark:border-zinc-800 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Crédito Hoy</CardTitle>
             </CardHeader>
@@ -1546,7 +1629,7 @@ export function InvoicesMenu() {
             </CardContent>
           </Card>
 
-          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+          <Card className="h-full border-zinc-200 dark:border-zinc-800 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Facturas en Confirmación</CardTitle>
             </CardHeader>
@@ -1567,7 +1650,7 @@ export function InvoicesMenu() {
             </CardContent>
           </Card>
 
-          <Card className="border-zinc-200 dark:border-zinc-800 shadow-sm">
+          <Card className="h-full border-zinc-200 dark:border-zinc-800 shadow-sm">
             <CardHeader className="pb-2">
               <CardTitle className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Cartera Pendiente</CardTitle>
             </CardHeader>
@@ -1590,7 +1673,7 @@ export function InvoicesMenu() {
               <div className="pt-3 border-t border-zinc-200 dark:border-zinc-700">
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mb-1">Total pendiente</p>
                 <div className="text-2xl font-bold text-zinc-900 dark:text-zinc-100">
-                  {formatCOP(stats.totalCreditPending + pendingInvoices.reduce((sum, inv) => sum + (inv.total || 0), 0))}
+                  {formatCOP(stats.totalCreditPending + pendingInvoices.filter(inv => !inv.is_vip).reduce((sum, inv) => sum + (inv.total || 0), 0))}
                 </div>
               </div>
             </CardContent>
@@ -1832,7 +1915,24 @@ export function InvoicesMenu() {
               </div>
 
               {/* Filtros */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 sm:gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-2.5 sm:gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-sm text-zinc-700 dark:text-zinc-300">Línea contable</Label>
+                  <Select value={lineFilter} onValueChange={(value: 'all' | 'general' | 'vip') => {
+                    setLineFilter(value);
+                    setCurrentPage(1);
+                    runDbFilter({ line: value });
+                  }}>
+                    <SelectTrigger aria-label="Filtrar línea contable" className="min-h-11 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">Todas (solo listado)</SelectItem>
+                      <SelectItem value="general">General</SelectItem>
+                      <SelectItem value="vip">Línea VIP</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
                 {/* Filtro de Periodo */}
                 <div className="space-y-1.5">
                   <Label className="text-xs text-zinc-600 dark:text-zinc-400 flex items-center gap-1">
@@ -2013,6 +2113,12 @@ export function InvoicesMenu() {
                               <span className="text-xs sm:text-sm font-mono font-semibold text-zinc-900 dark:text-zinc-100">
                                 #{invoice.number}
                               </span>
+                              {invoice.is_vip && (
+                                <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-950">
+                                  <Star className="h-4 w-4 shrink-0 fill-current" aria-hidden="true" />
+                                  VIP
+                                </span>
+                              )}
                             </td>
                             <td className="px-3 sm:px-4 py-2.5 sm:py-3 hidden xl:table-cell whitespace-nowrap">
                               <span className="text-xs sm:text-sm text-zinc-700 dark:text-zinc-300">
@@ -2262,6 +2368,115 @@ export function InvoicesMenu() {
       </div>
 
       {/* Modal de Facturas Pendientes */}
+      <Dialog open={showVipModal} onOpenChange={setShowVipModal}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Star className="h-5 w-5 fill-current" aria-hidden="true" />Contabilidad VIP</DialogTitle>
+            <DialogDescription>Histórico · contabilidad independiente</DialogDescription>
+          </DialogHeader>
+            <div className="space-y-4" aria-live="polite">
+              <div className="-mx-6 -mt-2 h-1.5 bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500" aria-hidden="true" />
+              {vipError ? (
+                <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">No se pudo consultar VIP. Verifica la migración SQL antes de facturar.</p>
+              ) : !vipSummary ? (
+                <p className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" />Cargando contabilidad VIP…</p>
+              ) : (
+                <>
+                  <div className="rounded-xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-4 shadow-sm dark:border-emerald-800 dark:from-emerald-950/40 dark:to-zinc-950">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300"><TrendingUp className="h-5 w-5" aria-hidden="true" /></span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium uppercase tracking-wide text-emerald-700 dark:text-emerald-400">Ingresos totales netos</p>
+                        <p className="break-words text-2xl font-bold text-emerald-600 dark:text-emerald-400">{formatCOP(vipSummary.revenue)}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-violet-200 bg-gradient-to-br from-violet-50 to-white p-4 shadow-sm dark:border-violet-800 dark:from-violet-950/40 dark:to-zinc-950">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-violet-100 text-violet-700 dark:bg-violet-900 dark:text-violet-300"><DollarSign className="h-5 w-5" aria-hidden="true" /></span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium uppercase tracking-wide text-violet-700 dark:text-violet-400">Ganancia bruta</p>
+                        <p className={`break-words text-2xl font-bold ${vipSummary.profit === null ? 'text-zinc-500' : 'text-violet-600 dark:text-violet-400'}`}>
+                          {vipSummary.profit === null ? 'No disponible' : formatCOP(vipSummary.profit)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="rounded-xl border border-sky-200 bg-gradient-to-br from-sky-50 to-white p-4 shadow-sm dark:border-sky-800 dark:from-sky-950/40 dark:to-zinc-950">
+                    <div className="flex items-center gap-3">
+                      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-sky-100 text-sky-700 dark:bg-sky-900 dark:text-sky-300"><Banknote className="h-5 w-5" aria-hidden="true" /></span>
+                      <div className="min-w-0">
+                        <p className="text-xs font-medium uppercase tracking-wide text-sky-700 dark:text-sky-400">Efectivo neto VIP</p>
+                        <p className="break-words text-2xl font-bold text-sky-600 dark:text-sky-400">{formatCOP(vipSummary.cash)}</p>
+                      </div>
+                    </div>
+                  </div>
+                  {vipSummary.missingCosts > 0 && (
+                    <p className="flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+                      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
+                      Costo histórico no disponible en {vipSummary.missingCosts} documento(s). No se estima con costos actuales.
+                    </p>
+                  )}
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400">Ventas sin impuestos, ajustadas por devoluciones y cambios. Incluye crédito; no equivale a cobros.</p>
+                </>
+              )}
+              <Button
+                className="min-h-11 w-full bg-amber-500 font-semibold text-zinc-950 hover:bg-amber-400"
+                onClick={() => {
+                  if (vipError) { loadStats(); return; }
+                  openVipInvoices();
+                }}
+              >
+                <Star className="mr-2 h-4 w-4 fill-current" aria-hidden="true" />
+                {vipError ? 'Reintentar consulta' : 'Ver facturas VIP'}
+              </Button>
+            </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showVipInvoicesModal} onOpenChange={setShowVipInvoicesModal}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-hidden flex flex-col bg-white dark:bg-zinc-950">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><Star className="h-5 w-5 fill-amber-500 text-amber-500" aria-hidden="true" />Facturas VIP</DialogTitle>
+            <DialogDescription>{vipInvoicesLoading ? 'Cargando…' : `${vipInvoices.length} factura(s) de la línea VIP`}</DialogDescription>
+          </DialogHeader>
+          <div className="h-1 rounded bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500" aria-hidden="true" />
+          <Input
+            placeholder="Buscar por número o cliente…"
+            value={vipInvoiceSearch}
+            onChange={e => setVipInvoiceSearch(e.target.value)}
+          />
+          <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+            {vipInvoicesLoading ? (
+              <p className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400"><Loader2 className="h-4 w-4 animate-spin" />Cargando facturas VIP…</p>
+            ) : vipInvoicesError ? (
+              <div className="space-y-2">
+                <p className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">No se pudieron cargar las facturas VIP.</p>
+                <Button variant="outline" onClick={openVipInvoices}>Reintentar</Button>
+              </div>
+            ) : (() => {
+              const term = vipInvoiceSearch.trim().toLowerCase();
+              const list = vipInvoices.filter(inv => !term || String(inv.number).toLowerCase().includes(term) || (inv.customer_name || '').toLowerCase().includes(term));
+              if (list.length === 0) return <p className="py-8 text-center text-sm text-zinc-600 dark:text-zinc-400">No hay facturas VIP para mostrar.</p>;
+              return list.map(inv => (
+                <div key={inv.id} className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-gradient-to-r from-amber-50 to-white p-3 shadow-sm dark:border-amber-900 dark:from-amber-950/30 dark:to-zinc-950">
+                  <div className="min-w-0">
+                    <p className="flex items-center gap-2 font-semibold text-zinc-900 dark:text-zinc-100">
+                      <Star className="h-4 w-4 shrink-0 fill-amber-500 text-amber-500" aria-hidden="true" />#{inv.number}
+                      {inv.is_credit && <Badge variant="outline" className="border-blue-200 bg-blue-50 text-xs text-blue-700 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-400">Crédito</Badge>}
+                      {inv.status === 'anulada' && <Badge variant="outline" className="border-red-200 bg-red-50 text-xs text-red-700">Anulada</Badge>}
+                    </p>
+                    <p className="truncate text-sm text-zinc-700 dark:text-zinc-300">{inv.customer_name || 'Sin cliente'}</p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">{inv.date ? new Date(inv.date).toLocaleString('es-CO') : ''}</p>
+                  </div>
+                  <p className="shrink-0 text-lg font-bold text-emerald-600 dark:text-emerald-400">{formatCOP(inv.total || 0)}</p>
+                </div>
+              ));
+            })()}
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={showPendingModal} onOpenChange={setShowPendingModal}>
         <DialogContent className="max-w-5xl max-h-[80vh] overflow-y-auto bg-white dark:bg-zinc-950">
           <DialogHeader>
@@ -2576,7 +2791,10 @@ export function InvoicesMenu() {
       <Dialog open={showPreviewModal} onOpenChange={setShowPreviewModal}>
         <DialogContent className="max-w-2xl w-[95vw] sm:w-full max-h-[90vh] overflow-y-auto bg-white dark:bg-zinc-950">
           <DialogHeader className="space-y-2">
-            <DialogTitle className="text-base sm:text-lg text-zinc-900 dark:text-zinc-100">Vista Previa de Factura</DialogTitle>
+            <DialogTitle className="flex items-center gap-2 text-base sm:text-lg text-zinc-900 dark:text-zinc-100">
+              {selectedInvoice?.is_vip && <Star className="h-5 w-5 shrink-0 fill-amber-300 text-amber-800" aria-label="Factura VIP" />}
+              Vista Previa de Factura {selectedInvoice?.is_vip ? 'VIP' : ''}
+            </DialogTitle>
             <DialogDescription className="text-xs sm:text-sm text-zinc-600 dark:text-zinc-400">
               Detalles de la factura seleccionada
             </DialogDescription>
@@ -3361,7 +3579,7 @@ export function InvoicesMenu() {
       <ProductSelectionModal
         open={showAddProductToEdit}
         onOpenChange={setShowAddProductToEdit}
-        products={products}
+        products={products.filter(product => Boolean(product.is_vip) === Boolean(editingInvoice?.is_vip))}
         departments={departments}
         onSelectProduct={async (product) => {
           setSelectedProductToAdd(product);

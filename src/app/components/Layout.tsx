@@ -608,6 +608,7 @@ export function Layout() {
 
       if (fetchError) throw fetchError;
       if (!invoice) throw new Error('Factura no encontrada');
+      if (invoice.is_vip) throw new Error('Las facturas VIP deben anularse, no eliminarse.');
 
       // Revertir stock y IDs únicas
       for (const item of invoice.items) {
